@@ -170,7 +170,7 @@ Common pattern: argparse → load_config → OutputDir → loop seeds → run_me
 
 ---
 
-## Phase 5 — Plotting
+## Phase 5 — Plotting ✅ COMPLETE (14/14 tests passing; 118 total)
 
 **Goal:** Reproducible figures: `.pdf` + `.png` + `_data.csv` + `_meta.json`.
 
