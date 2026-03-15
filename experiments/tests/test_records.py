@@ -1,0 +1,124 @@
+"""Tests for async_abc.io.records."""
+import csv
+import time
+from pathlib import Path
+
+import pytest
+
+from async_abc.io.records import ParticleRecord, RecordWriter
+
+
+def make_record(**kwargs):
+    defaults = dict(
+        method="async_propulate_abc",
+        replicate=0,
+        seed=42,
+        step=1,
+        params={"mu": 0.5},
+        loss=1.23,
+        weight=0.8,
+        tolerance=5.0,
+        wall_time=0.01,
+    )
+    defaults.update(kwargs)
+    return ParticleRecord(**defaults)
+
+
+class TestParticleRecord:
+    def test_creation(self):
+        r = make_record()
+        assert r.method == "async_propulate_abc"
+        assert r.loss == pytest.approx(1.23)
+
+    def test_params_stored(self):
+        r = make_record(params={"mu": 1.0, "sigma": 2.0})
+        assert r.params["mu"] == 1.0
+
+    def test_optional_weight_none(self):
+        r = make_record(weight=None)
+        assert r.weight is None
+
+    def test_optional_tolerance_none(self):
+        r = make_record(tolerance=None)
+        assert r.tolerance is None
+
+
+class TestRecordWriter:
+    def test_creates_file(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record()])
+        assert path.exists()
+
+    def test_csv_has_header(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record()])
+        with open(path) as f:
+            header = f.readline()
+        assert "method" in header
+        assert "loss" in header
+
+    def test_roundtrip_single_record(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        rec = make_record(method="abc", loss=3.14, step=7)
+        writer = RecordWriter(path)
+        writer.write([rec])
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 1
+        assert rows[0]["method"] == "abc"
+        assert float(rows[0]["loss"]) == pytest.approx(3.14)
+        assert int(rows[0]["step"]) == 7
+
+    def test_append_mode_preserves_rows(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record(step=1)])
+        writer.write([make_record(step=2)])
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 2
+        steps = {int(r["step"]) for r in rows}
+        assert steps == {1, 2}
+
+    def test_multiple_records_in_one_call(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        records = [make_record(step=i) for i in range(5)]
+        writer = RecordWriter(path)
+        writer.write(records)
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert len(rows) == 5
+
+    def test_params_flattened_to_columns(self, tmp_output_dir):
+        """Each param key becomes param_<key> column."""
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        rec = make_record(params={"mu": 0.3, "sigma": 1.1})
+        writer = RecordWriter(path)
+        writer.write([rec])
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert "param_mu" in rows[0]
+        assert "param_sigma" in rows[0]
+        assert float(rows[0]["param_mu"]) == pytest.approx(0.3)
+
+    def test_none_weight_written_as_empty(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record(weight=None)])
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        assert rows[0]["weight"] == ""

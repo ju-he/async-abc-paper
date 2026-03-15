@@ -1,0 +1,29 @@
+{
+  "experiment_name": "gandk",
+  "benchmark": {
+    "name": "gandk",
+    "observed_data_seed": 42,
+    "n_obs": 1000,
+    "true_A": 3.0,
+    "true_B": 1.0,
+    "true_g": 2.0,
+    "true_k": 0.5
+  },
+  "methods": ["async_propulate_abc"],
+  "inference": {
+    "max_simulations": 10000,
+    "n_workers": 4,
+    "k": 100,
+    "tol_init": 10.0,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8
+  },
+  "execution": {
+    "n_replicates": 5,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true
+  }
+}

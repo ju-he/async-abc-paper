@@ -1,0 +1,33 @@
+{
+  "experiment_name": "sensitivity",
+  "benchmark": {
+    "name": "gaussian_mean",
+    "observed_data_seed": 42,
+    "n_obs": 100,
+    "true_mu": 0.0,
+    "sigma_obs": 1.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": ["async_propulate_abc"],
+  "inference": {
+    "max_simulations": 2000,
+    "n_workers": 4,
+    "k": 50,
+    "tol_init": 5.0,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8
+  },
+  "execution": {
+    "n_replicates": 3,
+    "base_seed": 0
+  },
+  "sensitivity_grid": {
+    "k": [10, 50, 100],
+    "perturbation_scale": [0.4, 0.8, 1.5],
+    "scheduler_type": ["acceptance_rate", "quantile", "geometric_decay"]
+  },
+  "plots": {
+    "sensitivity_heatmap": true
+  }
+}
