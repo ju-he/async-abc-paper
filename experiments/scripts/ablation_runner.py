@@ -14,6 +14,7 @@ from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord, RecordWriter
+from async_abc.plotting.reporters import plot_ablation_summary
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import make_arg_parser
 from async_abc.utils.seeding import make_seeds
@@ -49,6 +50,10 @@ def main() -> None:
                 for r in records:
                     r.method = f"{method}__{name}"
                 writer.write(records)
+
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("ablation_comparison"):
+        plot_ablation_summary(output_dir.data, variants, output_dir)
 
     write_metadata(output_dir, cfg)
 

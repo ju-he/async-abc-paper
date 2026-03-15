@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
+from async_abc.plotting.reporters import plot_archive_evolution, plot_posterior
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import make_arg_parser, run_experiment
 from async_abc.benchmarks import make_benchmark
@@ -52,9 +53,15 @@ def main() -> None:
     original_simulate = bm.simulate
     bm.simulate = wrapped_simulate
 
-    run_experiment(cfg, output_dir, benchmark=bm)
+    records = run_experiment(cfg, output_dir, benchmark=bm)
 
     bm.simulate = original_simulate
+
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("posterior"):
+        plot_posterior(records, output_dir)
+    if plots_cfg.get("archive_evolution"):
+        plot_archive_evolution(records, output_dir)
     write_metadata(output_dir, cfg, extra={"heterogeneity": het})
 
 

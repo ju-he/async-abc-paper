@@ -15,6 +15,7 @@ from async_abc.benchmarks import make_benchmark
 from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
+from async_abc.plotting.reporters import plot_scaling_summary
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import make_arg_parser
 from async_abc.utils.seeding import make_seeds
@@ -68,6 +69,10 @@ def main() -> None:
             writer = csv.DictWriter(f, fieldnames=list(throughput_rows[0].keys()))
             writer.writeheader()
             writer.writerows(throughput_rows)
+
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"):
+        plot_scaling_summary(throughput_rows, output_dir)
 
     write_metadata(output_dir, cfg, extra={"worker_counts": worker_counts})
 

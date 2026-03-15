@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
+from async_abc.plotting.reporters import plot_archive_evolution, plot_posterior
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import make_arg_parser, run_experiment
 
@@ -18,7 +19,12 @@ def main() -> None:
     cfg = load_config(args.config, test_mode=args.test)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
-    run_experiment(cfg, output_dir)
+    records = run_experiment(cfg, output_dir)
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("posterior"):
+        plot_posterior(records, output_dir)
+    if plots_cfg.get("archive_evolution"):
+        plot_archive_evolution(records, output_dir)
     write_metadata(output_dir, cfg)
 
 

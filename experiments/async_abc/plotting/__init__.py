@@ -7,6 +7,13 @@ from .common import (
     sensitivity_heatmap,
     compute_wasserstein,
 )
+from .reporters import (
+    plot_posterior,
+    plot_archive_evolution,
+    plot_scaling_summary,
+    plot_sensitivity_summary,
+    plot_ablation_summary,
+)
 
 __all__ = [
     "save_figure",
@@ -16,4 +23,9 @@ __all__ = [
     "archive_evolution_plot",
     "sensitivity_heatmap",
     "compute_wasserstein",
+    "plot_posterior",
+    "plot_archive_evolution",
+    "plot_scaling_summary",
+    "plot_sensitivity_summary",
+    "plot_ablation_summary",
 ]
