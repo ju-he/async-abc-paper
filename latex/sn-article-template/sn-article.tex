@@ -1,45 +1,5 @@
-%Version 3.1 December 2024
-% See section 11 of the User Manual for version history
-%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%                                                                 %%
-%% Please do not use \input{...} to include other tex files.       %%
-%% Submit your LaTeX manuscript as one .tex document.              %%
-%%                                                                 %%
-%% All additional figures and files should be attached             %%
-%% separately and not embedded in the \TeX\ document itself.       %%
-%%                                                                 %%
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-%%\documentclass[referee,sn-basic]{sn-jnl}% referee option is meant for double line spacing
-
-%%=======================================================%%
-%% to print line numbers in the margin use lineno option %%
-%%=======================================================%%
-
-%%\documentclass[lineno,pdflatex,sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
-
-%%=========================================================================================%%
-%% the documentclass is set to pdflatex as default. You can delete it if not appropriate.  %%
-%%=========================================================================================%%
-
-%%\documentclass[sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
-
-%%Note: the following reference styles support Namedate and Numbered referencing. By default the style follows the most common style. To switch between the options you can add or remove �Numbered� in the optional parenthesis. 
-%%The option is available for: sn-basic.bst, sn-chicago.bst%  
- 
-%%\documentclass[pdflatex,sn-nature]{sn-jnl}% Style for submissions to Nature Portfolio journals
-%%\documentclass[pdflatex,sn-basic]{sn-jnl}% Basic Springer Nature Reference Style/Chemistry Reference Style
-\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}% Math and Physical Sciences Numbered Reference Style
-%%\documentclass[pdflatex,sn-mathphys-ay]{sn-jnl}% Math and Physical Sciences Author Year Reference Style
-%%\documentclass[pdflatex,sn-aps]{sn-jnl}% American Physical Society (APS) Reference Style
-%%\documentclass[pdflatex,sn-vancouver-num]{sn-jnl}% Vancouver Numbered Reference Style
-%%\documentclass[pdflatex,sn-vancouver-ay]{sn-jnl}% Vancouver Author Year Reference Style
-%%\documentclass[pdflatex,sn-apa]{sn-jnl}% APA Reference Style
-%%\documentclass[pdflatex,sn-chicago]{sn-jnl}% Chicago-based Humanities Reference Style
-
-%%%% Standard Packages
-%%<additional latex packages if required can be included here>
+% Version 3.1 December 2024
+\documentclass[pdflatex,sn-mathphys-num]{sn-jnl}
 
 \usepackage{graphicx}%
 \usepackage{multirow}%
@@ -55,569 +15,326 @@
 \usepackage{algorithmicx}%
 \usepackage{algpseudocode}%
 \usepackage{listings}%
-%%%%
-
-%%%%%=============================================================================%%%%
-%%%%  Remarks: This template is provided to aid authors with the preparation
-%%%%  of original research articles intended for submission to journals published 
-%%%%  by Springer Nature. The guidance has been prepared in partnership with 
-%%%%  production teams to conform to Springer Nature technical requirements. 
-%%%%  Editorial and presentation requirements differ among journal portfolios and 
-%%%%  research disciplines. You may find sections in this template are irrelevant 
-%%%%  to your work and are empowered to omit any such section if allowed by the 
-%%%%  journal you intend to submit to. The submission guidelines and policies 
-%%%%  of the journal take precedence. A detailed User Manual is available in the 
-%%%%  template package for technical guidance.
-%%%%%=============================================================================%%%%
-
-%% as per the requirement new theorem styles can be included as shown below
-\theoremstyle{thmstyleone}%
-\newtheorem{theorem}{Theorem}%  meant for continuous numbers
-%%\newtheorem{theorem}{Theorem}[section]% meant for sectionwise numbers
-%% optional argument [theorem] produces theorem numbering sequence instead of independent numbers for Proposition
-\newtheorem{proposition}[theorem]{Proposition}% 
-%%\newtheorem{proposition}{Proposition}% to get separate numbers for theorem and proposition etc.
-
-\theoremstyle{thmstyletwo}%
-\newtheorem{example}{Example}%
-\newtheorem{remark}{Remark}%
-
-\theoremstyle{thmstylethree}%
-\newtheorem{definition}{Definition}%
 
 \raggedbottom
-%%\unnumbered% uncomment this for unnumbered level heads
+
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\methodname}{asynchronous steady-state ABC-SMC}
 
 \begin{document}
 
-\title[Article Title]{Article Title}
+\title[\methodname{} in Propulate]{Asynchronous Steady-State ABC-SMC for Heterogeneous Simulator Workloads}
 
-%%=============================================================%%
-%% GivenName	-> \fnm{Joergen W.}
-%% Particle	-> \spfx{van der} -> surname prefix
-%% FamilyName	-> \sur{Ploeg}
-%% Suffix	-> \sfx{IV}
-%% \author*[1,2]{\fnm{Joergen W.} \spfx{van der} \sur{Ploeg} 
-%%  \sfx{IV}}\email{iauthor@gmail.com}
-%%=============================================================%%
+\author*[1]{\fnm{First} \sur{Author}}\email{first.author@example.com}
+\author[1]{\fnm{Second} \sur{Author}}\email{second.author@example.com}
 
-\author*[1,2]{\fnm{First} \sur{Author}}\email{iauthor@gmail.com}
+\affil*[1]{\orgdiv{Department}, \orgname{Organization}, \orgaddress{\city{City}, \country{Country}}}
 
-\author[2,3]{\fnm{Second} \sur{Author}}\email{iiauthor@gmail.com}
-\equalcont{These authors contributed equally to this work.}
+\abstract{We study an asynchronous steady-state variant of approximate Bayesian computation with sequential Monte Carlo for simulator-based inference on heterogeneous high-performance computing workloads. The paper targets three questions: whether the method preserves posterior quality relative to established ABC baselines, whether asynchronous execution improves resource utilization under runtime heterogeneity, and whether the approach integrates cleanly into a practical distributed inference stack. This manuscript is currently a structured draft. It fixes the paper narrative, section flow, equations, planned experiments, and placeholder figures and tables while the experimental code is being completed.}
 
-\author[1,2]{\fnm{Third} \sur{Author}}\email{iiiauthor@gmail.com}
-\equalcont{These authors contributed equally to this work.}
-
-\affil*[1]{\orgdiv{Department}, \orgname{Organization}, \orgaddress{\street{Street}, \city{City}, \postcode{100190}, \state{State}, \country{Country}}}
-
-\affil[2]{\orgdiv{Department}, \orgname{Organization}, \orgaddress{\street{Street}, \city{City}, \postcode{10587}, \state{State}, \country{Country}}}
-
-\affil[3]{\orgdiv{Department}, \orgname{Organization}, \orgaddress{\street{Street}, \city{City}, \postcode{610101}, \state{State}, \country{Country}}}
-
-%%==================================%%
-%% Sample for unstructured abstract %%
-%%==================================%%
-
-\abstract{The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. Authors are advised to check the author instructions for the journal they are submitting to for word limits and if structural elements like subheadings, citations, or equations are permitted.}
-
-%%================================%%
-%% Sample for structured abstract %%
-%%================================%%
-
-% \abstract{\textbf{Purpose:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
-% 
-% \textbf{Methods:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
-% 
-% \textbf{Results:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.
-% 
-% \textbf{Conclusion:} The abstract serves both as a general introduction to the topic and as a brief, non-technical summary of the main results and their implications. The abstract must not include subheadings (unless expressly permitted in the journal's Instructions to Authors), equations or citations. As a guide the abstract should not exceed 200 words. Most journals do not set a hard limit however authors are advised to check the author instructions for the journal they are submitting to.}
-
-\keywords{keyword1, Keyword2, Keyword3, Keyword4}
-
-%%\pacs[JEL Classification]{D8, H51}
-
-%%\pacs[MSC Classification]{35A01, 65L10, 65L12, 65L20, 65L70}
+\keywords{approximate Bayesian computation, sequential Monte Carlo, asynchronous algorithms, high-performance computing, likelihood-free inference}
 
 \maketitle
 
-\section{Introduction}\label{sec1}
-
-The Introduction section, of referenced text \cite{bib1} expands on the background of the work (some overlap with the Abstract is acceptable). The introduction should not include subheadings.
-
-Springer Nature does not impose a strict layout as standard however authors are advised to check the individual requirements for the journal they are planning to submit to as there may be journal-level preferences. When preparing your text please also be aware that some stylistic choices are not supported in full text XML (publication version), including coloured font. These will not be replicated in the typeset article if it is accepted. 
-
-\section{Results}\label{sec2}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\section{This is an example for first level head---section head}\label{sec3}
-
-\subsection{This is an example for second level head---subsection head}\label{subsec2}
-
-\subsubsection{This is an example for third level head---subsubsection head}\label{subsubsec2}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. 
-
-\section{Equations}\label{sec4}
-
-Equations in \LaTeX\ can either be inline or on-a-line by itself (``display equations''). For
-inline equations use the \verb+$...$+ commands. E.g.: The equation
-$H\psi = E \psi$ is written via the command \verb+$H \psi = E \psi$+.
-
-For display equations (with auto generated equation numbers)
-one can use the equation or align environments:
-\begin{equation}
-\|\tilde{X}(k)\|^2 \leq\frac{\sum\limits_{i=1}^{p}\left\|\tilde{Y}_i(k)\right\|^2+\sum\limits_{j=1}^{q}\left\|\tilde{Z}_j(k)\right\|^2 }{p+q}.\label{eq1}
-\end{equation}
-where,
-\begin{align}
-D_\mu &=  \partial_\mu - ig \frac{\lambda^a}{2} A^a_\mu \nonumber \\
-F^a_{\mu\nu} &= \partial_\mu A^a_\nu - \partial_\nu A^a_\mu + g f^{abc} A^b_\mu A^a_\nu \label{eq2}
-\end{align}
-Notice the use of \verb+\nonumber+ in the align environment at the end
-of each line, except the last, so as not to produce equation numbers on
-lines where no equation numbers are required. The \verb+\label{}+ command
-should only be used at the last line of an align environment where
-\verb+\nonumber+ is not used.
-\begin{equation}
-Y_\infty = \left( \frac{m}{\textrm{GeV}} \right)^{-3}
-    \left[ 1 + \frac{3 \ln(m/\textrm{GeV})}{15}
-    + \frac{\ln(c_2/5)}{15} \right]
-\end{equation}
-The class file also supports the use of \verb+\mathbb{}+, \verb+\mathscr{}+ and
-\verb+\mathcal{}+ commands. As such \verb+\mathbb{R}+, \verb+\mathscr{R}+
-and \verb+\mathcal{R}+ produces $\mathbb{R}$, $\mathscr{R}$ and $\mathcal{R}$
-respectively (refer Subsubsection~\ref{subsubsec2}).
-
-\section{Tables}\label{sec5}
-
-Tables can be inserted via the normal table and tabular environment. To put
-footnotes inside tables you should use \verb+\footnotetext[]{...}+ tag.
-The footnote appears just below the table itself (refer Tables~\ref{tab1} and \ref{tab2}). 
-For the corresponding footnotemark use \verb+\footnotemark[...]+
-
-\begin{table}[h]
-\caption{Caption text}\label{tab1}%
-\begin{tabular}{@{}llll@{}}
-\toprule
-Column 1 & Column 2  & Column 3 & Column 4\\
-\midrule
-row 1    & data 1   & data 2  & data 3  \\
-row 2    & data 4   & data 5\footnotemark[1]  & data 6  \\
-row 3    & data 7   & data 8  & data 9\footnotemark[2]  \\
-\botrule
-\end{tabular}
-\footnotetext{Source: This is an example of table footnote. This is an example of table footnote.}
-\footnotetext[1]{Example for a first table footnote. This is an example of table footnote.}
-\footnotetext[2]{Example for a second table footnote. This is an example of table footnote.}
-\end{table}
-
-\noindent
-The input format for the above table is as follows:
-
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-\bigskip
-\begin{verbatim}
-\begin{table}[<placement-specifier>]
-\caption{<table-caption>}\label{<table-label>}%
-\begin{tabular}{@{}llll@{}}
-\toprule
-Column 1 & Column 2 & Column 3 & Column 4\\
-\midrule
-row 1 & data 1 & data 2	 & data 3 \\
-row 2 & data 4 & data 5\footnotemark[1] & data 6 \\
-row 3 & data 7 & data 8	 & data 9\footnotemark[2]\\
-\botrule
-\end{tabular}
-\footnotetext{Source: This is an example of table footnote. 
-This is an example of table footnote.}
-\footnotetext[1]{Example for a first table footnote.
-This is an example of table footnote.}
-\footnotetext[2]{Example for a second table footnote. 
-This is an example of table footnote.}
-\end{table}
-\end{verbatim}
-\bigskip
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-
-\begin{table}[h]
-\caption{Example of a lengthy table which is set to full textwidth}\label{tab2}
-\begin{tabular*}{\textwidth}{@{\extracolsep\fill}lcccccc}
-\toprule%
-& \multicolumn{3}{@{}c@{}}{Element 1\footnotemark[1]} & \multicolumn{3}{@{}c@{}}{Element 2\footnotemark[2]} \\\cmidrule{2-4}\cmidrule{5-7}%
-Project & Energy & $\sigma_{calc}$ & $\sigma_{expt}$ & Energy & $\sigma_{calc}$ & $\sigma_{expt}$ \\
-\midrule
-Element 3  & 990 A & 1168 & $1547\pm12$ & 780 A & 1166 & $1239\pm100$\\
-Element 4  & 500 A & 961  & $922\pm10$  & 900 A & 1268 & $1092\pm40$\\
-\botrule
-\end{tabular*}
-\footnotetext{Note: This is an example of table footnote. This is an example of table footnote this is an example of table footnote this is an example of~table footnote this is an example of table footnote.}
-\footnotetext[1]{Example for a first table footnote.}
-\footnotetext[2]{Example for a second table footnote.}
-\end{table}
-
-In case of double column layout, tables which do not fit in single column width should be set to full text width. For this, you need to use \verb+\begin{table*}+ \verb+...+ \verb+\end{table*}+ instead of \verb+\begin{table}+ \verb+...+ \verb+\end{table}+ environment. Lengthy tables which do not fit in textwidth should be set as rotated table. For this, you need to use \verb+\begin{sidewaystable}+ \verb+...+ \verb+\end{sidewaystable}+ instead of \verb+\begin{table*}+ \verb+...+ \verb+\end{table*}+ environment. This environment puts tables rotated to single column width. For tables rotated to double column width, use \verb+\begin{sidewaystable*}+ \verb+...+ \verb+\end{sidewaystable*}+.
-
-\begin{sidewaystable}
-\caption{Tables which are too long to fit, should be written using the ``sidewaystable'' environment as shown here}\label{tab3}
-\begin{tabular*}{\textheight}{@{\extracolsep\fill}lcccccc}
-\toprule%
-& \multicolumn{3}{@{}c@{}}{Element 1\footnotemark[1]}& \multicolumn{3}{@{}c@{}}{Element\footnotemark[2]} \\\cmidrule{2-4}\cmidrule{5-7}%
-Projectile & Energy	& $\sigma_{calc}$ & $\sigma_{expt}$ & Energy & $\sigma_{calc}$ & $\sigma_{expt}$ \\
-\midrule
-Element 3 & 990 A & 1168 & $1547\pm12$ & 780 A & 1166 & $1239\pm100$ \\
-Element 4 & 500 A & 961  & $922\pm10$  & 900 A & 1268 & $1092\pm40$ \\
-Element 5 & 990 A & 1168 & $1547\pm12$ & 780 A & 1166 & $1239\pm100$ \\
-Element 6 & 500 A & 961  & $922\pm10$  & 900 A & 1268 & $1092\pm40$ \\
-\botrule
-\end{tabular*}
-\footnotetext{Note: This is an example of table footnote this is an example of table footnote this is an example of table footnote this is an example of~table footnote this is an example of table footnote.}
-\footnotetext[1]{This is an example of table footnote.}
-\end{sidewaystable}
-
-\section{Figures}\label{sec6}
-
-As per the \LaTeX\ standards you need to use eps images for \LaTeX\ compilation and \verb+pdf/jpg/png+ images for \verb+PDFLaTeX+ compilation. This is one of the major difference between \LaTeX\ and \verb+PDFLaTeX+. Each image should be from a single input .eps/vector image file. Avoid using subfigures. The command for inserting images for \LaTeX\ and \verb+PDFLaTeX+ can be generalized. The package used to insert images in \verb+LaTeX/PDFLaTeX+ is the graphicx package. Figures can be inserted via the normal figure environment as shown in the below example:
-
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-\bigskip
-\begin{verbatim}
-\begin{figure}[<placement-specifier>]
-\centering
-\includegraphics{<eps-file>}
-\caption{<figure-caption>}\label{<figure-label>}
-\end{figure}
-\end{verbatim}
-\bigskip
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-
-\begin{figure}[h]
-\centering
-\includegraphics[width=0.9\textwidth]{fig.eps}
-\caption{This is a widefig. This is an example of long caption this is an example of long caption  this is an example of long caption this is an example of long caption}\label{fig1}
-\end{figure}
-
-In case of double column layout, the above format puts figure captions/images to single column width. To get spanned images, we need to provide \verb+\begin{figure*}+ \verb+...+ \verb+\end{figure*}+.
-
-For sample purpose, we have included the width of images in the optional argument of \verb+\includegraphics+ tag. Please ignore this. 
-
-\section{Algorithms, Program codes and Listings}\label{sec7}
-
-Packages \verb+algorithm+, \verb+algorithmicx+ and \verb+algpseudocode+ are used for setting algorithms in \LaTeX\ using the format:
-
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-\bigskip
-\begin{verbatim}
-\begin{algorithm}
-\caption{<alg-caption>}\label{<alg-label>}
-\begin{algorithmic}[1]
-. . .
-\end{algorithmic}
-\end{algorithm}
-\end{verbatim}
-\bigskip
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-
-You may refer above listed package documentations for more details before setting \verb+algorithm+ environment. For program codes, the ``verbatim'' package is required and the command to be used is \verb+\begin{verbatim}+ \verb+...+ \verb+\end{verbatim}+. 
-
-Similarly, for \verb+listings+, use the \verb+listings+ package. \verb+\begin{lstlisting}+ \verb+...+ \verb+\end{lstlisting}+ is used to set environments similar to \verb+verbatim+ environment. Refer to the \verb+lstlisting+ package documentation for more details.
-
-A fast exponentiation procedure:
-
-\lstset{texcl=true,basicstyle=\small\sf,commentstyle=\small\rm,mathescape=true,escapeinside={(*}{*)}}
-\begin{lstlisting}
-begin
-  for $i:=1$ to $10$ step $1$ do
-      expt($2,i$);  
-      newline() od                (*\textrm{Comments will be set flush to the right margin}*)
-where
-proc expt($x,n$) $\equiv$
-  $z:=1$;
-  do if $n=0$ then exit fi;
-     do if odd($n$) then exit fi;                 
-        comment: (*\textrm{This is a comment statement;}*)
-        $n:=n/2$; $x:=x*x$ od;
-     { $n>0$ };
-     $n:=n-1$; $z:=z*x$ od;
-  print($z$). 
-end
-\end{lstlisting}
-
-\begin{algorithm}
-\caption{Calculate $y = x^n$}\label{algo1}
-\begin{algorithmic}[1]
-\Require $n \geq 0 \vee x \neq 0$
-\Ensure $y = x^n$ 
-\State $y \Leftarrow 1$
-\If{$n < 0$}\label{algln2}
-        \State $X \Leftarrow 1 / x$
-        \State $N \Leftarrow -n$
-\Else
-        \State $X \Leftarrow x$
-        \State $N \Leftarrow n$
-\EndIf
-\While{$N \neq 0$}
-        \If{$N$ is even}
-            \State $X \Leftarrow X \times X$
-            \State $N \Leftarrow N / 2$
-        \Else[$N$ is odd]
-            \State $y \Leftarrow y \times X$
-            \State $N \Leftarrow N - 1$
-        \EndIf
-\EndWhile
-\end{algorithmic}
-\end{algorithm}
-
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-\bigskip
-\begin{minipage}{\hsize}%
-\lstset{frame=single,framexleftmargin=-1pt,framexrightmargin=-17pt,framesep=12pt,linewidth=0.98\textwidth,language=pascal}% Set your language (you can change the language for each code-block optionally)
-%%% Start your code-block
-\begin{lstlisting}
-for i:=maxint to 0 do
-begin
-{ do nothing }
-end;
-Write('Case insensitive ');
-Write('Pascal keywords.');
-\end{lstlisting}
-\end{minipage}
-
-\section{Cross referencing}\label{sec8}
-
-Environments such as figure, table, equation and align can have a label
-declared via the \verb+\label{#label}+ command. For figures and table
-environments use the \verb+\label{}+ command inside or just
-below the \verb+\caption{}+ command. You can then use the
-\verb+\ref{#label}+ command to cross-reference them. As an example, consider
-the label declared for Figure~\ref{fig1} which is
-\verb+\label{fig1}+. To cross-reference it, use the command 
-\verb+Figure \ref{fig1}+, for which it comes up as
-``Figure~\ref{fig1}''. 
-
-To reference line numbers in an algorithm, consider the label declared for the line number 2 of Algorithm~\ref{algo1} is \verb+\label{algln2}+. To cross-reference it, use the command \verb+\ref{algln2}+ for which it comes up as line~\ref{algln2} of Algorithm~\ref{algo1}.
-
-\subsection{Details on reference citations}\label{subsec7}
-
-Standard \LaTeX\ permits only numerical citations. To support both numerical and author-year citations this template uses \verb+natbib+ \LaTeX\ package. For style guidance please refer to the template user manual.
-
-Here is an example for \verb+\cite{...}+: \cite{bib1}. Another example for \verb+\citep{...}+: \citep{bib2}. For author-year citation mode, \verb+\cite{...}+ prints Jones et al. (1990) and \verb+\citep{...}+ prints (Jones et al., 1990).
-
-All cited bib entries are printed at the end of this article: \cite{bib3}, \cite{bib4}, \cite{bib5}, \cite{bib6}, \cite{bib7}, \cite{bib8}, \cite{bib9}, \cite{bib10}, \cite{bib11}, \cite{bib12} and \cite{bib13}.
-
-\section{Examples for theorem like environments}\label{sec10}
-
-For theorem like environments, we require \verb+amsthm+ package. There are three types of predefined theorem styles exists---\verb+thmstyleone+, \verb+thmstyletwo+ and \verb+thmstylethree+ 
-
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-\bigskip
-\begin{tabular}{|l|p{19pc}|}
-\hline
-\verb+thmstyleone+ & Numbered, theorem head in bold font and theorem text in italic style \\\hline
-\verb+thmstyletwo+ & Numbered, theorem head in roman font and theorem text in italic style \\\hline
-\verb+thmstylethree+ & Numbered, theorem head in bold font and theorem text in roman style \\\hline
-\end{tabular}
-\bigskip
-%%=============================================%%
-%% For presentation purpose, we have included  %%
-%% \bigskip command. Please ignore this.       %%
-%%=============================================%%
-
-For mathematics journals, theorem styles can be included as shown in the following examples:
-
-\begin{theorem}[Theorem subhead]\label{thm1}
-Example theorem text. Example theorem text. Example theorem text. Example theorem text. Example theorem text. 
-Example theorem text. Example theorem text. Example theorem text. Example theorem text. Example theorem text. 
-Example theorem text. 
-\end{theorem}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\begin{proposition}
-Example proposition text. Example proposition text. Example proposition text. Example proposition text. Example proposition text. 
-Example proposition text. Example proposition text. Example proposition text. Example proposition text. Example proposition text. 
-\end{proposition}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\begin{example}
-Phasellus adipiscing semper elit. Proin fermentum massa
-ac quam. Sed diam turpis, molestie vitae, placerat a, molestie nec, leo. Maecenas lacinia. Nam ipsum ligula, eleifend
-at, accumsan nec, suscipit a, ipsum. Morbi blandit ligula feugiat magna. Nunc eleifend consequat lorem. 
-\end{example}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\begin{remark}
-Phasellus adipiscing semper elit. Proin fermentum massa
-ac quam. Sed diam turpis, molestie vitae, placerat a, molestie nec, leo. Maecenas lacinia. Nam ipsum ligula, eleifend
-at, accumsan nec, suscipit a, ipsum. Morbi blandit ligula feugiat magna. Nunc eleifend consequat lorem. 
-\end{remark}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\begin{definition}[Definition sub head]
-Example definition text. Example definition text. Example definition text. Example definition text. Example definition text. Example definition text. Example definition text. Example definition text. 
-\end{definition}
-
-Additionally a predefined ``proof'' environment is available: \verb+\begin{proof}+ \verb+...+ \verb+\end{proof}+. This prints a ``Proof'' head in italic font style and the ``body text'' in roman font style with an open square at the end of each proof environment. 
-
-\begin{proof}
-Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. 
-\end{proof}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text. Sample body text.
-
-\begin{proof}[Proof of Theorem~{\upshape\ref{thm1}}]
-Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. Example for proof text. 
-\end{proof}
-
-\noindent
-For a quote environment, use \verb+\begin{quote}...\end{quote}+
-\begin{quote}
-Quoted text example. Aliquam porttitor quam a lacus. Praesent vel arcu ut tortor cursus volutpat. In vitae pede quis diam bibendum placerat. Fusce elementum
-convallis neque. Sed dolor orci, scelerisque ac, dapibus nec, ultricies ut, mi. Duis nec dui quis leo sagittis commodo.
-\end{quote}
-
-Sample body text. Sample body text. Sample body text. Sample body text. Sample body text (refer Figure~\ref{fig1}). Sample body text. Sample body text. Sample body text (refer Table~\ref{tab3}). 
-
-\section{Methods}\label{sec11}
-
-Topical subheadings are allowed. Authors must ensure that their Methods section includes adequate experimental and characterization data necessary for others in the field to reproduce their work. Authors are encouraged to include RIIDs where appropriate. 
-
-\textbf{Ethical approval declarations} (only required where applicable) Any article reporting experiment/s carried out on (i)~live vertebrate (or higher invertebrates), (ii)~humans or (iii)~human samples must include an unambiguous statement within the methods section that meets the following requirements: 
-
-\begin{enumerate}[1.]
-\item Approval: a statement which confirms that all experimental protocols were approved by a named institutional and/or licensing committee. Please identify the approving body in the methods section
-
-\item Accordance: a statement explicitly saying that the methods were carried out in accordance with the relevant guidelines and regulations
-
-\item Informed consent (for experiments involving humans or human tissue samples): include a statement confirming that informed consent was obtained from all participants and/or their legal guardian/s
+\section{Introduction}\label{sec:introduction}
+
+Approximate Bayesian computation (ABC) is a standard tool for simulator-based inference when the likelihood is unavailable or too expensive to evaluate directly \cite{beaumont2019abc}. Sequential ABC methods improve efficiency by evolving proposal distributions and tolerance thresholds across a sequence of intermediate targets \cite{toni2009abcsmc,beaumont2009adaptive,delmoral2012adaptive}. In practice, however, many ABC-SMC implementations remain organized around synchronous populations, which introduces generation barriers and idle compute resources when simulation runtimes vary strongly across parameter settings.
+
+This paper focuses on a steady-state asynchronous alternative designed for heterogeneous high-performance computing workloads and implemented within Propulate. The intended contributions are:
+\begin{enumerate}
+\item a history-reconstructed \methodname{} algorithm compatible with Propulate's stateless propagator interface;
+\item a practical formulation of monotone tolerance adaptation and rolling archive reconstruction from evaluated history;
+\item an empirical evaluation against pyABC and other ABC baselines; and
+\item an analysis of runtime heterogeneity, utilization, and scaling behavior on distributed systems.
 \end{enumerate}
 
-If your manuscript includes potentially identifying patient/participant information, or if it describes human transplantation research, or if it reports results of a clinical trial then  additional information will be required. Please visit (\url{https://www.nature.com/nature-research/editorial-policies}) for Nature Portfolio journals, (\url{https://www.springer.com/gp/authors-editors/journal-author/journal-author-helpdesk/publishing-ethics/14214}) for Springer Nature journals, or (\url{https://www.biomedcentral.com/getpublished/editorial-policies\#ethics+and+consent}) for BMC.
+The remainder of the paper first summarizes the relevant ABC background, then develops the asynchronous method, describes the implementation, and finally lays out the experimental program that will populate the final results section.
 
-\section{Discussion}\label{sec12}
+\section{Background and Related Work}\label{sec:background}
 
-Discussions should be brief and focused. In some disciplines use of Discussion or `Conclusion' is interchangeable. It is not mandatory to use both. Some journals prefer a section `Results and Discussion' followed by a section `Conclusion'. Please refer to Journal-level guidance for any specific requirements. 
+\subsection{Approximate Bayesian computation}\label{sec:background-abc}
 
-\section{Conclusion}\label{sec13}
+ABC replaces exact likelihood evaluation with simulation and discrepancy-based acceptance. For observed data $y$ and parameter $\theta$, the ABC target at tolerance $\epsilon$ can be written as
+\begin{equation}
+\pi_{\epsilon}(\theta \mid y) \propto \pi(\theta) L_{\epsilon}(\theta),
+\label{eq:abc-target}
+\end{equation}
+where $\pi(\theta)$ is the prior and $L_{\epsilon}(\theta)$ denotes the likelihood approximation induced by the discrepancy threshold. The final paper should expand this section with the benchmark-specific discrepancy definitions, summary statistics, and tolerance schedules used in the experiments.
 
-Conclusions may be used to restate your hypothesis or research question, restate your major findings, explain the relevance and the added value of your work, highlight any limitations of your study, describe future directions for research and recommendations. 
+\subsection{Sequential ABC algorithms}\label{sec:background-sequential}
 
-In some disciplines use of Discussion or 'Conclusion' is interchangeable. It is not mandatory to use both. Please refer to Journal-level guidance for any specific requirements. 
+ABC rejection provides the simplest baseline but scales poorly in low-tolerance regimes. ABC-SMC and ABC-PMC address this by moving through a sequence of intermediate targets with adaptive proposals and importance weights \cite{toni2009abcsmc,beaumont2009adaptive,delmoral2012adaptive}. A common proposal form is the mixture
+\begin{equation}
+q_r(\theta) = \sum_{j=1}^{N_r} W_j^{(r)} K(\theta \mid \theta_j^{(r)}),
+\label{eq:proposal-mixture}
+\end{equation}
+where $K$ is typically a Gaussian perturbation kernel around accepted particles from the previous stage.
 
-\backmatter
+The main limitation for distributed execution is that these methods usually advance in generations: the proposal distribution and tolerance update only after an entire population has been evaluated. On heterogeneous workloads this creates a synchronization bottleneck.
 
-\bmhead{Supplementary information}
+\subsection{Parallel and distributed ABC}\label{sec:background-distributed}
 
-If your article has accompanying supplementary file/s please state so here. 
+Existing software such as pyABC demonstrates that ABC can be distributed effectively across multi-core and cluster environments \cite{klinger2018pyabc,schalte2022pyabc}. The key distinction for this paper is not whether simulation is parallelized, but whether the inference algorithm itself requires synchronous population boundaries. That distinction motivates the event-driven formulation introduced next.
 
-Authors reporting data from electrophoretic gels and blots should supply the full unprocessed scans for key as part of their Supplementary information. This may be requested by the editorial team/s if it is missing.
+\section{Method}\label{sec:method}
 
-Please refer to Journal-level guidance for any specific requirements.
+\subsection{Design constraints}\label{sec:method-constraints}
+
+The implementation target is Propulate, whose propagator interface exposes a single stateless call of the form \texttt{\_\_call\_\_(inds: List[Individual]) -> Individual}.
+The propagator receives the full evaluated history and must produce the next candidate without relying on persistent archive state or asynchronous callbacks. This leads directly to a history-based reconstruction of all algorithmic state.
+
+Let $\mathcal{H}_n = \{x_1, x_2, \dots, x_n\}$ denote the evaluated history after $n$ completed simulations. The algorithm reconstructs
+\begin{align}
+\epsilon_n &= T(\mathcal{H}_n), \label{eq:tolerance-functional} \\
+A_n &= A(\mathcal{H}_n, \epsilon_n), \label{eq:archive-functional} \\
+q_n(\theta) &= Q(\theta \mid A_n), \label{eq:proposal-functional}
+\end{align}
+where $T$ is the tolerance scheduler, $A$ is the archive selection rule, and $Q$ constructs the proposal distribution from the reconstructed archive.
+
+\subsection{Tolerance reconstruction and monotonicity}\label{sec:method-tolerance}
+
+Each proposed individual stores the effective tolerance active at proposal time. Given stored tolerances $\tau_i$, the effective tolerance reconstructed from history is
+\begin{equation}
+\epsilon_{\text{hist}} = \min_{i: \tau_i \neq \varnothing} \tau_i,
+\label{eq:tolerance-history}
+\end{equation}
+with fallback to the initial tolerance when the history is empty. The scheduler proposes an updated tolerance $\epsilon_{\text{sched}}$, and the final tolerance is
+\begin{equation}
+\epsilon_n = \min(\epsilon_{\text{hist}}, \epsilon_{\text{sched}}).
+\label{eq:tolerance-monotone}
+\end{equation}
+This gives a monotone decrease guarantee without mutable propagator state.
+
+\subsection{Archive reconstruction}\label{sec:method-archive}
+
+The active archive is reconstructed by filtering the evaluated history according to the current tolerance:
+\begin{equation}
+A_n = \left\{ \theta_i \in \mathcal{H}_n : \rho_i < \epsilon_n \right\},
+\label{eq:archive-set}
+\end{equation}
+followed by truncation to the best $k$ particles by discrepancy. This archive approximates the current ABC target and supplies the particles used for proposal construction.
+
+\subsection{Proposal and weighting}\label{sec:method-proposal}
+
+With archive particles $\{\theta_j\}_{j=1}^{k}$ and normalized weights $\{W_j^{(n)}\}_{j=1}^{k}$, the steady-state proposal is
+\begin{equation}
+q_n(\theta) = \sum_{j=1}^{k} W_j^{(n)} K(\theta \mid \theta_j),
+\label{eq:steady-state-proposal}
+\end{equation}
+using a Gaussian perturbation kernel with covariance estimated from the current archive. A newly proposed particle receives importance weight
+\begin{equation}
+w^\star = \frac{\pi(\theta^\star)}{q_n(\theta^\star)}.
+\label{eq:importance-weight}
+\end{equation}
+
+The final manuscript should discuss the known approximation introduced by asynchronous execution: the proposal used to generate a particle is fixed at proposal time, while the archive may evolve before the simulation result returns.
+
+\subsection{Steady-state update loop}\label{sec:method-algorithm}
+
+\begin{algorithm}
+\caption{History-reconstructed asynchronous steady-state ABC-SMC}\label{alg:async-abc}
+\begin{algorithmic}[1]
+\Require Evaluated history $\mathcal{H}_n$, archive size $k$, initial tolerance $\epsilon_0$
+\State Reconstruct $\epsilon_{\text{hist}}$ from stored particle tolerances
+\State Compute scheduler proposal $\epsilon_{\text{sched}}$
+\State Set $\epsilon_n \gets \min(\epsilon_{\text{hist}}, \epsilon_{\text{sched}})$
+\State Reconstruct archive $A_n$ from particles with $\rho < \epsilon_n$
+\If{$|A_n| < k$}
+    \State Sample from the prior
+\Else
+    \State Build mixture proposal $q_n(\theta)$ from $A_n$
+    \State Sample a parent and perturb to obtain $\theta^\star$
+    \State Clip to parameter bounds and stamp $\theta^\star$ with $\epsilon_n$
+    \State Compute the importance weight associated with the proposal at creation time
+\EndIf
+\State Return the candidate for external simulation and discrepancy evaluation
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Relation to classical ABC-SMC}\label{sec:method-comparison}
+
+\begin{table}[t]
+\caption{High-level comparison between classical ABC-SMC and the proposed steady-state variant.}\label{tab:method-comparison}
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+Property & Classical ABC-SMC & Steady-state async ABC \\
+\midrule
+Update style & generation-based & event-driven \\
+Synchronization & required per population & none \\
+State storage & explicit population state & reconstructed from history \\
+Tolerance changes & generation boundaries & online, monotone \\
+Best fit for workloads & homogeneous runtimes & heterogeneous runtimes \\
+\botrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:method-comparison} captures the paper's central algorithmic claim. The final version of this subsection should also make explicit which properties remain aligned with standard ABC-PMC theory and which aspects are practical approximations introduced for asynchronous HPC execution.
+
+\section{Implementation in Propulate}\label{sec:implementation}
+
+This section will document the concrete implementation decisions in the codebase. The planning notes already fix the main structure:
+\begin{itemize}
+\item stateless tolerance schedulers implemented as pure functions of history;
+\item archive selection from the top-$k$ accepted particles under the reconstructed tolerance;
+\item proposal covariance regularization for numerical stability; and
+\item integration with Propulate's MPI-oriented execution model.
+\end{itemize}
+
+The final write-up should include one concise code-level schematic, one paragraph on the propagator contract, and one paragraph on how metadata such as tolerance, weight, and generation are stored in individuals. It should also specify how pyABC baselines are configured to make the comparison fair.
+
+\section{Experimental Design}\label{sec:experiments}
+
+\subsection{Research questions}\label{sec:experiments-rqs}
+
+The experiments are organized around three top-level questions:
+\begin{enumerate}
+\item Does the asynchronous steady-state method recover posteriors comparable to established ABC baselines?
+\item Does asynchronous execution improve wall-clock efficiency and utilization under runtime heterogeneity?
+\item Does the method remain practical on realistic simulator-driven benchmarks?
+\end{enumerate}
+
+\subsection{Benchmarks}\label{sec:experiments-benchmarks}
+
+\begin{table}[t]
+\caption{Planned benchmark suite for the paper.}\label{tab:benchmarks}
+\centering
+\begin{tabular}{@{}p{0.26\textwidth}p{0.21\textwidth}p{0.43\textwidth}@{}}
+\toprule
+Benchmark & Role in paper & Planned outputs \\
+\midrule
+Gaussian mean inference & sanity check with analytic posterior & posterior overlays, error curves, calibration checks \\
+g-and-k distribution & standard likelihood-free benchmark & posterior error, Wasserstein distance, convergence comparison \\
+Lotka--Volterra system & established simulator-based ABC model & posterior recovery, simulation budget comparison \\
+Cellular Potts model & realistic heterogeneous simulator workload & wall-clock, throughput, utilization, scaling results \\
+\botrule
+\end{tabular}
+\end{table}
+
+The benchmark suite spans increasing levels of realism and computational heterogeneity. The Gaussian model anchors correctness against a tractable reference posterior, while the Cellular Potts model is intended to demonstrate the HPC advantages of barrier-free execution.
+
+\subsection{Baselines}\label{sec:experiments-baselines}
+
+The baseline set currently planned in the resources consists of:
+\begin{itemize}
+\item rejection ABC for simple low-dimensional settings;
+\item a classical ABC-SMC or ABC-PMC style baseline where practical; and
+\item distributed ABC-SMC via pyABC as the main external comparison.
+\end{itemize}
+
+\subsection{Evaluation metrics}\label{sec:experiments-metrics}
+
+The paper separates statistical and computational evaluation.
+
+\paragraph{Statistical accuracy.}
+Primary metrics will include posterior mean error, Wasserstein distance between posterior samples, and credible interval coverage. A benchmark-specific summary table should collect these values across methods and random seeds.
+
+\paragraph{Computational performance.}
+Primary metrics will include wall-clock time to a fixed error target, simulation throughput, worker utilization, and idle fraction. Scaling experiments will measure speedup and efficiency as the worker count increases.
+
+\subsection{Runtime heterogeneity, scaling, and sensitivity studies}\label{sec:experiments-special}
+
+The planning notes specify three additional experiment families that should each receive a dedicated subsection in the final paper:
+\begin{itemize}
+\item synthetic runtime heterogeneity experiments, for example via log-normal runtime perturbations;
+\item strong-scaling experiments across worker counts such as 1, 8, 32, 128, and 256; and
+\item sensitivity and ablation studies covering archive size, tolerance schedules, covariance adaptation, and archive truncation rules.
+\end{itemize}
+
+\section{Results}\label{sec:results}
+
+This section is intentionally structured before the code and figures are complete. The final results should follow the same order as the research questions and use stable subsection titles so plots and tables can be dropped in incrementally.
+
+\subsection{Posterior quality on synthetic benchmarks}\label{sec:results-statistical}
+
+\begin{figure}[t]
+\centering
+\fbox{\rule{0pt}{2.1in}\rule{0.9\linewidth}{0pt}}
+\caption{Placeholder for posterior comparison figures on the Gaussian and g-and-k benchmarks. Planned content: posterior overlays, calibration summaries, and error-versus-budget plots.}\label{fig:posterior-placeholder}
+\end{figure}
+
+\todo{Insert posterior comparison plots and quantitative accuracy table once the benchmark runners and aggregation scripts are complete.}
+
+\subsection{Performance under runtime heterogeneity}\label{sec:results-runtime}
+
+\begin{figure}[t]
+\centering
+\fbox{\rule{0pt}{2.1in}\rule{0.9\linewidth}{0pt}}
+\caption{Placeholder for runtime heterogeneity results. Planned content: worker utilization, throughput, and time-to-target comparisons for synchronous and asynchronous methods.}\label{fig:runtime-placeholder}
+\end{figure}
+
+\todo{Insert synthetic heterogeneity experiment showing asynchronous utilization benefits under parameter-dependent runtimes.}
+
+\subsection{Scaling on distributed resources}\label{sec:results-scaling}
+
+\begin{figure}[t]
+\centering
+\fbox{\rule{0pt}{2.1in}\rule{0.9\linewidth}{0pt}}
+\caption{Placeholder for scaling results. Planned content: parallel speedup and efficiency versus number of workers.}\label{fig:scaling-placeholder}
+\end{figure}
+
+\todo{Insert strong-scaling plots and the corresponding processed metrics table.}
+
+\subsection{Realistic simulator benchmark}\label{sec:results-realistic}
+
+\todo{Summarize the Cellular Potts benchmark here, including both posterior behavior and HPC performance characteristics.}
+
+\section{Discussion}\label{sec:discussion}
+
+The discussion should interpret the trade-off between exact sequential ABC semantics and practical asynchronous execution. At minimum, the final version should address:
+\begin{itemize}
+\item when the proposal-weight staleness approximation is negligible in practice;
+\item which workload patterns most strongly favor asynchronous execution;
+\item how much statistical deviation from synchronous ABC-SMC is empirically acceptable; and
+\item what aspects of the approach are specific to Propulate versus portable to other distributed inference frameworks.
+\end{itemize}
+
+\section{Conclusion}\label{sec:conclusion}
+
+This paper aims to position \methodname{} as a practical compromise between the statistical structure of sequential ABC and the systems realities of heterogeneous distributed simulation. The final conclusion should return to the three core claims of the paper: posterior validity, computational advantage, and practical usability.
 
 \bmhead{Acknowledgements}
 
-Acknowledgements are not compulsory. Where included they should be brief. Grant or contribution numbers may be acknowledged.
-
-Please refer to Journal-level guidance for any specific requirements.
+\todo{Add funding, compute allocation, and collaboration acknowledgements.}
 
 \section*{Declarations}
 
-Some journals require declarations to be submitted in a standardised format. Please check the Instructions for Authors of the journal to which you are submitting to see if you need to complete this section. If yes, your manuscript must contain the following sections under the heading `Declarations':
+\textbf{Funding} \\
+\todo{Add funding statement.}
 
-\begin{itemize}
-\item Funding
-\item Conflict of interest/Competing interests (check journal-specific guidelines for which heading to use)
-\item Ethics approval and consent to participate
-\item Consent for publication
-\item Data availability 
-\item Materials availability
-\item Code availability 
-\item Author contribution
-\end{itemize}
+\textbf{Conflict of interest/Competing interests} \\
+The authors declare no competing interests.
 
-\noindent
-If any of the sections are not relevant to your manuscript, please include the heading and write `Not applicable' for that section. 
+\textbf{Ethics approval and consent to participate} \\
+Not applicable.
 
-%%===================================================%%
-%% For presentation purpose, we have included        %%
-%% \bigskip command. Please ignore this.             %%
-%%===================================================%%
-\bigskip
-\begin{flushleft}%
-Editorial Policies for:
+\textbf{Consent for publication} \\
+Not applicable.
 
-\bigskip\noindent
-Springer journals and proceedings: \url{https://www.springer.com/gp/editorial-policies}
+\textbf{Data availability} \\
+\todo{State where raw and processed experiment outputs will be archived.}
 
-\bigskip\noindent
-Nature Portfolio journals: \url{https://www.nature.com/nature-research/editorial-policies}
+\textbf{Materials availability} \\
+Not applicable.
 
-\bigskip\noindent
-\textit{Scientific Reports}: \url{https://www.nature.com/srep/journal-policies/editorial-policies}
+\textbf{Code availability} \\
+\todo{Point to the repository and experiment reproduction entry point.}
 
-\bigskip\noindent
-BMC journals: \url{https://www.biomedcentral.com/getpublished/editorial-policies}
-\end{flushleft}
+\textbf{Author contribution} \\
+\todo{Add author contribution statement.}
 
 \begin{appendices}
 
-\section{Section title of first appendix}\label{secA1}
+\section{Implementation Details}\label{app:implementation}
 
-An appendix contains supplementary information that is not an essential part of the text itself but which may be helpful in providing a more comprehensive understanding of the research problem or it is information that is too cumbersome to be included in the body of the paper.
+This appendix can absorb implementation specifics that would otherwise clutter the main method section. Likely contents include tolerance scheduler definitions, covariance regularization details, and any benchmark-specific simulation notes that are useful for reproducibility.
 
-%%=============================================%%
-%% For submissions to Nature Portfolio Journals %%
-%% please use the heading ``Extended Data''.   %%
-%%=============================================%%
+\section{Additional Experimental Protocol}\label{app:protocol}
 
-%%=============================================================%%
-%% Sample for another appendix section			       %%
-%%=============================================================%%
-
-%% \section{Example of another appendix section}\label{secA2}%
-%% Appendices may be used for helpful, supporting or essential material that would otherwise 
-%% clutter, break up or be distracting to the text. Appendices can consist of sections, figures, 
-%% tables and equations etc.
+This appendix can collect resolved configuration summaries, seed handling, cluster setup, and any benchmark-specific details needed to reproduce the figures.
 
 \end{appendices}
 
-%%===========================================================================================%%
-%% If you are submitting to one of the Nature Portfolio journals, using the eJP submission   %%
-%% system, please include the references within the manuscript file itself. You may do this  %%
-%% by copying the reference list from your .bbl file, paste it into the main manuscript .tex %%
-%% file, and delete the associated \verb+\bibliography+ commands.                            %%
-%%===========================================================================================%%
-
-\bibliography{sn-bibliography}% common bib file
-%% if required, the content of .bbl file can be included here once bbl is generated
-%%\input sn-article.bbl
+\bibliography{sn-bibliography}
 
 \end{document}
