@@ -194,7 +194,7 @@ test_wasserstein_metric            — returns float
 
 ---
 
-## Phase 6 — Configs + run_all
+## Phase 6 — Configs + run_all ✅ COMPLETE (27/27 tests passing; 139 total)
 
 **Goal:** JSON configs for all 7 experiments; single-command orchestration.
 
