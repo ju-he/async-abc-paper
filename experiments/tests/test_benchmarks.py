@@ -1,5 +1,8 @@
 """Tests for async_abc.benchmarks.*"""
 import math
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -8,6 +11,56 @@ from async_abc.benchmarks.gaussian_mean import GaussianMean
 from async_abc.benchmarks.gandk import GandK
 from async_abc.benchmarks.lotka_volterra import LotkaVolterra
 from async_abc.benchmarks import make_benchmark
+
+# ---------------------------------------------------------------------------
+# CPM helpers & fixtures
+# ---------------------------------------------------------------------------
+
+_CPM_TEMPLATE_DIR = Path(__file__).parents[2] / "nastjapy_copy" / "templates" / "spheroid_inf_nanospheroids"
+
+
+def _nastjapy_available() -> bool:
+    src = Path(__file__).parents[2] / "nastjapy_copy" / "src"
+    if not src.is_dir():
+        return False
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+    try:
+        import nastja.parameter_space_config  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+_NASTJAPY_AVAILABLE = _nastjapy_available()
+
+
+@pytest.fixture
+def cpm_config(tmp_path):
+    """Minimal CellularPotts config using real template files (nastjapy must be available)."""
+    if not _NASTJAPY_AVAILABLE:
+        pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+    return {
+        "name": "cellular_potts",
+        "nastja_config_template": str(_CPM_TEMPLATE_DIR / "sim_config.json"),
+        "config_builder_params": str(_CPM_TEMPLATE_DIR / "config_builder_params.json"),
+        "distance_metric_params": str(_CPM_TEMPLATE_DIR / "distance_metric_params.json"),
+        "parameter_space": str(_CPM_TEMPLATE_DIR / "parameter_space_division_motility.json"),
+        "reference_data_path": str(tmp_path / "reference"),
+        "output_dir": str(tmp_path / "sims"),
+    }
+
+
+@pytest.fixture
+def cpm_mocks():
+    """Pre-built mock SimulationManager and DistanceMetric for injection."""
+    mock_sim = MagicMock()
+    mock_dist = MagicMock()
+    # Default: build_simulation_config returns a plausible config path
+    mock_sim.build_simulation_config.return_value = "/tmp/cpm_test/eval000001/config.json"
+    # Default: calculate_distance returns a positive float
+    mock_dist.calculate_distance.return_value = 2.5
+    return mock_sim, mock_dist
 
 
 # ---------------------------------------------------------------------------
@@ -185,23 +238,151 @@ class TestLotkaVolterra:
 
 
 # ---------------------------------------------------------------------------
-# CellularPotts stub
+# CellularPotts
 # ---------------------------------------------------------------------------
 
-class TestCellularPottsStub:
+class TestCellularPottsImport:
+    """Module-level import must always succeed regardless of nastjapy availability."""
+
     def test_import_does_not_raise(self):
         from async_abc.benchmarks import cellular_potts  # noqa: F401
 
-    def test_simulate_raises_import_error(self):
-        from async_abc.benchmarks.cellular_potts import CellularPotts
-        bm = CellularPotts({})
-        with pytest.raises(ImportError):
-            bm.simulate({"A": 1.0}, seed=0)
+    def test_class_importable(self):
+        from async_abc.benchmarks.cellular_potts import CellularPotts  # noqa: F401
 
-    def test_has_limits_attribute(self):
+    def test_missing_nastjapy_raises_import_error_on_init(self, tmp_path):
+        """When nastjapy_copy/src is absent, __init__ raises ImportError."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts, _NASTJAPY_SRC
+        if _NASTJAPY_SRC.is_dir():
+            pytest.skip("nastjapy is present — this test needs it absent")
+        with pytest.raises(ImportError):
+            CellularPotts({"name": "cellular_potts"})
+
+
+class TestCellularPotts:
+    """Tests for the real CellularPotts implementation (requires nastjapy venv)."""
+
+    # --- init & limits ---
+
+    def test_init_no_error(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts
-        bm = CellularPotts({})
-        assert hasattr(bm, "limits")
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        assert bm is not None
+
+    def test_limits_populated(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        assert "division_rate" in bm.limits
+        assert "motility" in bm.limits
+
+    def test_limits_bounds_correct(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        lo, hi = bm.limits["division_rate"]
+        assert lo == pytest.approx(0.00006)
+        assert hi == pytest.approx(0.6)
+        lo2, hi2 = bm.limits["motility"]
+        assert lo2 == 0.0
+        assert hi2 == 10000.0
+
+    def test_missing_required_key_raises(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        del cpm_config["reference_data_path"]
+        with pytest.raises(KeyError, match="reference_data_path"):
+            CellularPotts(cpm_config)
+
+    # --- simulate pipeline ---
+
+    def test_simulate_calls_build_config(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        mock_sim.build_simulation_config.assert_called_once()
+
+    def test_simulate_calls_run_simulation(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        mock_sim.run_simulation.assert_called_once()
+
+    def test_simulate_calls_calculate_distance(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        mock_dist.calculate_distance.assert_called_once()
+
+    def test_simulate_calls_cleanup(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_simulate_returns_float(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        assert isinstance(result, float)
+        assert result == pytest.approx(2.5)
+
+    def test_simulate_injects_seed_in_param_list(self, cpm_config, cpm_mocks):
+        """simulate() must include the seed as a named Parameter in ParameterList."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        captured: list = []
+        mock_sim.build_simulation_config.side_effect = (
+            lambda pl, **kw: captured.append(pl) or "/tmp/cpm_test/eval000001/config.json"
+        )
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=99)
+        assert len(captured) == 1
+        param_names = [p.name for p in captured[0].parameters]
+        assert "random_seed" in param_names
+        seed_val = next(p.value for p in captured[0].parameters if p.name == "random_seed")
+        assert seed_val == 99
+
+    def test_simulate_returns_nan_on_simulation_failure(self, cpm_config, cpm_mocks):
+        """Simulation runtime error → float('nan'), not re-raised exception."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        mock_sim.run_simulation.side_effect = RuntimeError("NAStJA crashed")
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        assert math.isnan(result)
+
+    def test_simulate_returns_nan_on_distance_failure(self, cpm_config, cpm_mocks):
+        """Distance computation failure → float('nan'), cleanup still called."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        mock_dist.calculate_distance.side_effect = ValueError("feature extraction failed")
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        assert math.isnan(result)
+        mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_simulate_cleanup_called_even_on_distance_failure(self, cpm_config, cpm_mocks):
+        """cleanup_simdir is always called (finally block), even when distance fails."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        mock_dist.calculate_distance.side_effect = RuntimeError("boom")
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=7)
+        mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_eval_counter_increments(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        bm.simulate({"division_rate": 0.1, "motility": 1000.0}, seed=1)
+        assert bm._eval_counter == 2
 
 
 # ---------------------------------------------------------------------------

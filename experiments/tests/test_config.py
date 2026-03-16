@@ -127,3 +127,61 @@ class TestNewMethodsInConfig:
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p, test_mode=True)
         assert cfg["inference"]["n_generations"] == 3
+
+
+# ---------------------------------------------------------------------------
+# CellularPotts benchmark config validation
+# ---------------------------------------------------------------------------
+
+_CPM_BENCHMARK_FULL = {
+    "name": "cellular_potts",
+    "nastja_config_template": "/some/sim_config.json",
+    "config_builder_params": "/some/config_builder_params.json",
+    "distance_metric_params": "/some/distance_metric_params.json",
+    "parameter_space": "/some/parameter_space.json",
+    "reference_data_path": "/some/reference",
+    "output_dir": "/some/sims",
+}
+
+
+class TestCPMConfigValidation:
+    def test_cpm_config_valid_passes(self, tmp_path, minimal_config):
+        minimal_config["benchmark"] = dict(_CPM_BENCHMARK_FULL)
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert cfg["benchmark"]["name"] == "cellular_potts"
+
+    def test_cpm_missing_nastja_config_template_raises(self, tmp_path, minimal_config):
+        bm = dict(_CPM_BENCHMARK_FULL)
+        del bm["nastja_config_template"]
+        minimal_config["benchmark"] = bm
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        with pytest.raises(ValidationError, match="nastja_config_template"):
+            load_config(p)
+
+    def test_cpm_missing_reference_data_path_raises(self, tmp_path, minimal_config):
+        bm = dict(_CPM_BENCHMARK_FULL)
+        del bm["reference_data_path"]
+        minimal_config["benchmark"] = bm
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        with pytest.raises(ValidationError, match="reference_data_path"):
+            load_config(p)
+
+    def test_cpm_missing_output_dir_raises(self, tmp_path, minimal_config):
+        bm = dict(_CPM_BENCHMARK_FULL)
+        del bm["output_dir"]
+        minimal_config["benchmark"] = bm
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        with pytest.raises(ValidationError, match="output_dir"):
+            load_config(p)
+
+    def test_non_cpm_benchmark_unaffected(self, tmp_path, minimal_config):
+        """gaussian_mean config must not be affected by CPM validation."""
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert cfg["benchmark"]["name"] == "gaussian_mean"

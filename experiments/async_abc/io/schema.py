@@ -23,6 +23,16 @@ VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
 
 VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
 
+# Extra required benchmark keys when name == "cellular_potts"
+CPM_REQUIRED_BENCHMARK_KEYS = [
+    "nastja_config_template",
+    "config_builder_params",
+    "distance_metric_params",
+    "parameter_space",
+    "reference_data_path",
+    "output_dir",
+]
+
 # Test-mode override values.
 # Keys under "clamp" are min(current, value); keys under "set" are forced to value.
 TEST_MODE_OVERRIDES = {
