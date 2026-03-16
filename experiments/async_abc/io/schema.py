@@ -33,6 +33,20 @@ CPM_REQUIRED_BENCHMARK_KEYS = [
     "output_dir",
 ]
 
+
+class ValidationError(ValueError):
+    """Raised when a config dict fails validation."""
+
+
+def _validate_cpm_benchmark(benchmark_cfg: dict) -> None:
+    """Raise ValidationError if a cellular_potts benchmark config is missing required keys."""
+    missing = [k for k in CPM_REQUIRED_BENCHMARK_KEYS if k not in benchmark_cfg]
+    if missing:
+        raise ValidationError(
+            f"Config['benchmark'] missing required key(s) for cellular_potts: {missing}"
+        )
+
+
 # Test-mode override values.
 # Keys under "clamp" are min(current, value); keys under "set" are forced to value.
 TEST_MODE_OVERRIDES = {

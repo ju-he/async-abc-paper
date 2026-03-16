@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -107,7 +108,7 @@ class CellularPotts:
         self._seed_param_name: str = config.get("seed_param_name", "random_seed")
         self._seed_param_path: str = config.get("seed_param_path", "Settings.randomseed")
         self._output_dir: str = config["output_dir"]
-        self._eval_counter: int = 0
+        self._eval_counter: int = 0  # for logging only; dir names use uuid4
 
         # SimulationManager
         if _sim_manager is not None:
@@ -172,7 +173,8 @@ class CellularPotts:
         from simulation.simulation_config import Parameter, ParameterList
 
         self._eval_counter += 1
-        sim_dir_name = f"eval{self._eval_counter:06d}"
+        sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
+        logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
         param_entries = [
             Parameter(

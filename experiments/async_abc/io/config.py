@@ -5,17 +5,14 @@ from pathlib import Path
 from typing import Union
 
 from .schema import (
-    CPM_REQUIRED_BENCHMARK_KEYS,
     REQUIRED_BENCHMARK,
     REQUIRED_EXECUTION,
     REQUIRED_INFERENCE,
     REQUIRED_TOP_LEVEL,
     TEST_MODE_OVERRIDES,
+    ValidationError,
+    _validate_cpm_benchmark,
 )
-
-
-class ValidationError(ValueError):
-    """Raised when a config dict fails validation."""
 
 
 def _validate(cfg: dict) -> None:
@@ -40,11 +37,7 @@ def _validate(cfg: dict) -> None:
         raise ValidationError("Config['methods'] must be a non-empty list.")
 
     if cfg["benchmark"].get("name") == "cellular_potts":
-        for key in CPM_REQUIRED_BENCHMARK_KEYS:
-            if key not in cfg["benchmark"]:
-                raise ValidationError(
-                    f"Config['benchmark'] missing required key for cellular_potts: '{key}'"
-                )
+        _validate_cpm_benchmark(cfg["benchmark"])
 
 
 def _apply_test_mode(cfg: dict) -> dict:

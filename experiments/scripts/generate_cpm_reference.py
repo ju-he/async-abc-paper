@@ -117,6 +117,11 @@ def main(args=None):
         ps_data = json.load(f)
     param_space_data = ps_data["parameters"]
 
+    # Validate that all true_params keys exist in the parameter space
+    unknown = set(true_params) - set(param_space_data)
+    if unknown:
+        parser.error(f"--true-params contains unknown parameter(s): {sorted(unknown)}")
+
     # Build ParameterList (true params + seed)
     param_entries = [
         Parameter(
