@@ -11,15 +11,15 @@
   },
   "methods": ["async_propulate_abc"],
   "inference": {
-    "max_simulations": 2000,
-    "n_workers": 4,
+    "max_simulations": 5000,
+    "n_workers": 48,
     "k": 50,
     "tol_init": 5.0,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
   },
   "execution": {
-    "n_replicates": 3,
+    "n_replicates": 5,
     "base_seed": 0
   },
   "ablation_variants": [
@@ -39,7 +39,7 @@
       "name": "no_schedule",
       "k": 50,
       "scheduler_type": "geometric_decay",
-      "decay_factor": 0.9999,
+      "decay_factor": 1.0,
       "perturbation_scale": 0.8
     },
     {

@@ -13,7 +13,7 @@
   },
   "methods": ["async_propulate_abc"],
   "inference": {
-    "max_simulations": 5000,
+    "max_simulations": 20000,
     "k": 100,
     "tol_init": 500000.0,
     "scheduler_type": "acceptance_rate",
@@ -21,11 +21,11 @@
     "n_workers": 1
   },
   "execution": {
-    "n_replicates": 3,
+    "n_replicates": 5,
     "base_seed": 0
   },
   "scaling": {
-    "worker_counts": [1, 8, 32, 128, 256]
+    "worker_counts": [1, 2, 4, 8, 16, 32, 48, 96, 192]
   },
   "plots": {
     "scaling_curve": true,

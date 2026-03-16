@@ -13,21 +13,21 @@
   },
   "methods": ["async_propulate_abc"],
   "inference": {
-    "max_simulations": 5000,
-    "n_workers": 4,
+    "max_simulations": 20000,
+    "n_workers": 48,
     "k": 100,
     "tol_init": 500000.0,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
   },
   "execution": {
-    "n_replicates": 3,
+    "n_replicates": 5,
     "base_seed": 0
   },
   "heterogeneity": {
     "distribution": "lognormal",
     "mu": 0.0,
-    "sigma": 1.5
+    "sigma_levels": [0.0, 0.5, 1.0, 1.5, 2.0]
   },
   "plots": {
     "idle_fraction": true,

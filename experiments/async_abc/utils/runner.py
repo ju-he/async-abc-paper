@@ -1,5 +1,7 @@
 """Shared experiment execution logic used by all runner scripts."""
 import argparse
+import sys
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -64,10 +66,18 @@ def run_experiment(
 
     for method in methods:
         for replicate, seed in enumerate(seeds):
-            records = run_method(
-                method, benchmark.simulate, benchmark.limits,
-                inference_cfg, output_dir, replicate, seed,
-            )
+            try:
+                records = run_method(
+                    method, benchmark.simulate, benchmark.limits,
+                    inference_cfg, output_dir, replicate, seed,
+                )
+            except ImportError as exc:
+                warnings.warn(
+                    f"Skipping method '{method}' (missing dependency): {exc}",
+                    stacklevel=2,
+                )
+                print(f"[runner] WARNING: skipping '{method}': {exc}", file=sys.stderr)
+                break  # skip all replicates for this method
             writer.write(records)
             all_records.extend(records)
 

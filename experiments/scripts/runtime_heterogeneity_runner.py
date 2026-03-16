@@ -3,6 +3,10 @@
 
 Wraps the benchmark simulator with a LogNormal sleep to mimic heterogeneous
 HPC workloads.  Measures idle-worker fraction and throughput over time.
+
+The ``heterogeneity`` config block accepts either a scalar ``sigma`` (single
+variance level) or a list ``sigma_levels`` (sweep over multiple levels).
+In test mode the sleep is skipped so the pipeline completes quickly.
 """
 import sys
 import time
@@ -20,16 +24,16 @@ from async_abc.utils.runner import make_arg_parser, run_experiment
 from async_abc.benchmarks import make_benchmark
 
 
-def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int):
+def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int,
+                                  test_mode: bool = False):
     """Wrap simulate_fn with a LogNormal wall-clock sleep."""
     rng = np.random.default_rng(seed)
 
     def wrapped(params, seed):
         delay = float(rng.lognormal(mean=mu, sigma=sigma))
-        # In test mode the delay would dominate; skip actual sleeping,
-        # just record the intended delay as part of params for analysis.
         result = simulate_fn(params, seed=seed)
-        # Uncomment for real HPC experiments: time.sleep(delay)
+        if not test_mode:
+            time.sleep(delay)
         return result
 
     return wrapped
@@ -45,24 +49,35 @@ def main() -> None:
     bm = make_benchmark(cfg["benchmark"])
     het = cfg.get("heterogeneity", {})
     mu = float(het.get("mu", 0.0))
-    sigma = float(het.get("sigma", 1.0))
 
-    wrapped_simulate = _make_heterogeneous_simulate(bm.simulate, mu, sigma, seed=42)
+    # Support both single sigma and a list of sigma levels for a sweep
+    if "sigma_levels" in het:
+        sigma_levels = list(het["sigma_levels"])
+    else:
+        sigma_levels = [float(het.get("sigma", 1.0))]
 
-    # Temporarily replace simulate method
     original_simulate = bm.simulate
-    bm.simulate = wrapped_simulate
+    all_records = []
 
-    records = run_experiment(cfg, output_dir, benchmark=bm)
+    for sigma in sigma_levels:
+        wrapped_simulate = _make_heterogeneous_simulate(
+            original_simulate, mu, sigma, seed=42, test_mode=args.test
+        )
+        bm.simulate = wrapped_simulate
+        records = run_experiment(cfg, output_dir, benchmark=bm)
+        # Tag each record with the sigma level used
+        for r in records:
+            r.method = f"{r.method}__sigma{sigma}"
+        all_records.extend(records)
 
     bm.simulate = original_simulate
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("posterior"):
-        plot_posterior(records, output_dir)
+        plot_posterior(all_records, output_dir)
     if plots_cfg.get("archive_evolution"):
-        plot_archive_evolution(records, output_dir)
-    write_metadata(output_dir, cfg, extra={"heterogeneity": het})
+        plot_archive_evolution(all_records, output_dir)
+    write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 
 
 if __name__ == "__main__":

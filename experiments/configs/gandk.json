@@ -9,17 +9,17 @@
     "true_g": 2.0,
     "true_k": 0.5
   },
-  "methods": ["async_propulate_abc"],
+  "methods": ["async_propulate_abc", "pyabc_smc"],
   "inference": {
-    "max_simulations": 10000,
-    "n_workers": 4,
+    "max_simulations": 100000,
+    "n_workers": 48,
     "k": 100,
     "tol_init": 10.0,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
   },
   "execution": {
-    "n_replicates": 5,
+    "n_replicates": 10,
     "base_seed": 0
   },
   "plots": {
