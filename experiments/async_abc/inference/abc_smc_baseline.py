@@ -1,8 +1,12 @@
-"""pyABC inference wrapper (optional dependency).
+"""Classical synchronous ABC-SMC baseline via pyABC.
 
-If ``pyabc`` is not installed, :func:`run_pyabc_smc` raises ``ImportError``
-with installation instructions.  The function is still importable so that the
-method registry can reference it unconditionally.
+Differs from :func:`~.pyabc_wrapper.run_pyabc_smc` in that it runs a fixed
+number of SMC generations (``n_generations`` config key, default 5) rather
+than targeting a minimum epsilon.  This makes the simulation budget more
+predictable and the comparison fairer.
+
+If ``pyabc`` is not installed, raises ``ImportError`` with installation
+instructions.
 """
 from typing import Callable, Dict, List
 
@@ -10,7 +14,7 @@ from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 
 
-def run_pyabc_smc(
+def run_abc_smc_baseline(
     simulate_fn: Callable,
     limits: Dict,
     inference_cfg: Dict,
@@ -18,16 +22,17 @@ def run_pyabc_smc(
     replicate: int,
     seed: int,
 ) -> List[ParticleRecord]:
-    """Run synchronous ABC-SMC via pyABC.
+    """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
 
     Parameters
     ----------
     simulate_fn:
         Callable ``(params: dict, seed: int) -> float``.
     limits:
-        Propulate-style limits dict ``{name: (lo, hi)}``.
+        Search-space limits dict ``{name: (lo, hi)}``.
     inference_cfg:
-        ``config["inference"]`` sub-dict.
+        ``config["inference"]`` sub-dict.  Reads ``max_simulations``, ``k``,
+        ``tol_init``, ``n_generations`` (default 5), ``n_workers`` (default 1).
     output_dir:
         Output directory (used for pyABC database path).
     replicate:
@@ -48,7 +53,7 @@ def run_pyabc_smc(
         import pyabc
     except ImportError as exc:
         raise ImportError(
-            "The pyabc method requires the 'pyabc' package. "
+            "The abc_smc_baseline method requires the 'pyabc' package. "
             "Install it with: pip install pyabc"
         ) from exc
 
@@ -56,10 +61,10 @@ def run_pyabc_smc(
     import threading
     import time
 
-    max_sims = inference_cfg["max_simulations"]
-    k = inference_cfg.get("k", 100)
-    tol_init = inference_cfg.get("tol_init", 10.0)
-    n_procs = inference_cfg.get("n_workers", 1)
+    max_sims     = inference_cfg["max_simulations"]
+    k            = inference_cfg.get("k", 100)
+    n_generations = inference_cfg.get("n_generations", 5)
+    n_procs      = inference_cfg.get("n_workers", 1)
 
     # Build pyABC prior from limits
     prior = pyabc.Distribution(
@@ -69,15 +74,11 @@ def run_pyabc_smc(
         }
     )
 
-    # Per-call distance cache: maps frozen param key -> actual loss.
-    # Must be local to avoid cross-replicate contamination.
+    # Per-call distance cache; local to avoid cross-replicate contamination.
     _distance_cache: Dict = {}
     _cache_lock = threading.Lock()
 
     def pyabc_model(params):
-        # Derive a stable per-evaluation seed from (run_seed, frozen_params).
-        # Using a param hash is deterministic regardless of evaluation order,
-        # which matters for parallel samplers.
         param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
         sim_seed = abs(hash((seed, param_key))) % (2**31)
         loss = float(simulate_fn(dict(params), seed=sim_seed))
@@ -88,14 +89,13 @@ def run_pyabc_smc(
     def pyabc_distance(x, x0):
         return x["distance"]
 
-    # Select sampler based on n_procs
     sampler = (
         pyabc.SingleCoreSampler()
         if n_procs == 1
         else pyabc.MulticoreEvalParallelSampler(n_procs)
     )
 
-    db_path = f"sqlite:///{output_dir.data / f'pyabc_rep{replicate}.db'}"
+    db_path = f"sqlite:///{output_dir.data / f'abc_smc_baseline_rep{replicate}.db'}"
 
     abc = pyabc.ABCSMC(
         models=pyabc_model,
@@ -111,22 +111,24 @@ def run_pyabc_smc(
     # Seed numpy before running so pyABC's internal prior sampling is reproducible
     np.random.seed(seed % (2**31))
     run_start = time.time()
+    # Run for exactly n_generations generations (or until budget exhausted).
+    # minimum_epsilon=0.0 so the only stopping criteria are generation count
+    # and simulation budget.
     history = abc.run(
-        minimum_epsilon=tol_init * 0.01,
+        minimum_epsilon=0.0,
         max_total_nr_simulations=max_sims,
+        max_nr_populations=n_generations,
     )
 
-    # Robust epsilon extraction: key by generation index, not row position
+    # Robust epsilon extraction: key by generation index
     all_pops = history.get_all_populations()
     eps_series = all_pops.set_index("t")["epsilon"]
 
-    # Collect records from the pyABC history
     records: List[ParticleRecord] = []
     step = 0
     for t in range(history.max_t + 1):
         df, w = history.get_distribution(m=0, t=t)
         eps_t = float(eps_series.loc[t]) if t in eps_series.index else float("inf")
-        # Use enumerate so we index w by position, not DataFrame label
         for pos, (idx, row) in enumerate(df.iterrows()):
             step += 1
             params = {col: float(row[col]) for col in limits}
@@ -134,7 +136,7 @@ def run_pyabc_smc(
             actual_loss = _distance_cache.get(param_key, eps_t)
             weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None
             records.append(ParticleRecord(
-                method="pyabc_smc",
+                method="abc_smc_baseline",
                 replicate=replicate,
                 seed=seed,
                 step=step,

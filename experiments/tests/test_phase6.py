@@ -141,3 +141,30 @@ class TestRunAll:
             timeout=30,
         )
         assert result.returncode != 0
+
+
+class TestGaussianMeanConfigMethods:
+    def test_gaussian_mean_has_rejection_abc(self):
+        from async_abc.io.config import load_config
+        cfg = load_config(CONFIGS_DIR / "gaussian_mean.json")
+        assert "rejection_abc" in cfg["methods"]
+
+    def test_gaussian_mean_has_abc_smc_baseline(self):
+        from async_abc.io.config import load_config
+        cfg = load_config(CONFIGS_DIR / "gaussian_mean.json")
+        assert "abc_smc_baseline" in cfg["methods"]
+
+    def test_gaussian_mean_has_n_generations(self):
+        from async_abc.io.config import load_config
+        cfg = load_config(CONFIGS_DIR / "gaussian_mean.json")
+        assert "n_generations" in cfg["inference"]
+
+    def test_gandk_has_rejection_abc(self):
+        from async_abc.io.config import load_config
+        cfg = load_config(CONFIGS_DIR / "gandk.json")
+        assert "rejection_abc" in cfg["methods"]
+
+    def test_gandk_has_abc_smc_baseline(self):
+        from async_abc.io.config import load_config
+        cfg = load_config(CONFIGS_DIR / "gandk.json")
+        assert "abc_smc_baseline" in cfg["methods"]

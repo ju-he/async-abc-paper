@@ -30,6 +30,7 @@ TEST_MODE_OVERRIDES = {
         "inference": {
             "n_workers": 8,
             "max_simulations": 500,
+            "n_generations": 3,
         },
         "execution": {
             "n_replicates": 2,

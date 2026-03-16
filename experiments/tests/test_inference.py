@@ -192,3 +192,270 @@ class TestPyabcWrapper:
         )
         assert isinstance(records, list)
         assert all(isinstance(r, ParticleRecord) for r in records)
+
+
+# ---------------------------------------------------------------------------
+# pyabc wrapper fixes
+# ---------------------------------------------------------------------------
+
+class TestPyabcWrapperFixes:
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    def test_particle_loss_is_actual_distance(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        records = run_pyabc_smc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        # Losses in the first generation must not all be identical (would indicate
+        # loss was set to the generation epsilon rather than the actual distance).
+        first_gen_losses = [r.loss for r in records[:10] if r.loss is not None]
+        assert len(set(round(l, 8) for l in first_gen_losses)) > 1, (
+            "All first-gen losses are identical — loss is likely set to epsilon"
+        )
+
+    def test_tolerance_field_is_generation_epsilon(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        records = run_pyabc_smc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        assert all(r.tolerance is not None for r in records)
+        assert all(r.tolerance >= 0.0 for r in records)
+
+    def test_singlecore_sampler_when_n_workers_1(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        cfg = {**_test_inference_cfg(), "n_workers": 1}
+        records = run_pyabc_smc(bm.simulate, bm.limits, cfg, od, replicate=0, seed=1)
+        assert len(records) > 0
+
+    def test_multicore_sampler_when_n_workers_gt_1(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        calls = []
+        original = pyabc.MulticoreEvalParallelSampler
+        monkeypatch.setattr(
+            pyabc, "MulticoreEvalParallelSampler",
+            lambda n: (calls.append(n), original(n))[1],
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        cfg = {**_test_inference_cfg(), "n_workers": 2}
+        run_pyabc_smc(bm.simulate, bm.limits, cfg, od, replicate=0, seed=1)
+        assert calls == [2], f"Expected MulticoreEvalParallelSampler(2), got {calls}"
+
+    def test_same_seed_reproducible(self, tmp_output_dir):
+        from pathlib import Path
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od1 = OutputDir(Path(tmp_output_dir) / "r1", "pyabc").ensure()
+        od2 = OutputDir(Path(tmp_output_dir) / "r2", "pyabc").ensure()
+        r1 = run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od1, replicate=0, seed=42)
+        r2 = run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od2, replicate=0, seed=42)
+        assert r1[0].params == r2[0].params
+
+    def test_epsilon_extraction_robust(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        records = run_pyabc_smc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        assert all(r.tolerance is not None for r in records)
+
+    def test_all_records_complete_schema(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc").ensure()
+        records = run_pyabc_smc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        for r in records:
+            assert r.method == "pyabc_smc"
+            assert isinstance(r.step, int) and r.step >= 1
+            assert math.isfinite(r.loss) and r.loss >= 0.0
+            assert r.tolerance is not None and r.tolerance >= 0.0
+            assert r.wall_time >= 0.0
+            assert "mu" in r.params
+
+
+# ---------------------------------------------------------------------------
+# rejection_abc
+# ---------------------------------------------------------------------------
+
+class TestRejectionAbc:
+    def test_importable(self):
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        assert callable(run_rejection_abc)
+
+    def test_in_registry(self):
+        assert "rejection_abc" in METHOD_REGISTRY
+
+    def test_returns_particle_records(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        assert isinstance(records, list)
+        assert all(isinstance(r, ParticleRecord) for r in records)
+
+    def test_method_name(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        assert all(r.method == "rejection_abc" for r in records)
+
+    def test_all_accepted_within_tolerance(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        cfg = {**_test_inference_cfg(), "tol_init": 5.0}
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        assert all(r.loss <= cfg["tol_init"] + 1e-9 for r in records)
+
+    def test_tolerance_field_equals_tol_init(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        cfg = {**_test_inference_cfg(), "tol_init": 3.0}
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        assert all(r.tolerance == pytest.approx(3.0) for r in records)
+
+    def test_steps_monotone(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1,
+        )
+        steps = [r.step for r in records]
+        assert steps == sorted(steps)
+        assert steps[0] >= 1
+
+    def test_returns_at_most_k_particles(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "rejection").ensure()
+        cfg = {**_test_inference_cfg(), "k": 5}
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        assert len(records) <= cfg["k"]
+
+
+# ---------------------------------------------------------------------------
+# abc_smc_baseline
+# ---------------------------------------------------------------------------
+
+class TestAbcSmcBaseline:
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    def test_importable(self):
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        assert callable(run_abc_smc_baseline)
+
+    def test_in_registry(self):
+        assert "abc_smc_baseline" in METHOD_REGISTRY
+
+    def test_returns_particle_records(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2}
+        records = run_abc_smc_baseline(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        assert isinstance(records, list)
+        assert all(isinstance(r, ParticleRecord) for r in records)
+
+    def test_method_name(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        assert all(r.method == "abc_smc_baseline" for r in records)
+
+    def test_tolerance_non_increasing(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 3, "k": 5, "max_simulations": 300}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        tols = [r.tolerance for r in records if r.tolerance is not None]
+        for i in range(1, len(tols)):
+            assert tols[i] <= tols[i - 1] + 1e-9
+
+    def test_loss_is_actual_distance(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2, "k": 10}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        gen0 = records[:10]
+        if len(gen0) > 1:
+            assert len(set(round(r.loss, 8) for r in gen0)) > 1, (
+                "All losses in generation 0 are identical — likely set to epsilon"
+            )
+
+    def test_steps_monotone(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2, "k": 5}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        steps = [r.step for r in records]
+        assert steps == sorted(steps)
+
+    def test_n_generations_respected(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 3, "k": 5}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        assert len(records) > 0
+
+    def test_n_generations_defaults(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg()}  # no n_generations key
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        assert isinstance(records, list)

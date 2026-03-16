@@ -88,3 +88,42 @@ class TestLoadConfig:
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p, test_mode=True)
         assert cfg["inference"]["n_workers"] == 2
+
+
+class TestNewMethodsInConfig:
+    def test_rejection_abc_validates(self, tmp_path, minimal_config):
+        minimal_config["methods"] = ["async_propulate_abc", "rejection_abc"]
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert "rejection_abc" in cfg["methods"]
+
+    def test_abc_smc_baseline_validates(self, tmp_path, minimal_config):
+        minimal_config["methods"] = ["async_propulate_abc", "abc_smc_baseline"]
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert "abc_smc_baseline" in cfg["methods"]
+
+    def test_all_four_methods_validate(self, tmp_path, minimal_config):
+        minimal_config["methods"] = [
+            "async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"
+        ]
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert len(cfg["methods"]) == 4
+
+    def test_n_generations_clamped_in_test_mode(self, tmp_path, minimal_config):
+        minimal_config["inference"]["n_generations"] = 10
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["n_generations"] <= 3
+
+    def test_n_generations_set_when_absent_in_test_mode(self, tmp_path, minimal_config):
+        # n_generations not in config — test mode should inject the clamped default
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["n_generations"] == 3

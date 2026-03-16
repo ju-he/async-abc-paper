@@ -9,12 +9,13 @@
     "true_g": 2.0,
     "true_k": 0.5
   },
-  "methods": ["async_propulate_abc", "pyabc_smc"],
+  "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
   "inference": {
     "max_simulations": 100000,
     "n_workers": 48,
     "k": 100,
     "tol_init": 10.0,
+    "n_generations": 5,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
   },

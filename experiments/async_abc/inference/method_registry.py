@@ -14,10 +14,14 @@ from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 from .propulate_abc import run_propulate_abc
 from .pyabc_wrapper import run_pyabc_smc
+from .rejection_abc import run_rejection_abc
+from .abc_smc_baseline import run_abc_smc_baseline
 
 METHOD_REGISTRY: Dict[str, Callable] = {
     "async_propulate_abc": run_propulate_abc,
-    "pyabc_smc": run_pyabc_smc,
+    "pyabc_smc":           run_pyabc_smc,
+    "rejection_abc":       run_rejection_abc,
+    "abc_smc_baseline":    run_abc_smc_baseline,
 }
 
 

@@ -9,12 +9,13 @@
     "prior_low": -5.0,
     "prior_high": 5.0
   },
-  "methods": ["async_propulate_abc", "pyabc_smc"],
+  "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
   "inference": {
     "max_simulations": 50000,
     "n_workers": 48,
     "k": 100,
     "tol_init": 5.0,
+    "n_generations": 5,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
   },

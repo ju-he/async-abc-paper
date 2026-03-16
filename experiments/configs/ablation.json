@@ -36,10 +36,10 @@
       "perturbation_scale": 0.8
     },
     {
-      "name": "no_schedule",
+      "name": "slow_decay",
       "k": 50,
       "scheduler_type": "geometric_decay",
-      "decay_factor": 1.0,
+      "decay_factor": 0.9999,
       "perturbation_scale": 0.8
     },
     {
