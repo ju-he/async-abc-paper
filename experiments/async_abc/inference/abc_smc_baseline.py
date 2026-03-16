@@ -12,6 +12,7 @@ from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from .pyabc_sampler import build_pyabc_sampler
 
 
 def run_abc_smc_baseline(
@@ -58,13 +59,13 @@ def run_abc_smc_baseline(
         ) from exc
 
     import numpy as np
-    import threading
     import time
 
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
     n_generations = inference_cfg.get("n_generations", 5)
-    n_procs      = inference_cfg.get("n_workers", 1)
+    n_procs          = inference_cfg.get("n_workers", 1)
+    parallel_backend = inference_cfg.get("parallel_backend", "multicore")
 
     # Build pyABC prior from limits
     prior = pyabc.Distribution(
@@ -75,25 +76,20 @@ def run_abc_smc_baseline(
     )
 
     # Per-call distance cache; local to avoid cross-replicate contamination.
+    # Note: not populated for MPI backend (workers run in separate processes).
     _distance_cache: Dict = {}
-    _cache_lock = threading.Lock()
 
     def pyabc_model(params):
         param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
         sim_seed = abs(hash((seed, param_key))) % (2**31)
         loss = float(simulate_fn(dict(params), seed=sim_seed))
-        with _cache_lock:
-            _distance_cache[param_key] = loss
+        _distance_cache[param_key] = loss
         return {"distance": loss}
 
     def pyabc_distance(x, x0):
         return x["distance"]
 
-    sampler = (
-        pyabc.SingleCoreSampler()
-        if n_procs == 1
-        else pyabc.MulticoreEvalParallelSampler(n_procs)
-    )
+    sampler = build_pyabc_sampler(n_procs, parallel_backend)
 
     db_path = f"sqlite:///{output_dir.data / f'abc_smc_baseline_rep{replicate}.db'}"
 

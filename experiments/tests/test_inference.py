@@ -1,6 +1,11 @@
 """Tests for async_abc.inference.*"""
+import json
 import math
+import shutil
+import subprocess
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -459,3 +464,227 @@ class TestAbcSmcBaseline:
         cfg = {**_test_inference_cfg()}  # no n_generations key
         records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
         assert isinstance(records, list)
+
+
+# ---------------------------------------------------------------------------
+# build_pyabc_sampler helper
+# ---------------------------------------------------------------------------
+
+class TestBuildPyabcSampler:
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    @pytest.fixture
+    def mock_mpi(self, monkeypatch):
+        """Inject a fake mpi4py.futures module to sidestep the ABI mismatch."""
+        import sys
+        import unittest.mock
+        mock_futures = unittest.mock.MagicMock()
+        monkeypatch.setitem(sys.modules, "mpi4py", unittest.mock.MagicMock())
+        monkeypatch.setitem(sys.modules, "mpi4py.futures", mock_futures)
+        return mock_futures
+
+    def test_multicore_n1_returns_singlecore_sampler(self):
+        import pyabc
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        sampler = build_pyabc_sampler(n_procs=1, parallel_backend="multicore")
+        assert isinstance(sampler, pyabc.SingleCoreSampler)
+
+    def test_multicore_n4_returns_multicore_sampler(self, monkeypatch):
+        import pyabc
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        calls = []
+        original = pyabc.MulticoreEvalParallelSampler
+        monkeypatch.setattr(
+            pyabc, "MulticoreEvalParallelSampler",
+            lambda n: (calls.append(n), original(n))[1],
+        )
+        build_pyabc_sampler(n_procs=4, parallel_backend="multicore")
+        assert calls == [4]
+
+    def test_mpi_backend_returns_concurrent_future_sampler(self, mock_mpi):
+        import pyabc
+        import unittest.mock
+        mock_mpi.MPIPoolExecutor.return_value = unittest.mock.MagicMock()
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        sampler = build_pyabc_sampler(n_procs=8, parallel_backend="mpi")
+        assert isinstance(sampler, pyabc.ConcurrentFutureSampler)
+
+    def test_mpi_backend_does_not_pass_max_workers(self, mock_mpi):
+        """Worker count is determined by mpirun -n N, not a Python parameter."""
+        import unittest.mock
+        mock_mpi.MPIPoolExecutor.return_value = unittest.mock.MagicMock()
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        build_pyabc_sampler(n_procs=16, parallel_backend="mpi")
+        mock_mpi.MPIPoolExecutor.assert_called_once_with()
+
+    def test_mpi_n1_still_uses_concurrent_future_sampler(self, mock_mpi):
+        import pyabc
+        import unittest.mock
+        mock_mpi.MPIPoolExecutor.return_value = unittest.mock.MagicMock()
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        sampler = build_pyabc_sampler(n_procs=1, parallel_backend="mpi")
+        assert isinstance(sampler, pyabc.ConcurrentFutureSampler)
+
+    def test_invalid_backend_raises_value_error(self):
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+        with pytest.raises(ValueError, match="parallel_backend"):
+            build_pyabc_sampler(n_procs=2, parallel_backend="redis")
+
+
+# ---------------------------------------------------------------------------
+# pyabc_wrapper: parallel_backend config key
+# ---------------------------------------------------------------------------
+
+class TestPyabcWrapperMpiBackend:
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    def test_mpi_backend_key_is_forwarded(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.pyabc_wrapper as wrapper_mod
+        from async_abc.io.paths import OutputDir
+        calls = []
+
+        def spy(n_procs, parallel_backend):
+            calls.append(parallel_backend)
+            return pyabc.SingleCoreSampler()
+
+        monkeypatch.setattr(wrapper_mod, "build_pyabc_sampler", spy, raising=False)
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc_mpi").ensure()
+        cfg = {**_test_inference_cfg(), "parallel_backend": "mpi", "n_workers": 2}
+        run_pyabc_smc(bm.simulate, bm.limits, cfg, od, replicate=0, seed=1)
+        assert "mpi" in calls, f"Expected 'mpi' in calls, got {calls}"
+
+    def test_absent_parallel_backend_defaults_to_multicore(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.pyabc_wrapper as wrapper_mod
+        from async_abc.io.paths import OutputDir
+        calls = []
+
+        def spy(n_procs, parallel_backend):
+            calls.append(parallel_backend)
+            return pyabc.SingleCoreSampler()
+
+        monkeypatch.setattr(wrapper_mod, "build_pyabc_sampler", spy, raising=False)
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc_default").ensure()
+        run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1)
+        assert calls == ["multicore"], f"Expected ['multicore'], got {calls}"
+
+
+# ---------------------------------------------------------------------------
+# abc_smc_baseline: parallel_backend config key
+# ---------------------------------------------------------------------------
+
+class TestAbcSmcBaselineMpiBackend:
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    def test_mpi_backend_key_is_forwarded(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        calls = []
+
+        def spy(n_procs, parallel_backend):
+            calls.append(parallel_backend)
+            return pyabc.SingleCoreSampler()
+
+        monkeypatch.setattr(baseline_mod, "build_pyabc_sampler", spy, raising=False)
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "smc_mpi").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2,
+               "parallel_backend": "mpi", "n_workers": 2}
+        run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, replicate=0, seed=1)
+        assert "mpi" in calls, f"Expected 'mpi' in calls, got {calls}"
+
+    def test_absent_parallel_backend_defaults_to_multicore(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        calls = []
+
+        def spy(n_procs, parallel_backend):
+            calls.append(parallel_backend)
+            return pyabc.SingleCoreSampler()
+
+        monkeypatch.setattr(baseline_mod, "build_pyabc_sampler", spy, raising=False)
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "smc_default").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2}
+        run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, replicate=0, seed=1)
+        assert calls == ["multicore"], f"Expected ['multicore'], got {calls}"
+
+
+# ---------------------------------------------------------------------------
+# MPI integration test (subprocess via mpirun)
+# ---------------------------------------------------------------------------
+
+class TestMpiIntegration:
+    """End-to-end test that exercises the real MPI backend via mpirun -n 2.
+
+    Skipped automatically when mpirun is not on PATH.
+    The helper script (mpi_integration_helper.py) must be launched via
+    ``python -m mpi4py.futures`` so that rank 1 enters the worker loop
+    instead of re-running the ABC.
+    """
+
+    @pytest.fixture(autouse=True)
+    def skip_if_mpirun_not_usable(self):
+        """Skip if mpirun is absent or can't run as a subprocess.
+
+        OpenMPI fails silently when stdin is /dev/null (e.g. inside some CI
+        task runners). Probe with a trivial command before attempting the
+        full integration test.
+        """
+        if shutil.which("mpirun") is None:
+            pytest.skip("mpirun not on PATH")
+        probe = subprocess.run(
+            ["mpirun", "-n", "1", "--stdin", "none",
+             sys.executable, "-c", "pass"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+        if probe.returncode != 0:
+            pytest.skip(
+                "mpirun failed a trivial probe (likely stdin=/dev/null incompatibility); "
+                "run this test from a proper shell to verify the MPI backend"
+            )
+
+    @pytest.fixture(autouse=True)
+    def skip_if_no_pyabc(self):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+
+    def test_mpi_backend_via_mpirun(self, tmp_path):
+        helper = Path(__file__).parent / "mpi_integration_helper.py"
+        output_file = tmp_path / "mpi_result.json"
+        result = subprocess.run(
+            [
+                "mpirun", "-n", "2",
+                "--stdin", "none",   # prevent OpenMPI failing when stdin=/dev/null
+                sys.executable, "-m", "mpi4py.futures",
+                str(helper), str(output_file),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, (
+            f"mpirun exited with rc={result.returncode}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        assert output_file.exists(), "Helper did not write result file"
+        data = json.loads(output_file.read_text())
+        assert data["n_records"] > 0, f"Expected records, got: {data}"
+        assert data["method"] == "pyabc_smc"
