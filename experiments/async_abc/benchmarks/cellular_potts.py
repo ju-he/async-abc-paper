@@ -1,8 +1,7 @@
 """Cellular Potts model benchmark backed by nastjapy's simulation machinery.
 
-Requires nastjapy (via the nastjapy_copy symlink) to run simulations.  Import
-succeeds unconditionally; instantiation raises ``ImportError`` when nastjapy is
-not importable from the repo-local symlink.
+Requires nastjapy to run simulations. The active environment is preferred; the
+repo-local ``nastjapy_copy`` symlink is used only as a fallback.
 """
 from __future__ import annotations
 
@@ -15,26 +14,39 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# nastjapy_copy/src is 3 parents above this file (repo root / nastjapy_copy / src)
 _NASTJAPY_SRC = Path(__file__).resolve().parents[3] / "nastjapy_copy" / "src"
 
 
 def _ensure_nastjapy_on_path() -> None:
-    """Insert nastjapy_copy/src onto sys.path so nastjapy modules are importable.
+    """Resolve nastjapy from the environment or the repo-local fallback.
 
     Raises
     ------
     ImportError
-        If nastjapy_copy/src does not exist (symlink missing or broken).
+        If neither the active environment nor ``nastjapy_copy/src`` is usable.
     """
-    if not _NASTJAPY_SRC.is_dir():
-        raise ImportError(
-            f"nastjapy_copy/src not found at {_NASTJAPY_SRC}. "
-            "Ensure the nastjapy_copy symlink is present at the repo root."
-        )
+    try:
+        import nastja.parameter_space_config  # noqa: F401
+        return
+    except Exception as env_exc:
+        if not _NASTJAPY_SRC.is_dir():
+            raise ImportError(
+                "The cellular_potts benchmark requires a working nastjapy/nastja "
+                "installation in the active environment, or a repo-local "
+                f"'nastjapy_copy/src' fallback at {_NASTJAPY_SRC}."
+            ) from env_exc
+
     src_str = str(_NASTJAPY_SRC)
     if src_str not in sys.path:
         sys.path.insert(0, src_str)
+    try:
+        import nastja.parameter_space_config  # noqa: F401
+    except Exception as path_exc:
+        raise ImportError(
+            "The cellular_potts benchmark requires a working nastjapy/nastja "
+            "installation. Import failed from both the active environment and "
+            f"the repo-local fallback at {_NASTJAPY_SRC}."
+        ) from path_exc
 
 
 class CellularPotts:

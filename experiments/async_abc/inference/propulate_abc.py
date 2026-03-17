@@ -13,21 +13,63 @@ the run seed and the individual's generation counter.
 import random
 import sys
 import time
+from importlib import invalidate_caches
 from pathlib import Path
 from typing import Callable, Dict, List
 
 import numpy as np
 
-# Add propulate to path if needed (it's a symlink at the project root)
-_propulate_root = Path(__file__).parent.parent.parent.parent / "propulate"
-if str(_propulate_root) not in sys.path:
-    sys.path.insert(0, str(_propulate_root))
-
-from propulate import Propulator
-from propulate.propagators.abcpmc import ABCPMC
-
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+
+_PROPULATE_ROOT = Path(__file__).resolve().parents[3] / "propulate"
+Propulator = None
+ABCPMC = None
+
+
+def _ensure_propulate_imports() -> None:
+    """Resolve propulate from the active environment or the repo-local fallback."""
+    global Propulator, ABCPMC
+    if Propulator is not None and ABCPMC is not None:
+        return
+
+    def _import_symbols():
+        from propulate import Propulator as _Propulator
+        try:
+            from propulate.propagators.abcpmc import ABCPMC as _ABCPMC
+        except ImportError:
+            from propulate.propagators import ABCPMC as _ABCPMC
+        return _Propulator, _ABCPMC
+
+    try:
+        _Propulator, _ABCPMC = _import_symbols()
+    except ImportError as env_exc:
+        if not _PROPULATE_ROOT.is_dir():
+            raise ImportError(
+                "The async_propulate_abc method requires 'propulate'. "
+                "Install it in the active environment or provide the repo-local "
+                f"'propulate' checkout at {_PROPULATE_ROOT}."
+            ) from env_exc
+        propulate_root = str(_PROPULATE_ROOT)
+        if propulate_root not in sys.path:
+            sys.path.insert(0, propulate_root)
+        invalidate_caches()
+        for module_name in list(sys.modules):
+            if module_name == "propulate" or module_name.startswith("propulate."):
+                del sys.modules[module_name]
+        try:
+            _Propulator, _ABCPMC = _import_symbols()
+        except ImportError as path_exc:
+            raise ImportError(
+                "The async_propulate_abc method requires 'propulate'. "
+                "Import from the active environment failed, and the repo-local "
+                f"fallback at {_PROPULATE_ROOT} was not usable."
+            ) from path_exc
+
+    if Propulator is None:
+        Propulator = _Propulator
+    if ABCPMC is None:
+        ABCPMC = _ABCPMC
 
 
 def _eval_seed(run_seed: int, generation: int) -> int:
@@ -67,6 +109,8 @@ def run_propulate_abc(
     List[ParticleRecord]
         One record per simulation evaluation, in generation order.
     """
+    _ensure_propulate_imports()
+
     max_sims = inference_cfg["max_simulations"]
     k = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)

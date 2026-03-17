@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "async-abc-paper"
+version = "0.1.0"
+description = "Experiment library for the async-ABC paper."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "POT",
+    "scipy",
+]
+
+[project.optional-dependencies]
+pyabc = ["pyabc"]
+mpi = ["mpi4py"]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/ju-he/async-abc-paper"
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-dir]
+"" = "experiments"
+
+[tool.setuptools.packages.find]
+where = ["experiments"]
+include = ["async_abc*"]
