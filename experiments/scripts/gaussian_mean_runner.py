@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
-from async_abc.plotting.reporters import plot_archive_evolution, plot_posterior
+from async_abc.plotting.reporters import plot_benchmark_diagnostics
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import (
     compute_scaling_factor,
@@ -42,11 +42,7 @@ def main() -> None:
         )
     write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
 
-    plots_cfg = cfg.get("plots", {})
-    if plots_cfg.get("posterior"):
-        plot_posterior(records, output_dir)
-    if plots_cfg.get("archive_evolution"):
-        plot_archive_evolution(records, output_dir)
+    plot_benchmark_diagnostics(records, cfg, output_dir)
     write_metadata(output_dir, cfg)
 
 

@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
-from async_abc.plotting.reporters import plot_archive_evolution, plot_posterior
+from async_abc.plotting.reporters import plot_benchmark_diagnostics, plot_worker_gantt
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_experiment, write_timing_csv
 from async_abc.benchmarks import make_benchmark
@@ -86,11 +86,9 @@ def main() -> None:
         )
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
-    plots_cfg = cfg.get("plots", {})
-    if plots_cfg.get("posterior"):
-        plot_posterior(all_records, output_dir)
-    if plots_cfg.get("archive_evolution"):
-        plot_archive_evolution(all_records, output_dir)
+    plot_benchmark_diagnostics(all_records, cfg, output_dir)
+    if cfg.get("plots", {}).get("gantt"):
+        plot_worker_gantt(all_records, output_dir)
     write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 
 

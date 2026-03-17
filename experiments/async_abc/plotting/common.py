@@ -12,6 +12,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from .export import save_figure
 
@@ -226,3 +227,166 @@ def compute_wasserstein(
     a = np.asarray(samples_a, dtype=float).ravel()
     b = np.asarray(samples_b, dtype=float).ravel()
     return float(wasserstein_distance(a, b))
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 figures
+# ---------------------------------------------------------------------------
+
+def gantt_plot(records, ax=None):
+    """Horizontal worker timeline using sim_start_time/sim_end_time metadata."""
+    timed = [
+        record for record in records
+        if record.worker_id is not None
+        and record.sim_start_time is not None
+        and record.sim_end_time is not None
+    ]
+    workers = sorted({str(record.worker_id) for record in timed})
+
+    created_fig = ax is None
+    if ax is None:
+        fig_height = min(10.0, max(3.5, 0.6 * max(1, len(workers))))
+        fig, ax = plt.subplots(figsize=(7, fig_height))
+    else:
+        fig = ax.figure
+
+    if not timed:
+        ax.set_title("Worker timeline")
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("worker")
+        return fig
+
+    worker_to_y = {worker: idx for idx, worker in enumerate(workers)}
+    methods = sorted({record.method for record in timed})
+    cmap = plt.get_cmap("tab10")
+    method_colors = {method: cmap(i % 10) for i, method in enumerate(methods)}
+
+    for record in timed:
+        ax.barh(
+            worker_to_y[str(record.worker_id)],
+            float(record.sim_end_time) - float(record.sim_start_time),
+            left=float(record.sim_start_time),
+            height=0.7,
+            color=method_colors[record.method],
+            alpha=0.85,
+        )
+
+    ax.set_yticks(list(worker_to_y.values()))
+    ax.set_yticklabels(list(worker_to_y.keys()))
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("worker")
+    ax.set_title("Worker timeline")
+
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=method_colors[method], alpha=0.85)
+        for method in methods
+    ]
+    ax.legend(handles, methods, frameon=False, loc="best")
+    if created_fig:
+        fig.tight_layout()
+    return fig
+
+
+def quality_vs_time_plot(quality_df: pd.DataFrame, ax=None):
+    """Line plot of Wasserstein quality versus wall-clock time."""
+    created_fig = ax is None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
+    if quality_df.empty:
+        ax.set_title("Posterior quality vs. wall-clock time")
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("wasserstein")
+        return fig
+
+    for (method, replicate), group in quality_df.groupby(["method", "replicate"], sort=True):
+        group = group.sort_values("wall_time")
+        label = method if quality_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
+        ax.plot(group["wall_time"], group["wasserstein"], marker="o", label=label)
+
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("wasserstein")
+    ax.set_title("Posterior quality vs. wall-clock time")
+    ax.legend(frameon=False, fontsize=8)
+    if created_fig:
+        fig.tight_layout()
+    return fig
+
+
+def corner_plot(records, param_names: List[str], true_params: Optional[Dict] = None, ax=None):
+    """Pairwise posterior scatter/hist grid."""
+    if not param_names:
+        fig, axis = plt.subplots(figsize=(4, 3))
+        axis.set_title("Posterior corner")
+        return fig
+
+    if ax is None:
+        fig, axes = plt.subplots(len(param_names), len(param_names), figsize=(3 * len(param_names), 3 * len(param_names)))
+    else:
+        axes = ax
+        fig = axes.figure if hasattr(axes, "figure") else axes[0, 0].figure
+
+    if len(param_names) == 1:
+        axes = np.array([[axes]])
+    elif not isinstance(axes, np.ndarray):
+        axes = np.asarray(axes)
+
+    data = {
+        name: np.asarray([record.params[name] for record in records if name in record.params], dtype=float)
+        for name in param_names
+    }
+
+    for row_idx, y_name in enumerate(param_names):
+        for col_idx, x_name in enumerate(param_names):
+            axis = axes[row_idx, col_idx]
+            if row_idx == col_idx:
+                axis.hist(data[x_name], bins=20, density=False, color="steelblue", alpha=0.75)
+                if true_params and x_name in true_params:
+                    axis.axvline(float(true_params[x_name]), color="crimson", linestyle="--", linewidth=1.2)
+            else:
+                axis.scatter(data[x_name], data[y_name], s=12, alpha=0.7, color="steelblue")
+                if true_params:
+                    if x_name in true_params:
+                        axis.axvline(float(true_params[x_name]), color="crimson", linestyle="--", linewidth=0.9)
+                    if y_name in true_params:
+                        axis.axhline(float(true_params[y_name]), color="crimson", linestyle="--", linewidth=0.9)
+
+            if row_idx == len(param_names) - 1:
+                axis.set_xlabel(x_name)
+            if col_idx == 0:
+                axis.set_ylabel(y_name)
+
+    fig.suptitle("Posterior corner", y=0.995)
+    fig.tight_layout()
+    return fig
+
+
+def tolerance_trajectory_plot(trajectory_df: pd.DataFrame, ax=None):
+    """Line plot of tolerance versus wall-clock time."""
+    created_fig = ax is None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
+    if trajectory_df.empty:
+        ax.set_title("Tolerance trajectory")
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("tolerance")
+        return fig
+
+    for (method, replicate), group in trajectory_df.groupby(["method", "replicate"], sort=True):
+        group = group.sort_values("wall_time")
+        label = method if trajectory_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
+        ax.plot(group["wall_time"], group["tolerance"], marker="o", label=label)
+
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("tolerance")
+    ax.set_yscale("log")
+    ax.set_title("Tolerance trajectory")
+    ax.legend(frameon=False, fontsize=8)
+    if created_fig:
+        fig.tight_layout()
+    return fig

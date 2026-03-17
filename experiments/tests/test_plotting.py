@@ -12,13 +12,27 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import matplotlib
 matplotlib.use("Agg")  # non-interactive backend
+from matplotlib.figure import Figure
 
+from async_abc.analysis import tolerance_over_wall_time, wasserstein_at_checkpoints
+from async_abc.io.paths import OutputDir
+from async_abc.io.records import ParticleRecord
 from async_abc.plotting.export import save_figure, get_git_hash
 from async_abc.plotting.common import (
+    corner_plot,
+    gantt_plot,
     posterior_plot,
+    quality_vs_time_plot,
     scaling_plot,
+    tolerance_trajectory_plot,
     archive_evolution_plot,
     compute_wasserstein,
+)
+from async_abc.plotting.reporters import (
+    plot_corner,
+    plot_quality_vs_time,
+    plot_tolerance_trajectory,
+    plot_worker_gantt,
 )
 
 
@@ -37,6 +51,23 @@ def _read_csv(path):
     with open(path, newline="") as f:
         reader = csv.DictReader(f)
         return list(reader)
+
+
+def _multi_param_records():
+    return [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=i + 1,
+            params={"x": 0.1 + 0.1 * i, "y": 1.0 - 0.1 * i},
+            loss=0.2 * (i + 1),
+            weight=1.0 / 4.0,
+            tolerance=1.0,
+            wall_time=0.1 * (i + 1),
+        )
+        for i in range(4)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +171,60 @@ class TestArchiveEvolutionPlot:
         archive_evolution_plot(sim_counts, tolerances, path_stem=tmp_path / "evo")
         rows = _read_csv(tmp_path / "evo_data.csv")
         assert set(rows[0].keys()) >= {"sim_count", "tolerance"}
+
+
+class TestPhase3PlotFunctions:
+    def test_gantt_plot_returns_figure(self, abc_smc_records):
+        fig = gantt_plot(abc_smc_records)
+        assert isinstance(fig, Figure)
+
+    def test_quality_vs_time_plot_returns_figure(self, sample_records):
+        df = wasserstein_at_checkpoints(sample_records, {"mu": 0.0}, [10, 50])
+        fig = quality_vs_time_plot(df)
+        assert isinstance(fig, Figure)
+
+    def test_corner_plot_returns_figure(self):
+        fig = corner_plot(_multi_param_records(), param_names=["x", "y"], true_params={"x": 0.0, "y": 1.0})
+        assert isinstance(fig, Figure)
+
+    def test_tolerance_trajectory_plot_returns_figure(self, sample_records):
+        df = tolerance_over_wall_time(sample_records)
+        fig = tolerance_trajectory_plot(df)
+        assert isinstance(fig, Figure)
+
+
+class TestPhase3Reporters:
+    def test_plot_worker_gantt_exports_files(self, tmp_path, abc_smc_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_worker_gantt(abc_smc_records, output_dir)
+        assert (output_dir.plots / "worker_gantt.pdf").exists()
+        assert (output_dir.plots / "worker_gantt.png").exists()
+        assert (output_dir.plots / "worker_gantt_data.csv").exists()
+        assert (output_dir.plots / "worker_gantt_meta.json").exists()
+
+    def test_plot_quality_vs_time_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_quality_vs_time(sample_records, {"mu": 0.0}, [10, 50], output_dir)
+        assert (output_dir.plots / "quality_vs_time.pdf").exists()
+        assert (output_dir.plots / "quality_vs_time.png").exists()
+        assert (output_dir.plots / "quality_vs_time_data.csv").exists()
+        assert (output_dir.plots / "quality_vs_time_meta.json").exists()
+
+    def test_plot_corner_exports_files(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_corner(_multi_param_records(), ["x", "y"], output_dir, true_params={"x": 0.0, "y": 1.0})
+        assert (output_dir.plots / "corner.pdf").exists()
+        assert (output_dir.plots / "corner.png").exists()
+        assert (output_dir.plots / "corner_data.csv").exists()
+        assert (output_dir.plots / "corner_meta.json").exists()
+
+    def test_plot_tolerance_trajectory_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_tolerance_trajectory(sample_records, output_dir)
+        assert (output_dir.plots / "tolerance_trajectory.pdf").exists()
+        assert (output_dir.plots / "tolerance_trajectory.png").exists()
+        assert (output_dir.plots / "tolerance_trajectory_data.csv").exists()
+        assert (output_dir.plots / "tolerance_trajectory_meta.json").exists()
 
 
 class TestWassersteinMetric:

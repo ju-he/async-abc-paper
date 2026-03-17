@@ -6,18 +6,23 @@ standard set of figures for a given experiment type.
 import csv
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from ..analysis import tolerance_over_wall_time, wasserstein_at_checkpoints
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 from .common import (
     archive_evolution_plot,
+    corner_plot,
     compute_wasserstein,
+    gantt_plot,
     posterior_plot,
+    quality_vs_time_plot,
     scaling_plot,
     sensitivity_heatmap,
+    tolerance_trajectory_plot,
 )
 from .export import save_figure
 
@@ -68,6 +73,82 @@ def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir)
         sim_counts=np.array(steps, dtype=float),
         tolerances=np.array(mean_tols, dtype=float),
         path_stem=stem,
+    )
+
+
+def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Worker timeline from simulation start/end metadata."""
+    timed = [
+        r for r in records
+        if r.worker_id is not None and r.sim_start_time is not None and r.sim_end_time is not None
+    ]
+    if not timed:
+        return
+
+    fig = gantt_plot(timed)
+    data = {
+        "method": [r.method for r in timed],
+        "replicate": [r.replicate for r in timed],
+        "worker_id": [r.worker_id for r in timed],
+        "sim_start_time": [r.sim_start_time for r in timed],
+        "sim_end_time": [r.sim_end_time for r in timed],
+        "generation": [r.generation for r in timed],
+    }
+    save_figure(fig, output_dir.plots / "worker_gantt", data=data)
+
+
+def plot_quality_vs_time(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    checkpoint_steps: List[int],
+    output_dir: OutputDir,
+) -> None:
+    """Wasserstein-vs-time diagnostic from existing ParticleRecords."""
+    if not true_params or not checkpoint_steps:
+        return
+
+    quality_df = wasserstein_at_checkpoints(records, true_params, checkpoint_steps)
+    if quality_df.empty:
+        return
+
+    fig = quality_vs_time_plot(quality_df)
+    save_figure(
+        fig,
+        output_dir.plots / "quality_vs_time",
+        data={col: quality_df[col].tolist() for col in quality_df.columns},
+    )
+
+
+def plot_corner(
+    records: List[ParticleRecord],
+    param_names: List[str],
+    output_dir: OutputDir,
+    true_params: Optional[Dict[str, float]] = None,
+) -> None:
+    """Corner plot for the final population."""
+    final = _final_population(records)
+    if not final or not param_names:
+        return
+
+    fig = corner_plot(final, param_names=param_names, true_params=true_params)
+    data = {
+        name: [r.params.get(name) for r in final]
+        for name in param_names
+    }
+    save_figure(fig, output_dir.plots / "corner", data=data)
+
+
+def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Tolerance schedule over wall-clock time."""
+    trajectory_df = tolerance_over_wall_time(records)
+    if trajectory_df.empty:
+        return
+
+    fig = tolerance_trajectory_plot(trajectory_df)
+    save_figure(
+        fig,
+        output_dir.plots / "tolerance_trajectory",
+        data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
     )
 
 
@@ -188,6 +269,37 @@ def plot_ablation_summary(
     save_figure(fig, stem, data=data)
 
 
+def plot_benchmark_diagnostics(
+    records: List[ParticleRecord],
+    cfg: Dict[str, Any],
+    output_dir: OutputDir,
+) -> None:
+    """Emit the configured benchmark plots for a standard benchmark runner."""
+    plots_cfg = cfg.get("plots", {})
+    benchmark_cfg = cfg.get("benchmark", {})
+
+    if plots_cfg.get("posterior"):
+        plot_posterior(records, output_dir)
+    if plots_cfg.get("archive_evolution"):
+        plot_archive_evolution(records, output_dir)
+    if plots_cfg.get("corner"):
+        plot_corner(
+            records,
+            param_names=_param_names(records),
+            output_dir=output_dir,
+            true_params=_true_params_from_cfg(records, benchmark_cfg),
+        )
+    if plots_cfg.get("tolerance_trajectory"):
+        plot_tolerance_trajectory(records, output_dir)
+    if plots_cfg.get("quality_vs_time"):
+        plot_quality_vs_time(
+            records,
+            true_params=_true_params_from_cfg(records, benchmark_cfg),
+            checkpoint_steps=_default_checkpoint_steps(records),
+            output_dir=output_dir,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -217,3 +329,22 @@ def _parse_variant_value(stem_str: str, key: str):
     except ValueError:
         pass
     return raw
+
+
+def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str, Any]) -> Dict[str, float]:
+    """Extract true parameter values from benchmark config using param names."""
+    true_params: Dict[str, float] = {}
+    for param in _param_names(records):
+        key = f"true_{param}"
+        if key in benchmark_cfg:
+            true_params[param] = float(benchmark_cfg[key])
+    return true_params
+
+
+def _default_checkpoint_steps(records: List[ParticleRecord], count: int = 8) -> List[int]:
+    """Choose a small set of evenly spaced simulation checkpoints."""
+    max_step = max((int(r.step) for r in records), default=0)
+    if max_step <= 0:
+        return []
+    n = min(count, max_step)
+    return sorted({int(round(x)) for x in np.linspace(1, max_step, num=n)})

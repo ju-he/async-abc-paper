@@ -25,7 +25,10 @@
   },
   "plots": {
     "posterior": true,
-    "archive_evolution": true
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
   },
   "analysis": {
     "target_wasserstein": 1.0

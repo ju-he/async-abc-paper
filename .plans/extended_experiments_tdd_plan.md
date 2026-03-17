@@ -290,6 +290,8 @@ generation barrier overhead quantification without re-running experiments.
 
 ## Phase 3 — New Visualizations
 
+Status: completed on 2026-03-17
+
 ### Goal
 
 Four new plot types callable from runners and analysis scripts:
@@ -329,6 +331,18 @@ def plot_corner(records, param_names, true_params, output_dir): ...
 def plot_tolerance_trajectory(records, output_dir): ...
 ```
 
+Implemented note:
+- Added the four figure constructors in `plotting/common.py` as matplotlib
+  figure builders and wired them into exporting reporters in
+  `plotting/reporters.py`.
+- Added `plot_benchmark_diagnostics(...)` so the benchmark runner scripts can
+  honor the expanded `plots` config without duplicating dispatch logic.
+- Updated `gaussian_mean.json`, `gandk.json`, `lotka_volterra.json`,
+  `cellular_potts.json`, and `runtime_heterogeneity.json` with the new plot
+  switches.
+- Fixed a runtime integration bug during implementation by sizing the Gantt
+  figure by worker count instead of record count.
+
 ### Config hooks (add to relevant experiment configs)
 
 In benchmark configs (`plots` block):
@@ -354,7 +368,7 @@ In `runtime_heterogeneity.json` (`plots` block):
 
 ### TDD steps
 
-**Step 3.1 — Extend** `experiments/tests/test_plotting.py`:
+**Step 3.1 — Extend** `experiments/tests/test_plotting.py`: complete
 
 ```python
 def test_gantt_plot_requires_sim_times(records_without_sim_times):
@@ -378,9 +392,14 @@ def test_tolerance_trajectory_plot_returns_figure(trajectory_df):
     assert isinstance(fig, Figure)
 ```
 
-**Step 3.2 — Implement** plot functions in `common.py` and wire up reporters
+**Step 3.2 — Implement** plot functions in `common.py` and wire up reporters: complete
 
-**Step 3.3 — Run tests** — all Phase 3 tests green
+**Step 3.3 — Run tests**: complete
+
+Verified:
+- `python -m pytest tests/test_plotting.py -q` → 22 passed
+- `python -m pytest tests/test_phase6.py -q -k 'Phase3ConfigPlots'` → 4 passed
+- `python -m pytest tests/test_runners.py -q -k 'creates_phase3_plots or creates_gantt_plot'` → 2 passed
 
 ### Commit message
 ```

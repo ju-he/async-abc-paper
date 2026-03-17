@@ -168,3 +168,21 @@ class TestGaussianMeanConfigMethods:
         from async_abc.io.config import load_config
         cfg = load_config(CONFIGS_DIR / "gandk.json")
         assert "abc_smc_baseline" in cfg["methods"]
+
+
+class TestPhase3ConfigPlots:
+    @pytest.mark.parametrize("config_file", [
+        "gaussian_mean.json",
+        "gandk.json",
+        "lotka_volterra.json",
+    ])
+    def test_benchmark_configs_enable_phase3_plots(self, config_file):
+        cfg = json.loads((CONFIGS_DIR / config_file).read_text())
+        plots = cfg["plots"]
+        assert plots.get("corner") is True
+        assert plots.get("tolerance_trajectory") is True
+        assert plots.get("quality_vs_time") is True
+
+    def test_runtime_heterogeneity_enables_gantt(self):
+        cfg = json.loads((CONFIGS_DIR / "runtime_heterogeneity.json").read_text())
+        assert cfg["plots"].get("gantt") is True

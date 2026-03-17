@@ -68,6 +68,13 @@ class TestGaussianMeanRunner:
         result = _run_script("gaussian_mean_runner.py", "gaussian_mean.json", tmp_output_dir)
         assert result.returncode == 0
 
+    def test_creates_phase3_plots(self, tmp_output_dir):
+        _run_script("gaussian_mean_runner.py", "gaussian_mean.json", tmp_output_dir)
+        plots_dir = tmp_output_dir / "gaussian_mean" / "plots"
+        assert (plots_dir / "quality_vs_time.pdf").exists()
+        assert (plots_dir / "tolerance_trajectory.pdf").exists()
+        assert (plots_dir / "corner.pdf").exists()
+
 
 # ---------------------------------------------------------------------------
 # G-and-k runner
@@ -202,3 +209,8 @@ class TestRuntimeHeterogeneityRunner:
             "runtime_heterogeneity_runner.py", "runtime_heterogeneity.json", tmp_output_dir
         )
         assert result.returncode == 0, f"Runner failed:\n{result.stderr}"
+
+    def test_creates_gantt_plot(self, tmp_output_dir):
+        _run_script("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json", tmp_output_dir)
+        plots_dir = tmp_output_dir / "runtime_heterogeneity" / "plots"
+        assert (plots_dir / "worker_gantt.pdf").exists()
