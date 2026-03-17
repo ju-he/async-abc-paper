@@ -8,6 +8,7 @@ predictable and the comparison fairer.
 If ``pyabc`` is not installed, raises ``ImportError`` with installation
 instructions.
 """
+from datetime import datetime
 from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
@@ -59,7 +60,6 @@ def run_abc_smc_baseline(
         ) from exc
 
     import numpy as np
-    import time
 
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
@@ -106,7 +106,7 @@ def run_abc_smc_baseline(
 
     # Seed numpy before running so pyABC's internal prior sampling is reproducible
     np.random.seed(seed % (2**31))
-    run_start = time.time()
+    run_start = datetime.now()
     # Run for exactly n_generations generations (or until budget exhausted).
     # minimum_epsilon=0.0 so the only stopping criteria are generation count
     # and simulation budget.
@@ -118,13 +118,27 @@ def run_abc_smc_baseline(
 
     # Robust epsilon extraction: key by generation index
     all_pops = history.get_all_populations()
+    all_pops = all_pops[all_pops["t"] >= 0].copy()
     eps_series = all_pops.set_index("t")["epsilon"]
+    end_time_series = all_pops.set_index("t")["population_end_time"]
 
     records: List[ParticleRecord] = []
     step = 0
     for t in range(history.max_t + 1):
         df, w = history.get_distribution(m=0, t=t)
         eps_t = float(eps_series.loc[t]) if t in eps_series.index else float("inf")
+        generation_end_dt = end_time_series.loc[t] if t in end_time_series.index else None
+        previous_end_dt = run_start if t == 0 else end_time_series.loc[t - 1]
+        generation_start = (
+            (previous_end_dt - run_start).total_seconds()
+            if previous_end_dt is not None
+            else None
+        )
+        generation_end = (
+            (generation_end_dt - run_start).total_seconds()
+            if generation_end_dt is not None
+            else None
+        )
         for pos, (idx, row) in enumerate(df.iterrows()):
             step += 1
             params = {col: float(row[col]) for col in limits}
@@ -140,7 +154,10 @@ def run_abc_smc_baseline(
                 loss=actual_loss,
                 weight=weight_val,
                 tolerance=eps_t,
-                wall_time=time.time() - run_start,
+                wall_time=generation_end if generation_end is not None else 0.0,
+                sim_start_time=generation_start,
+                sim_end_time=generation_end,
+                generation=t,
             ))
 
     return records

@@ -42,6 +42,20 @@ class TestParticleRecord:
         r = make_record(tolerance=None)
         assert r.tolerance is None
 
+    def test_worker_event_fields_default_to_none(self):
+        r = ParticleRecord(
+            method="m",
+            replicate=0,
+            seed=1,
+            step=0,
+            params={},
+            loss=0.1,
+        )
+        assert r.worker_id is None
+        assert r.sim_start_time is None
+        assert r.sim_end_time is None
+        assert r.generation is None
+
 
 class TestRecordWriter:
     def test_creates_file(self, tmp_output_dir):
@@ -122,3 +136,42 @@ class TestRecordWriter:
             reader = csv.DictReader(f)
             rows = list(reader)
         assert rows[0]["weight"] == ""
+
+    def test_csv_roundtrip_with_worker_events(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        rec = make_record(
+            worker_id="rank_3",
+            sim_start_time=1.2,
+            sim_end_time=2.5,
+            generation=2,
+        )
+        writer = RecordWriter(path)
+        writer.write([rec])
+        with open(path) as f:
+            row = next(csv.DictReader(f))
+        loaded = ParticleRecord.from_csv_row(row)
+        assert loaded.worker_id == "rank_3"
+        assert loaded.sim_start_time == pytest.approx(1.2)
+        assert loaded.sim_end_time == pytest.approx(2.5)
+        assert loaded.generation == 2
+        assert loaded.wall_time == pytest.approx(rec.wall_time)
+
+    def test_csv_roundtrip_with_none_worker_events(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        rec = make_record(
+            worker_id=None,
+            sim_start_time=None,
+            sim_end_time=None,
+            generation=None,
+        )
+        writer = RecordWriter(path)
+        writer.write([rec])
+        with open(path) as f:
+            row = next(csv.DictReader(f))
+        loaded = ParticleRecord.from_csv_row(row)
+        assert loaded.worker_id is None
+        assert loaded.sim_start_time is None
+        assert loaded.sim_end_time is None
+        assert loaded.generation is None

@@ -121,6 +121,17 @@ class TestRunPropulateAbc:
         assert math.isfinite(r.loss) and r.loss >= 0.0
         assert r.wall_time >= 0.0
 
+    def test_records_have_sim_end_time(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "run").ensure()
+        records = run_propulate_abc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=13,
+        )
+        assert all(r.sim_end_time is not None for r in records)
+        assert all(r.sim_end_time >= 0.0 for r in records)
+        assert all(r.wall_time == pytest.approx(r.sim_end_time) for r in records)
+
     def test_records_count_matches_max_simulations(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
         bm = _gaussian_bm()
@@ -464,6 +475,31 @@ class TestAbcSmcBaseline:
         cfg = {**_test_inference_cfg()}  # no n_generations key
         records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
         assert isinstance(records, list)
+
+    def test_records_have_generation(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 3, "k": 5}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        assert all(r.generation is not None for r in records)
+        generations = sorted({r.generation for r in records})
+        assert generations == list(range(len(generations)))
+
+    def test_records_have_generation_timing(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc").ensure()
+        cfg = {**_test_inference_cfg(), "n_generations": 2, "k": 5}
+        records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, 0, 1)
+        timed = [
+            r for r in records
+            if r.sim_start_time is not None and r.sim_end_time is not None
+        ]
+        assert timed
+        assert all(r.sim_end_time >= r.sim_start_time for r in timed)
 
 
 # ---------------------------------------------------------------------------

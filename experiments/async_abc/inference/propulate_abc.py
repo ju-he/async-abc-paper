@@ -120,11 +120,17 @@ def run_propulate_abc(
         params = {key: float(ind[key]) for key in limits}
         weight = float(ind.weight) if ind.weight is not None else None
         tolerance = float(ind.tolerance) if ind.tolerance is not None else None
-        wall_time = (
+        sim_end_time = (
             float(ind.evaltime) - run_start
             if hasattr(ind, "evaltime") and ind.evaltime is not None
             else 0.0
         )
+        sim_start_time = (
+            sim_end_time - float(ind.evalperiod)
+            if hasattr(ind, "evalperiod") and ind.evalperiod is not None
+            else None
+        )
+        generation = int(ind.generation) if getattr(ind, "generation", None) is not None else None
         records.append(ParticleRecord(
             method="async_propulate_abc",
             replicate=replicate,
@@ -134,7 +140,11 @@ def run_propulate_abc(
             loss=float(ind.loss),
             weight=weight,
             tolerance=tolerance,
-            wall_time=wall_time,
+            wall_time=sim_end_time,
+            worker_id=str(ind.rank) if getattr(ind, "rank", None) is not None else None,
+            sim_start_time=sim_start_time,
+            sim_end_time=sim_end_time,
+            generation=generation,
         ))
 
     return records

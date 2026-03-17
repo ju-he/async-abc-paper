@@ -5,8 +5,7 @@ records to a CSV file, flattening the ``params`` dict into ``param_<key>``
 columns.  The header is written once on first write; subsequent calls append.
 """
 import csv
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -46,27 +45,88 @@ class ParticleRecord:
     weight: Optional[float] = None
     tolerance: Optional[float] = None
     wall_time: float = 0.0
+    worker_id: Optional[str] = None
+    sim_start_time: Optional[float] = None
+    sim_end_time: Optional[float] = None
+    generation: Optional[int] = None
+
+    def to_csv_row(self, param_keys: List[str]) -> Dict[str, Any]:
+        row: Dict[str, Any] = {
+            "method": self.method,
+            "replicate": self.replicate,
+            "seed": self.seed,
+            "step": self.step,
+        }
+        for key in param_keys:
+            row[f"param_{key}"] = self.params.get(key, "")
+        row["loss"] = self.loss
+        row["weight"] = "" if self.weight is None else self.weight
+        row["tolerance"] = "" if self.tolerance is None else self.tolerance
+        row["wall_time"] = self.wall_time
+        row["worker_id"] = "" if self.worker_id is None else self.worker_id
+        row["sim_start_time"] = "" if self.sim_start_time is None else self.sim_start_time
+        row["sim_end_time"] = "" if self.sim_end_time is None else self.sim_end_time
+        row["generation"] = "" if self.generation is None else self.generation
+        return row
+
+    @classmethod
+    def from_csv_row(cls, row: Dict[str, str]) -> "ParticleRecord":
+        params = {
+            key.removeprefix("param_"): float(value)
+            for key, value in row.items()
+            if key.startswith("param_") and value != ""
+        }
+        return cls(
+            method=row["method"],
+            replicate=int(row["replicate"]),
+            seed=int(row["seed"]),
+            step=int(row["step"]),
+            params=params,
+            loss=float(row["loss"]),
+            weight=_parse_optional_float(row.get("weight")),
+            tolerance=_parse_optional_float(row.get("tolerance")),
+            wall_time=float(row.get("wall_time", 0.0) or 0.0),
+            worker_id=_parse_optional_str(row.get("worker_id")),
+            sim_start_time=_parse_optional_float(row.get("sim_start_time")),
+            sim_end_time=_parse_optional_float(row.get("sim_end_time")),
+            generation=_parse_optional_int(row.get("generation")),
+        )
 
 
 # Fixed columns that appear in the CSV before and after the param columns
 _PREFIX_COLS = ["method", "replicate", "seed", "step"]
-_SUFFIX_COLS = ["loss", "weight", "tolerance", "wall_time"]
+_SUFFIX_COLS = [
+    "loss",
+    "weight",
+    "tolerance",
+    "wall_time",
+    "worker_id",
+    "sim_start_time",
+    "sim_end_time",
+    "generation",
+]
+
+
+def _parse_optional_float(value: Optional[str]) -> Optional[float]:
+    if value in (None, ""):
+        return None
+    return float(value)
+
+
+def _parse_optional_int(value: Optional[str]) -> Optional[int]:
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def _parse_optional_str(value: Optional[str]) -> Optional[str]:
+    if value in (None, ""):
+        return None
+    return value
 
 
 def _record_to_row(record: ParticleRecord, param_keys: List[str]) -> Dict[str, Any]:
-    row: Dict[str, Any] = {
-        "method": record.method,
-        "replicate": record.replicate,
-        "seed": record.seed,
-        "step": record.step,
-    }
-    for k in param_keys:
-        row[f"param_{k}"] = record.params.get(k, "")
-    row["loss"] = record.loss
-    row["weight"] = "" if record.weight is None else record.weight
-    row["tolerance"] = "" if record.tolerance is None else record.tolerance
-    row["wall_time"] = record.wall_time
-    return row
+    return record.to_csv_row(param_keys)
 
 
 class RecordWriter:
