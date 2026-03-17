@@ -10,7 +10,7 @@
 #SBATCH --output=/tmp/abc_test_all-%j.out
 # Override SLURM log path at submission time: sbatch --output=<dir>/abc_test_all-%j.out ...
 
-nastjapy_path=NASTJAPY_PATH
+nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
 output_dir="${1:?Usage: $(basename "$0") <output_dir> [--extend]}"
 extend_flag="${2:-}"
 experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
