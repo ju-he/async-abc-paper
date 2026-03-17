@@ -214,3 +214,54 @@ class TestRuntimeHeterogeneityRunner:
         _run_script("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json", tmp_output_dir)
         plots_dir = tmp_output_dir / "runtime_heterogeneity" / "plots"
         assert (plots_dir / "worker_gantt.pdf").exists()
+
+
+# ---------------------------------------------------------------------------
+# Straggler runner
+# ---------------------------------------------------------------------------
+
+class TestStragglerRunner:
+    def test_straggler_runner_test_mode(self, tmp_path, straggler_config_file):
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(SCRIPTS_DIR / "straggler_runner.py"),
+                "--config",
+                str(straggler_config_file),
+                "--output-dir",
+                str(tmp_path),
+                "--test",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert result.returncode == 0, f"Runner failed:\n{result.stderr}"
+        csv_path = tmp_path / "straggler" / "data" / "raw_results.csv"
+        assert csv_path.exists()
+        with open(csv_path) as f:
+            rows = list(csv.DictReader(f))
+        methods = {r["method"] for r in rows}
+        assert any("straggler_slowdown" in method for method in methods)
+
+    def test_straggler_runner_tags_records(self, tmp_path, straggler_config_file):
+        subprocess.run(
+            [
+                PYTHON,
+                str(SCRIPTS_DIR / "straggler_runner.py"),
+                "--config",
+                str(straggler_config_file),
+                "--output-dir",
+                str(tmp_path),
+                "--test",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        csv_path = tmp_path / "straggler" / "data" / "raw_results.csv"
+        with open(csv_path) as f:
+            rows = list(csv.DictReader(f))
+        methods = {r["method"] for r in rows}
+        assert any("1x" in method for method in methods)
+        assert any("5x" in method for method in methods)

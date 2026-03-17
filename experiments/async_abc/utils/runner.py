@@ -93,6 +93,18 @@ def compute_scaling_factor(
         factor *= n_trials
         note = f"{full_sims} sims × {n_trials} SBC trials, {full_workers} workers"
 
+    elif "straggler" in cfg:
+        straggler = cfg["straggler"]
+        slowdown_factors = straggler.get("slowdown_factor", [1])
+        base_sleep_s = float(straggler.get("base_sleep_s", 0.0))
+        sims_per_sweep = full_sims * full_reps / full_workers
+        extra_seconds = sum(float(s) * base_sleep_s * sims_per_sweep for s in slowdown_factors)
+        factor *= len(slowdown_factors)
+        note = (
+            f"{full_sims} sims × {full_reps} reps, {len(slowdown_factors)} slowdown levels, "
+            f"+{format_duration(extra_seconds)} straggler sleep"
+        )
+
     else:
         note = f"{full_sims} sims × {full_reps} reps, {full_workers} workers"
 

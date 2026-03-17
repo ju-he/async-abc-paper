@@ -16,6 +16,7 @@ CONFIG_FILES = [
     "gandk.json",
     "lotka_volterra.json",
     "sbc.json",
+    "straggler.json",
     "runtime_heterogeneity.json",
     "scaling.json",
     "sensitivity.json",
@@ -28,6 +29,7 @@ EXPERIMENT_NAMES = [
     "gandk",
     "lotka_volterra",
     "sbc",
+    "straggler",
     "runtime_heterogeneity",
     "scaling",
     "sensitivity",
@@ -187,4 +189,11 @@ class TestPhase3ConfigPlots:
 
     def test_runtime_heterogeneity_enables_gantt(self):
         cfg = json.loads((CONFIGS_DIR / "runtime_heterogeneity.json").read_text())
+        assert cfg["plots"].get("gantt") is True
+
+
+class TestPhase5ConfigPlots:
+    def test_straggler_enables_plots(self):
+        cfg = json.loads((CONFIGS_DIR / "straggler.json").read_text())
+        assert cfg["plots"].get("throughput_vs_slowdown") is True
         assert cfg["plots"].get("gantt") is True

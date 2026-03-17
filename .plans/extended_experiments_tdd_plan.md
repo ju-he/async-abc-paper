@@ -582,6 +582,8 @@ coverage tables for async_propulate_abc vs abc_smc_baseline on gaussian_mean.
 
 ## Phase 5 — Straggler Tolerance Experiment
 
+Status: completed on 2026-03-17
+
 ### Goal
 
 Show that async ABC degrades gracefully when one worker permanently runs slowly
@@ -650,9 +652,21 @@ High-level flow:
 4. Write results CSV + metadata
 5. `compute_scaling_factor` already handles basic configs; add `straggler` block case analogous to `heterogeneity` (compute expected sleep overhead per sigma level)
 
+Implemented note:
+- Added `configs/straggler.json`, `scripts/straggler_runner.py`, a `straggler`
+  branch in `compute_scaling_factor()`, and `run_all` registry support.
+- The runner uses a custom execution loop with `RecordWriter` rather than
+  `run_experiment()`, because slowdown tags must be applied before rows are
+  written to `raw_results.csv`.
+- The slowdown wrapper uses MPI rank when available and falls back to
+  multiprocessing worker identity otherwise; in test mode the sleep is skipped.
+- The runner exports `raw_results.csv`, `throughput_vs_slowdown_summary.csv`,
+  a throughput-vs-slowdown figure, and a worker Gantt plot at the worst
+  slowdown level.
+
 ### TDD steps
 
-**Step 5.1 — Extend** `experiments/tests/test_runners.py`:
+**Step 5.1 — Extend** `experiments/tests/test_runners.py`: complete
 
 ```python
 def test_straggler_runner_test_mode(tmp_path, straggler_config_file):
@@ -672,9 +686,15 @@ def test_straggler_runner_tags_records(tmp_path, straggler_config_file):
     ...
 ```
 
-**Step 5.2 — Implement** `straggler_runner.py`
+**Step 5.2 — Implement** `straggler_runner.py`: complete
 
-**Step 5.3 — Run tests** — all Phase 5 tests green
+**Step 5.3 — Run tests**: complete
+
+Verified:
+- `python -m pytest tests/test_runners.py -q -k 'StragglerRunner'` → 2 passed
+- `python -m pytest tests/test_phase6.py -q -k 'Phase5ConfigPlots or straggler.json'` → 4 passed
+- `python -m pytest tests/test_config.py -q` → 24 passed
+- `python -m pytest tests/test_phase6.py -q -k 'config_passes_schema_validation or config_file_exists'` → 18 passed, 25 deselected
 
 ### Commit message
 ```
@@ -757,7 +777,7 @@ Mark each phase ✅ when its commit is made.
 - [✅] Phase 2 — Analysis module
 - [✅] Phase 3 — New visualizations
 - [✅] Phase 4 — SBC runner
-- [ ] Phase 5 — Straggler experiment
+- [✅] Phase 5 — Straggler experiment
 - [ ] Phase 6 — tol_init sensitivity
 
 ## Resolved Design Decisions

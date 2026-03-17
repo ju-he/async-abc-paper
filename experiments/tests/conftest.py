@@ -94,6 +94,48 @@ def sbc_config_file(tmp_path):
 
 
 @pytest.fixture
+def straggler_config_file(tmp_path):
+    cfg = {
+        "experiment_name": "straggler",
+        "benchmark": {
+            "name": "gaussian_mean",
+            "observed_data_seed": 42,
+            "n_obs": 40,
+            "true_mu": 0.0,
+            "sigma_obs": 1.0,
+            "prior_low": -5.0,
+            "prior_high": 5.0,
+        },
+        "methods": ["async_propulate_abc", "abc_smc_baseline"],
+        "inference": {
+            "max_simulations": 200,
+            "n_workers": 2,
+            "k": 20,
+            "tol_init": 5.0,
+            "n_generations": 2,
+            "scheduler_type": "acceptance_rate",
+            "perturbation_scale": 0.8,
+        },
+        "execution": {
+            "n_replicates": 1,
+            "base_seed": 0,
+        },
+        "straggler": {
+            "straggler_rank": 0,
+            "base_sleep_s": 0.1,
+            "slowdown_factor": [1, 5],
+        },
+        "plots": {
+            "throughput_vs_slowdown": True,
+            "gantt": True,
+        },
+    }
+    path = tmp_path / "straggler.json"
+    path.write_text(json.dumps(cfg))
+    return path
+
+
+@pytest.fixture
 def sample_records():
     return [
         ParticleRecord(

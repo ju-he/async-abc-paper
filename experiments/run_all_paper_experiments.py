@@ -36,6 +36,7 @@ EXPERIMENT_REGISTRY = {
     "gandk": ("gandk_runner.py", "gandk.json"),
     "lotka_volterra": ("lotka_volterra_runner.py", "lotka_volterra.json"),
     "sbc": ("sbc_runner.py", "sbc.json"),
+    "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),
     "scaling": ("scaling_runner.py", "scaling.json"),
     "sensitivity": ("sensitivity_runner.py", "sensitivity.json"),
