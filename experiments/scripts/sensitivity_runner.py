@@ -6,6 +6,7 @@ writes results to a separate CSV named after the variant.
 """
 import itertools
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -17,7 +18,7 @@ from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
 from async_abc.plotting.reporters import plot_sensitivity_summary
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import make_arg_parser
+from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -50,6 +51,7 @@ def main() -> None:
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
+    experiment_start = time.time()
     for variant in variants:
         # Build a unique name from the variant parameters
         variant_name = "_".join(f"{k}{v}" for k, v in sorted(variant.items()))
@@ -67,6 +69,19 @@ def main() -> None:
                 for r in records:
                     r.method = f"{method}__{'__'.join(f'{k}_{v}' for k, v in sorted(variant.items()))}"
                 writer.write(records)
+
+    experiment_elapsed = time.time() - experiment_start
+    name = cfg["experiment_name"]
+    estimated = None
+    print(f"[{name}] Done in {format_duration(experiment_elapsed)}", flush=True)
+    if args.test:
+        factor, extra, note = compute_scaling_factor(args.config)
+        estimated = experiment_elapsed * factor + extra
+        print(
+            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
+            flush=True,
+        )
+    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("sensitivity_heatmap"):

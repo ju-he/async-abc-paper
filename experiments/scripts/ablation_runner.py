@@ -5,6 +5,7 @@ Each entry in ``ablation_variants`` overrides inference parameters and
 produces its own CSV file, enabling component-by-component analysis.
 """
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -16,7 +17,7 @@ from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord, RecordWriter
 from async_abc.plotting.reporters import plot_ablation_summary
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import make_arg_parser
+from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -33,6 +34,7 @@ def main() -> None:
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
+    experiment_start = time.time()
     for variant in variants:
         name = variant.get("name", "unnamed")
         # Merge base inference config with variant overrides (exclude "name" key)
@@ -50,6 +52,19 @@ def main() -> None:
                 for r in records:
                     r.method = f"{method}__{name}"
                 writer.write(records)
+
+    experiment_elapsed = time.time() - experiment_start
+    exp_name = cfg["experiment_name"]
+    estimated = None
+    print(f"[{exp_name}] Done in {format_duration(experiment_elapsed)}", flush=True)
+    if args.test:
+        factor, extra, note = compute_scaling_factor(args.config)
+        estimated = experiment_elapsed * factor + extra
+        print(
+            f"[{exp_name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
+            flush=True,
+        )
+    write_timing_csv(output_dir.data / "timing.csv", exp_name, experiment_elapsed, estimated, args.test)
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("ablation_comparison"):

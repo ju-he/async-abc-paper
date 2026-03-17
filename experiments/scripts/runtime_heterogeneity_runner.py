@@ -20,7 +20,7 @@ from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.reporters import plot_archive_evolution, plot_posterior
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import make_arg_parser, run_experiment
+from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_experiment, write_timing_csv
 from async_abc.benchmarks import make_benchmark
 
 
@@ -59,6 +59,7 @@ def main() -> None:
     original_simulate = bm.simulate
     all_records = []
 
+    experiment_start = time.time()
     for sigma in sigma_levels:
         wrapped_simulate = _make_heterogeneous_simulate(
             original_simulate, mu, sigma, seed=42, test_mode=args.test
@@ -71,6 +72,19 @@ def main() -> None:
         all_records.extend(records)
 
     bm.simulate = original_simulate
+
+    experiment_elapsed = time.time() - experiment_start
+    name = cfg["experiment_name"]
+    estimated = None
+    print(f"[{name}] Done in {format_duration(experiment_elapsed)}", flush=True)
+    if args.test:
+        factor, extra, note = compute_scaling_factor(args.config)
+        estimated = experiment_elapsed * factor + extra
+        print(
+            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
+            flush=True,
+        )
+    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("posterior"):

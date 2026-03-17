@@ -17,7 +17,7 @@ from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.reporters import plot_scaling_summary
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import make_arg_parser
+from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -40,6 +40,7 @@ def main() -> None:
     seeds = make_seeds(n_replicates, base_seed)
 
     throughput_rows = []
+    experiment_start = time.time()
     for n_workers in worker_counts:
         inference_cfg = {**cfg["inference"], "n_workers": n_workers}
         for method in cfg["methods"]:
@@ -61,6 +62,19 @@ def main() -> None:
                     "wall_time_s": elapsed,
                     "throughput_sims_per_s": throughput,
                 })
+
+    experiment_elapsed = time.time() - experiment_start
+    name = cfg["experiment_name"]
+    estimated = None
+    print(f"[{name}] Done in {format_duration(experiment_elapsed)}", flush=True)
+    if args.test:
+        factor, extra, note = compute_scaling_factor(args.config)
+        estimated = experiment_elapsed * factor + extra
+        print(
+            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
+            flush=True,
+        )
+    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
     # Write throughput summary
     throughput_path = output_dir.data / "throughput_summary.csv"

@@ -1,9 +1,13 @@
 """Shared experiment execution logic used by all runner scripts."""
 import argparse
+import csv
+import json
+import math
 import sys
 import warnings
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..benchmarks import make_benchmark
 from ..inference.method_registry import run_method
@@ -11,6 +15,117 @@ from ..io.config import load_config
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, RecordWriter
 from ..utils.seeding import make_seeds
+
+
+def format_duration(seconds: float) -> str:
+    """Format a duration in seconds as a human-readable string."""
+    s = int(seconds)
+    if s < 60:
+        return f"{seconds:.1f}s"
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {sec:02d}s"
+    return f"{m}m {sec:02d}s"
+
+
+def compute_scaling_factor(
+    config_path: Union[str, Path],
+) -> Tuple[float, float, str]:
+    """Estimate how much longer the full run takes compared to a test run.
+
+    Returns
+    -------
+    factor : float
+        Linear multiplier: ``test_elapsed * factor`` estimates the compute portion.
+    extra_seconds : float
+        Additional fixed time beyond the linear scaling (expected sleep for
+        runtime_heterogeneity experiments; 0 for all others).
+    note : str
+        Parenthetical describing what the full run entails.
+    """
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    full_sims = cfg["inference"]["max_simulations"]
+    full_workers = cfg["inference"]["n_workers"]
+    full_reps = cfg["execution"]["n_replicates"]
+
+    # Apply TEST_MODE_OVERRIDES clamps to get test-mode values
+    test_sims = min(full_sims, 500)
+    test_workers = min(full_workers, 8)
+    test_reps = min(full_reps, 2)
+
+    factor = (full_sims * full_reps / full_workers) / (
+        test_sims * test_reps / test_workers
+    )
+    extra_seconds = 0.0
+
+    if "sensitivity_grid" in cfg:
+        grid = cfg["sensitivity_grid"]
+        full_grid_size = 1
+        for v in grid.values():
+            full_grid_size *= len(v)
+        factor *= full_grid_size  # test shrinks each axis to 1 value
+        note = f"{full_sims} sims × {full_reps} reps, {full_grid_size} grid variants"
+
+    elif "scaling" in cfg:
+        n_wc = len(cfg["scaling"].get("worker_counts", [1]))
+        factor *= n_wc  # test reduces to [1]
+        note = f"{full_sims} sims × {full_reps} reps, {n_wc} worker configs"
+
+    elif "heterogeneity" in cfg:
+        het = cfg["heterogeneity"]
+        mu = float(het.get("mu", 0.0))
+        sigmas = het.get("sigma_levels", [het.get("sigma", 1.0)])
+        # Expected sleep per sim: exp(mu + sigma^2/2); multiply by sequential sims per worker
+        sims_per_sigma = full_sims * full_reps / full_workers
+        extra_seconds = sum(
+            math.exp(mu + s ** 2 / 2) * sims_per_sigma for s in sigmas
+        )
+        note = (
+            f"{full_sims} sims × {full_reps} reps, "
+            f"+{format_duration(extra_seconds)} sleep"
+        )
+
+    else:
+        note = f"{full_sims} sims × {full_reps} reps, {full_workers} workers"
+
+    return factor, extra_seconds, note
+
+
+_TIMING_FIELDNAMES = [
+    "experiment_name",
+    "elapsed_s",
+    "estimated_full_s",
+    "test_mode",
+    "timestamp",
+]
+
+
+def write_timing_csv(
+    path: Union[str, Path],
+    experiment_name: str,
+    elapsed_s: float,
+    estimated_full_s: Optional[float],
+    test_mode: bool,
+) -> None:
+    """Append one timing row to a CSV file, writing the header if needed."""
+    path = Path(path)
+    write_header = not path.exists() or path.stat().st_size == 0
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_TIMING_FIELDNAMES)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({
+            "experiment_name": experiment_name,
+            "elapsed_s": round(elapsed_s, 3),
+            "estimated_full_s": (
+                round(estimated_full_s, 3) if estimated_full_s is not None else ""
+            ),
+            "test_mode": test_mode,
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+        })
 
 
 def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
