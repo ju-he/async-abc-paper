@@ -154,6 +154,8 @@ timing bounds and generation indices from pyABC history.
 
 ## Phase 2 — Analysis Module
 
+Status: completed on 2026-03-17
+
 ### Goal
 
 A standalone `async_abc/analysis/` module that computes derived metrics from
@@ -170,6 +172,11 @@ async_abc/analysis/
 ├── trajectory.py       # tolerance and loss over simulation step / wall_time
 └── barrier.py          # generation barrier overhead from abc_smc_baseline data
 ```
+
+Implemented note:
+- Added `async_abc.analysis` with the planned public modules plus a small
+  internal `_helpers.py` adapter to flatten `ParticleRecord` iterables into
+  DataFrames for reuse across the pure analysis functions.
 
 ### `ess.py`
 
@@ -228,7 +235,7 @@ def barrier_overhead_fraction(records: list[ParticleRecord]) -> pd.DataFrame:
 
 ### TDD steps
 
-**Step 2.1 — New file** `experiments/tests/test_analysis.py`:
+**Step 2.1 — New file** `experiments/tests/test_analysis.py`: complete
 
 ```python
 def test_compute_ess_uniform_weights():
@@ -262,9 +269,13 @@ def test_generation_spans_requires_generation_field(abc_smc_records):
     assert (df["gen_end"] >= df["gen_start"]).all()
 ```
 
-**Step 2.2 — Implement** `ess.py`, `convergence.py`, `trajectory.py`, `barrier.py`
+**Step 2.2 — Implement** `ess.py`, `convergence.py`, `trajectory.py`, `barrier.py`: complete
 
-**Step 2.3 — Run tests** — all Phase 2 tests green
+**Step 2.3 — Run tests**: complete
+
+Verified:
+- `python -m pytest tests/test_analysis.py -q` → 9 passed
+- `python -m pytest tests/test_records.py tests/test_inference.py -q` → 65 passed, 1 skipped
 
 ### Commit message
 ```

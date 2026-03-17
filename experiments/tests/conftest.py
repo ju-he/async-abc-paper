@@ -9,6 +9,8 @@ import pytest
 # Make async_abc importable from the experiments/ directory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from async_abc.io.records import ParticleRecord
+
 MINIMAL_CONFIG = {
     "experiment_name": "test_experiment",
     "benchmark": {
@@ -50,3 +52,119 @@ def config_file(tmp_path, minimal_config):
 @pytest.fixture
 def tmp_output_dir(tmp_path):
     return tmp_path / "results"
+
+
+@pytest.fixture
+def sample_records():
+    return [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=1,
+            params={"mu": 2.0},
+            loss=2.0,
+            weight=1.0,
+            tolerance=5.0,
+            wall_time=0.2,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=10,
+            params={"mu": 1.0},
+            loss=1.0,
+            weight=1.0,
+            tolerance=2.5,
+            wall_time=1.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=25,
+            params={"mu": 0.5},
+            loss=0.5,
+            weight=0.5,
+            tolerance=1.0,
+            wall_time=2.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=50,
+            params={"mu": 0.1},
+            loss=0.1,
+            weight=0.5,
+            tolerance=0.5,
+            wall_time=3.0,
+        ),
+    ]
+
+
+@pytest.fixture
+def abc_smc_records():
+    return [
+        ParticleRecord(
+            method="abc_smc_baseline",
+            replicate=0,
+            seed=2,
+            step=1,
+            params={"mu": 0.8},
+            loss=0.8,
+            weight=0.5,
+            tolerance=1.0,
+            wall_time=1.2,
+            worker_id="0",
+            sim_start_time=0.0,
+            sim_end_time=1.0,
+            generation=0,
+        ),
+        ParticleRecord(
+            method="abc_smc_baseline",
+            replicate=0,
+            seed=2,
+            step=2,
+            params={"mu": 0.6},
+            loss=0.6,
+            weight=0.5,
+            tolerance=1.0,
+            wall_time=1.2,
+            worker_id="1",
+            sim_start_time=0.0,
+            sim_end_time=1.2,
+            generation=0,
+        ),
+        ParticleRecord(
+            method="abc_smc_baseline",
+            replicate=0,
+            seed=2,
+            step=3,
+            params={"mu": 0.3},
+            loss=0.3,
+            weight=0.5,
+            tolerance=0.5,
+            wall_time=2.6,
+            worker_id="0",
+            sim_start_time=1.2,
+            sim_end_time=2.2,
+            generation=1,
+        ),
+        ParticleRecord(
+            method="abc_smc_baseline",
+            replicate=0,
+            seed=2,
+            step=4,
+            params={"mu": 0.1},
+            loss=0.1,
+            weight=0.5,
+            tolerance=0.5,
+            wall_time=2.6,
+            worker_id="1",
+            sim_start_time=1.2,
+            sim_end_time=2.6,
+            generation=1,
+        ),
+    ]
