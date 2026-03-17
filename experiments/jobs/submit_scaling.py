@@ -118,6 +118,11 @@ def main() -> None:
         help="Maximum time limit per job in hours. Default: 24.0",
     )
     parser.add_argument(
+        "--extend",
+        action="store_true",
+        help="Pass --extend to scaling_runner.py to skip already-completed worker counts.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print sbatch commands without submitting.",
@@ -185,6 +190,7 @@ def main() -> None:
             f"--output={output_dir}/abc_scaling_{n}-%j.out",
             str(scaling_script),
             str(output_dir),
+            *(["--extend"] if args.extend else []),
         ]
 
         tag = "(dry run)" if args.dry_run else ""

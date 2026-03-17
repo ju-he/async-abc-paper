@@ -27,7 +27,7 @@ def main() -> None:
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     t0 = time.time()
-    records = run_experiment(cfg, output_dir)
+    records = run_experiment(cfg, output_dir, extend=args.extend)
     elapsed = time.time() - t0
 
     name = cfg["experiment_name"]

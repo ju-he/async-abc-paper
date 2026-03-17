@@ -19,7 +19,8 @@
 #SBATCH --output=/tmp/abc_scaling-%j.out
 
 nastjapy_path=NASTJAPY_PATH
-output_dir="${1:?Usage: scaling_single.sh <output_dir>}"
+output_dir="${1:?Usage: scaling_single.sh <output_dir> [--extend]}"
+extend_flag="${2:-}"
 experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
 
 n_workers="${SLURM_NTASKS}"
@@ -34,4 +35,5 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 srun -n "$n_workers" python "$experiments_dir/scripts/scaling_runner.py" \
     --config "$experiments_dir/configs/scaling.json" \
     --output-dir "$output_dir" \
-    --n-workers "$n_workers"
+    --n-workers "$n_workers" \
+    ${extend_flag:+"$extend_flag"}

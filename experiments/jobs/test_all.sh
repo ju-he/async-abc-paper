@@ -7,10 +7,12 @@
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
 #SBATCH --job-name=abc_test_all
-#SBATCH --output=OUTPUT_DIR/abc_test_all-%j.out
+#SBATCH --output=/tmp/abc_test_all-%j.out
+# Override SLURM log path at submission time: sbatch --output=<dir>/abc_test_all-%j.out ...
 
 nastjapy_path=NASTJAPY_PATH
-output_dir=OUTPUT_DIR
+output_dir="${1:?Usage: $(basename "$0") <output_dir> [--extend]}"
+extend_flag="${2:-}"
 experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
 
 module restore nastjapy
@@ -24,4 +26,5 @@ srun python "$experiments_dir/run_all_paper_experiments.py" \
     --test \
     --experiments gaussian_mean gandk lotka_volterra sbc \
                   straggler runtime_heterogeneity sensitivity ablation \
-    --output-dir "$output_dir"
+    --output-dir "$output_dir" \
+    ${extend_flag:+"$extend_flag"}

@@ -148,6 +148,34 @@ def write_timing_csv(
         })
 
 
+def find_completed_combinations(csv_path: Path, key_cols: List[str]) -> set:
+    """Return the set of key tuples already present in an existing CSV.
+
+    Parameters
+    ----------
+    csv_path:
+        Path to the CSV file to inspect.
+    key_cols:
+        Column names whose combined values identify a unique run
+        (e.g. ``["method", "replicate"]``).
+
+    Returns
+    -------
+    set of tuple
+        Each element is a tuple of string values, one per key column.
+        Returns an empty set if the file is missing or empty.
+    """
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return set()
+    with open(csv_path) as f:
+        rows = list(csv.DictReader(f))
+    return {
+        tuple(row[c] for c in key_cols)
+        for row in rows
+        if all(c in row for c in key_cols)
+    }
+
+
 def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
     """Return a pre-configured ArgumentParser for experiment runners."""
     p = argparse.ArgumentParser(description=description)
@@ -156,6 +184,8 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
                    help="Root directory for results.")
     p.add_argument("--test", action="store_true",
                    help="Test mode: small budget, ≤8 workers.")
+    p.add_argument("--extend", action="store_true",
+                   help="Skip parameter combinations already present in existing CSVs.")
     return p
 
 
@@ -165,6 +195,7 @@ def run_experiment(
     benchmark=None,
     methods: Optional[List[str]] = None,
     csv_name: str = "raw_results.csv",
+    extend: bool = False,
 ) -> List[ParticleRecord]:
     """Run all methods × replicates and write results to CSV.
 
@@ -180,6 +211,9 @@ def run_experiment(
         Method names to run.  Defaults to ``cfg["methods"]``.
     csv_name:
         Filename for the output CSV inside ``output_dir.data``.
+    extend:
+        When ``True``, skip ``(method, replicate)`` combinations that already
+        have at least one row in the existing CSV.
 
     Returns
     -------
@@ -196,11 +230,17 @@ def run_experiment(
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
-    writer = RecordWriter(output_dir.data / csv_name)
+    csv_path = output_dir.data / csv_name
+    done = find_completed_combinations(csv_path, ["method", "replicate"]) if extend else set()
+
+    writer = RecordWriter(csv_path)
     all_records: List[ParticleRecord] = []
 
     for method in methods:
         for replicate, seed in enumerate(seeds):
+            if (method, str(replicate)) in done:
+                print(f"[runner] --extend: skipping {method} replicate={replicate} (already done)", flush=True)
+                continue
             try:
                 records = run_method(
                     method, benchmark.simulate, benchmark.limits,

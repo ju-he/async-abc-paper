@@ -17,7 +17,7 @@ from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.reporters import plot_scaling_summary
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -45,12 +45,18 @@ def main() -> None:
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
+    throughput_path = output_dir.data / "throughput_summary.csv"
+    done = find_completed_combinations(throughput_path, ["n_workers", "method", "replicate"]) if args.extend else set()
+
     throughput_rows = []
     experiment_start = time.time()
     for n_workers in worker_counts:
         inference_cfg = {**cfg["inference"], "n_workers": n_workers}
         for method in cfg["methods"]:
             for replicate, seed in enumerate(seeds):
+                if (str(n_workers), method, str(replicate)) in done:
+                    print(f"[scaling] --extend: skipping n_workers={n_workers} {method} replicate={replicate}", flush=True)
+                    continue
                 t0 = time.time()
                 records = run_method(
                     method, bm.simulate, bm.limits,
@@ -82,12 +88,14 @@ def main() -> None:
         )
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
-    # Write throughput summary
-    throughput_path = output_dir.data / "throughput_summary.csv"
+    # Write throughput summary — append when extending, overwrite otherwise
     if throughput_rows:
-        with open(throughput_path, "w", newline="") as f:
+        write_header = not args.extend or not throughput_path.exists() or throughput_path.stat().st_size == 0
+        mode = "a" if args.extend and not write_header else "w"
+        with open(throughput_path, mode, newline="") as f:
             writer = csv.DictWriter(f, fieldnames=list(throughput_rows[0].keys()))
-            writer.writeheader()
+            if write_header:
+                writer.writeheader()
             writer.writerows(throughput_rows)
 
     plots_cfg = cfg.get("plots", {})

@@ -65,7 +65,7 @@ def main() -> None:
             original_simulate, mu, sigma, seed=42, test_mode=args.test
         )
         bm.simulate = wrapped_simulate
-        records = run_experiment(cfg, output_dir, benchmark=bm)
+        records = run_experiment(cfg, output_dir, benchmark=bm, extend=args.extend)
         # Tag each record with the sigma level used
         for r in records:
             r.method = f"{r.method}__sigma{sigma}"

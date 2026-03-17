@@ -18,7 +18,7 @@ from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
 from async_abc.plotting.reporters import plot_sensitivity_summary
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -75,17 +75,23 @@ def main() -> None:
             )
             del inference_cfg["tol_init_multiplier"]
         csv_name = f"sensitivity_{variant_name}.csv"
-        writer = RecordWriter(output_dir.data / csv_name)
+        csv_path = output_dir.data / csv_name
+        done = find_completed_combinations(csv_path, ["method", "replicate"]) if args.extend else set()
+        writer = RecordWriter(csv_path)
 
         for method in cfg["methods"]:
+            tagged_method = f"{method}__{variant_name}"
             for replicate, seed in enumerate(seeds):
+                if (tagged_method, str(replicate)) in done:
+                    print(f"[sensitivity] --extend: skipping {tagged_method} replicate={replicate}", flush=True)
+                    continue
                 records = run_method(
                     method, bm.simulate, bm.limits,
                     inference_cfg, output_dir, replicate, seed,
                 )
                 # Tag records with variant info
                 for r in records:
-                    r.method = f"{method}__{variant_name}"
+                    r.method = tagged_method
                 writer.write(records)
 
     experiment_elapsed = time.time() - experiment_start

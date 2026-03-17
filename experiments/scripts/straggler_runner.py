@@ -22,7 +22,7 @@ from async_abc.io.records import RecordWriter
 from async_abc.plotting.export import save_figure
 from async_abc.plotting.reporters import plot_worker_gantt
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
@@ -104,7 +104,8 @@ def main() -> None:
     straggler_rank = int(straggler_cfg.get("straggler_rank", 0))
     base_sleep_s = float(straggler_cfg.get("base_sleep_s", 0.1))
 
-    writer = RecordWriter(output_dir.data / "raw_results.csv")
+    csv_path = output_dir.data / "raw_results.csv"
+    writer = RecordWriter(csv_path)
     seeds = make_seeds(cfg["execution"]["n_replicates"], cfg["execution"]["base_seed"])
 
     all_records = []
@@ -122,8 +123,13 @@ def main() -> None:
             test_mode=args.test,
         )
         factor_records = []
+        done = find_completed_combinations(csv_path, ["method", "replicate"]) if args.extend else set()
         for method in cfg["methods"]:
+            tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
             for replicate, seed in enumerate(seeds):
+                if (tagged_method, str(replicate)) in done:
+                    print(f"[straggler] --extend: skipping {tagged_method} replicate={replicate}", flush=True)
+                    continue
                 t0 = time.time()
                 records = run_method(
                     method,
@@ -135,7 +141,6 @@ def main() -> None:
                     seed,
                 )
                 elapsed = time.time() - t0
-                tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
                 for record in records:
                     record.method = tagged_method
                 writer.write(records)

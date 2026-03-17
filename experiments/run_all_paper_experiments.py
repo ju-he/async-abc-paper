@@ -50,6 +50,7 @@ def _run_experiment(
     config: str,
     output_dir: Path,
     test_mode: bool,
+    extend: bool = False,
 ) -> tuple:
     """Run a single experiment script as a subprocess.
 
@@ -63,6 +64,8 @@ def _run_experiment(
     ]
     if test_mode:
         cmd.append("--test")
+    if extend:
+        cmd.append("--extend")
 
     print(f"[run_all] Starting: {name}", flush=True)
     t0 = time.time()
@@ -95,6 +98,10 @@ def main() -> None:
             f"Choices: {', '.join(EXPERIMENT_REGISTRY)}"
         ),
     )
+    parser.add_argument(
+        "--extend", action="store_true",
+        help="Skip parameter combinations already present in existing CSVs.",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -112,7 +119,7 @@ def main() -> None:
 
     for name in args.experiments:
         runner, config = EXPERIMENT_REGISTRY[name]
-        rc, elapsed = _run_experiment(name, runner, config, output_dir, test_mode=args.test)
+        rc, elapsed = _run_experiment(name, runner, config, output_dir, test_mode=args.test, extend=args.extend)
         print(f"[run_all] Time:    {name} took {format_duration(elapsed)}", flush=True)
         est = None
         if args.test:
