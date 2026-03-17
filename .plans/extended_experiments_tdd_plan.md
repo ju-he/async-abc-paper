@@ -414,6 +414,8 @@ functions. Corner plot shows pairwise joint posteriors for multi-parameter model
 
 ## Phase 4 — Simulation-Based Calibration (SBC) Runner
 
+Status: completed on 2026-03-17
+
 ### Goal
 
 Empirical calibration check: draw θ* from prior, simulate observed data, run inference,
@@ -465,6 +467,13 @@ experiments/
 }
 ```
 
+Implemented note:
+- Added `execution.n_replicates = 1` in the concrete config for compatibility
+  with the existing config schema, while the SBC loop itself is driven by
+  `sbc.n_trials`.
+- Extended test-mode config overrides to clamp `sbc.n_trials`, keeping the
+  SBC runner fast enough for subprocess tests.
+
 ### `experiments/async_abc/analysis/sbc.py`
 
 ```python
@@ -482,6 +491,11 @@ def empirical_coverage(
     """Returns DataFrame(param, coverage_level, empirical_coverage)."""
 ```
 
+Implemented note:
+- The implemented summaries preserve `method` and `param` columns when present,
+  so multiple inference methods can be analyzed in one SBC run without losing
+  provenance.
+
 ### `experiments/scripts/sbc_runner.py`
 
 High-level flow:
@@ -495,9 +509,17 @@ High-level flow:
 4. Plot rank histogram and coverage table
 5. Write results CSV + metadata
 
+Implemented note:
+- The runner samples true parameters from the benchmark limits, rebuilds the
+  benchmark with `true_<param>` overrides per trial, runs each configured
+  method via `run_method()`, writes `sbc_ranks.csv` and `coverage.csv`, and
+  exports a rank histogram plus empirical-coverage figure.
+- `run_all_paper_experiments.py` was updated to register the new `sbc`
+  experiment.
+
 ### TDD steps
 
-**Step 4.1 — New file** `experiments/tests/test_sbc.py`:
+**Step 4.1 — New file** `experiments/tests/test_sbc.py`: complete
 
 ```python
 def test_compute_rank_true_below_all():
@@ -539,9 +561,13 @@ def test_sbc_runner_test_mode(tmp_path, sbc_config_file):
     assert (tmp_path / "sbc" / "data" / "sbc_ranks.csv").exists()
 ```
 
-**Step 4.2 — Implement** `sbc.py`, then `sbc_runner.py`
+**Step 4.2 — Implement** `sbc.py`, then `sbc_runner.py`: complete
 
-**Step 4.3 — Run tests** — all Phase 4 tests green
+**Step 4.3 — Run tests**: complete
+
+Verified:
+- `python -m pytest tests/test_sbc.py -q` → 6 passed
+- `python -m pytest tests/test_config.py tests/test_phase6.py -q -k 'sbc or config_passes_schema_validation or config_file_exists'` → 17 passed, 46 deselected
 
 ### Commit message
 ```
@@ -727,10 +753,10 @@ Grid size: 3×3×3×4 = 108 variants, completing the hyperparameter analysis.
 
 Mark each phase ✅ when its commit is made.
 
-- [ ] Phase 1 — Extended ParticleRecord
-- [ ] Phase 2 — Analysis module
-- [ ] Phase 3 — New visualizations
-- [ ] Phase 4 — SBC runner
+- [✅] Phase 1 — Extended ParticleRecord
+- [✅] Phase 2 — Analysis module
+- [✅] Phase 3 — New visualizations
+- [✅] Phase 4 — SBC runner
 - [ ] Phase 5 — Straggler experiment
 - [ ] Phase 6 — tol_init sensitivity
 

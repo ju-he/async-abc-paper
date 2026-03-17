@@ -45,11 +45,15 @@ def _apply_test_mode(cfg: dict) -> dict:
     cfg = copy.deepcopy(cfg)
     # Clamp: use min(current, limit)
     for section, overrides in TEST_MODE_OVERRIDES.get("clamp", {}).items():
+        if section not in cfg:
+            continue
         for key, limit in overrides.items():
             current = cfg[section].get(key)
             cfg[section][key] = min(current, limit) if current is not None else limit
     # Set: unconditionally assign
     for section, overrides in TEST_MODE_OVERRIDES.get("set", {}).items():
+        if section not in cfg:
+            continue
         for key, val in overrides.items():
             cfg[section][key] = val
     return cfg

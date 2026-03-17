@@ -59,6 +59,9 @@ TEST_MODE_OVERRIDES = {
         "execution": {
             "n_replicates": 2,
         },
+        "sbc": {
+            "n_trials": 5,
+        },
     },
     "set": {
         "execution": {

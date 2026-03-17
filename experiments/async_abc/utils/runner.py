@@ -88,6 +88,11 @@ def compute_scaling_factor(
             f"+{format_duration(extra_seconds)} sleep"
         )
 
+    elif "sbc" in cfg:
+        n_trials = int(cfg["sbc"].get("n_trials", 1))
+        factor *= n_trials
+        note = f"{full_sims} sims × {n_trials} SBC trials, {full_workers} workers"
+
     else:
         note = f"{full_sims} sims × {full_reps} reps, {full_workers} workers"
 

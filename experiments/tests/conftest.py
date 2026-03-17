@@ -55,6 +55,45 @@ def tmp_output_dir(tmp_path):
 
 
 @pytest.fixture
+def sbc_config_file(tmp_path):
+    cfg = {
+        "experiment_name": "sbc",
+        "benchmark": {
+            "name": "gaussian_mean",
+            "n_obs": 40,
+            "sigma_obs": 1.0,
+            "prior_low": -5.0,
+            "prior_high": 5.0,
+        },
+        "methods": ["async_propulate_abc", "abc_smc_baseline"],
+        "inference": {
+            "max_simulations": 200,
+            "n_workers": 2,
+            "k": 20,
+            "tol_init": 5.0,
+            "n_generations": 2,
+            "scheduler_type": "acceptance_rate",
+            "perturbation_scale": 0.8,
+        },
+        "execution": {
+            "n_replicates": 1,
+            "base_seed": 0,
+        },
+        "sbc": {
+            "n_trials": 4,
+            "coverage_levels": [0.5, 0.9],
+        },
+        "plots": {
+            "rank_histogram": True,
+            "coverage_table": True,
+        },
+    }
+    path = tmp_path / "sbc.json"
+    path.write_text(json.dumps(cfg))
+    return path
+
+
+@pytest.fixture
 def sample_records():
     return [
         ParticleRecord(
