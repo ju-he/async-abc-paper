@@ -1,10 +1,13 @@
 #!/bin/bash -x
 # Run the scaling experiment for a single worker count.
-# This script is intended to be called by submit_scaling.sh, which overrides
-# --ntasks, --nodes, --time, --job-name, and --output on the sbatch command line.
+# Called by submit_scaling.py, which overrides --ntasks, --nodes, --time,
+# --job-name, and --output on the sbatch command line.
 #
-# Standalone use:
-#   sbatch --ntasks=48 --nodes=1 --time=01:00:00 scaling_single.sh
+# Usage (via submit_scaling.py, recommended):
+#   python submit_scaling.py <output_dir>
+#
+# Manual standalone use:
+#   sbatch --ntasks=48 --nodes=1 --time=01:00:00 scaling_single.sh <output_dir>
 #
 #SBATCH --account=tissuetwin
 #SBATCH --ntasks=1
@@ -13,10 +16,10 @@
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
 #SBATCH --job-name=abc_scaling
-#SBATCH --output=OUTPUT_DIR/abc_scaling-%j.out
+#SBATCH --output=/tmp/abc_scaling-%j.out
 
 nastjapy_path=NASTJAPY_PATH
-output_dir=OUTPUT_DIR
+output_dir="${1:?Usage: scaling_single.sh <output_dir>}"
 experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
 
 n_workers="${SLURM_NTASKS}"
