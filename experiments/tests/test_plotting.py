@@ -23,6 +23,7 @@ from async_abc.plotting.common import (
     gantt_plot,
     posterior_plot,
     quality_vs_time_plot,
+    sensitivity_heatmap,
     scaling_plot,
     tolerance_trajectory_plot,
     archive_evolution_plot,
@@ -171,6 +172,22 @@ class TestArchiveEvolutionPlot:
         archive_evolution_plot(sim_counts, tolerances, path_stem=tmp_path / "evo")
         rows = _read_csv(tmp_path / "evo_data.csv")
         assert set(rows[0].keys()) >= {"sim_count", "tolerance"}
+
+
+class TestSensitivityHeatmap:
+    def test_sensitivity_heatmap_supports_facets(self, tmp_path):
+        data = np.array([
+            [[1.0, 2.0], [3.0, 4.0]],
+            [[2.0, 3.0], [4.0, 5.0]],
+        ])
+        paths = sensitivity_heatmap(
+            data,
+            row_labels=["50", "100"],
+            col_labels=["0.4", "0.8"],
+            path_stem=tmp_path / "sensitivity_facet",
+            facet_labels=["0.5x", "2.0x"],
+        )
+        assert "pdf" in paths and "png" in paths and "csv" in paths
 
 
 class TestPhase3PlotFunctions:

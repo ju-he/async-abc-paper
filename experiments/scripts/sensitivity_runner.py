@@ -56,6 +56,11 @@ def main() -> None:
         # Build a unique name from the variant parameters
         variant_name = "_".join(f"{k}{v}" for k, v in sorted(variant.items()))
         inference_cfg = {**cfg["inference"], **variant}
+        if "tol_init_multiplier" in variant:
+            inference_cfg["tol_init"] = (
+                float(cfg["inference"]["tol_init"]) * float(variant["tol_init_multiplier"])
+            )
+            del inference_cfg["tol_init_multiplier"]
         csv_name = f"sensitivity_{variant_name}.csv"
         writer = RecordWriter(output_dir.data / csv_name)
 

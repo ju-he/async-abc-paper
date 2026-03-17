@@ -177,20 +177,20 @@ def plot_sensitivity_summary(
     grid: Dict[str, List],
     output_dir: OutputDir,
 ) -> None:
-    """Heatmap of mean final tolerance across a 2-parameter sensitivity grid.
-
-    Uses the first two grid axes as rows/columns; additional axes are ignored.
-    """
+    """Heatmap of mean final tolerance across the sensitivity grid."""
     axes = list(grid.keys())
     if len(axes) < 2:
         return
 
-    row_key, col_key = axes[0], axes[1]
+    row_key = "k" if "k" in grid else axes[0]
+    col_key = "perturbation_scale" if "perturbation_scale" in grid else axes[1]
+    facet_key = "tol_init_multiplier" if "tol_init_multiplier" in grid else None
     row_vals = grid[row_key]
     col_vals = grid[col_key]
+    facet_vals = grid[facet_key] if facet_key else None
 
-    # Build lookup: (row_val, col_val) → mean final tolerance
-    tol_map: Dict = {}
+    # Build lookup: (row_val, col_val, facet_val) → mean final tolerance
+    tol_map: Dict = defaultdict(list)
     for csv_path in sorted(data_dir.glob("sensitivity_*.csv")):
         rows = _read_csv(csv_path)
         if not rows:
@@ -205,25 +205,44 @@ def plot_sensitivity_summary(
 
         # Parse variant name from filename stem
         stem_str = csv_path.stem[len("sensitivity_"):]  # strip prefix
-        # stem_str looks like "k10_perturbation_scale0.4_scheduler_typeacceptance_rate"
         rv = _parse_variant_value(stem_str, row_key)
         cv = _parse_variant_value(stem_str, col_key)
+        fv = _parse_variant_value(stem_str, facet_key) if facet_key else None
         if rv is not None and cv is not None:
-            tol_map[(rv, cv)] = mean_tol
+            tol_map[(rv, cv, fv)].append(mean_tol)
 
     if not tol_map:
+        return
+
+    row_labels = [str(v) for v in row_vals]
+    col_labels = [str(v) for v in col_vals]
+    stem = output_dir.plots / "sensitivity_heatmap"
+    if facet_key and facet_vals is not None:
+        matrix = np.full((len(facet_vals), len(row_vals), len(col_vals)), np.nan)
+        for f_idx, fv in enumerate(facet_vals):
+            for i, rv in enumerate(row_vals):
+                for j, cv in enumerate(col_vals):
+                    key = (rv, cv, fv)
+                    if key in tol_map:
+                        matrix[f_idx, i, j] = float(np.mean(tol_map[key]))
+        sensitivity_heatmap(
+            matrix,
+            row_labels=row_labels,
+            col_labels=col_labels,
+            path_stem=stem,
+            facet_labels=[str(v) for v in facet_vals],
+        )
         return
 
     matrix = np.full((len(row_vals), len(col_vals)), np.nan)
     for i, rv in enumerate(row_vals):
         for j, cv in enumerate(col_vals):
-            key = (rv, cv)
-            if key in tol_map:
-                matrix[i, j] = tol_map[key]
-
-    row_labels = [str(v) for v in row_vals]
-    col_labels = [str(v) for v in col_vals]
-    stem = output_dir.plots / "sensitivity_heatmap"
+            vals = []
+            for key, key_vals in tol_map.items():
+                if key[0] == rv and key[1] == cv:
+                    vals.extend(key_vals)
+            if vals:
+                matrix[i, j] = float(np.mean(vals))
     sensitivity_heatmap(matrix, row_labels=row_labels, col_labels=col_labels, path_stem=stem)
 
 

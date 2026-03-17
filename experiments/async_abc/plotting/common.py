@@ -170,17 +170,21 @@ def sensitivity_heatmap(
     row_labels: List[str],
     col_labels: List[str],
     path_stem: Union[str, Path],
+    facet_labels: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
     """Heatmap for sensitivity / ablation results.
 
     Parameters
     ----------
     data:
-        2-D array of shape ``(len(row_labels), len(col_labels))``.
+        2-D array of shape ``(len(row_labels), len(col_labels))`` or
+        3-D array of shape ``(n_facets, len(row_labels), len(col_labels))``.
     row_labels, col_labels:
         Axis tick labels.
     path_stem:
         Destination path without extension.
+    facet_labels:
+        Optional labels for the first axis of 3-D data.
 
     Returns
     -------
@@ -188,18 +192,53 @@ def sensitivity_heatmap(
         Paths produced by :func:`save_figure`.
     """
     data = np.asarray(data, dtype=float)
-    fig, ax = plt.subplots(figsize=(max(4, len(col_labels)), max(3, len(row_labels))))
-    im = ax.imshow(data, aspect="auto", cmap="viridis")
-    fig.colorbar(im, ax=ax)
-    ax.set_xticks(range(len(col_labels)))
-    ax.set_xticklabels(col_labels, rotation=45, ha="right")
-    ax.set_yticks(range(len(row_labels)))
-    ax.set_yticklabels(row_labels)
-    fig.tight_layout()
+    if data.ndim == 2:
+        fig, ax = plt.subplots(figsize=(max(4, len(col_labels)), max(3, len(row_labels))))
+        im = ax.imshow(data, aspect="auto", cmap="viridis")
+        fig.colorbar(im, ax=ax)
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_xticklabels(col_labels, rotation=45, ha="right")
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_yticklabels(row_labels)
+        fig.tight_layout()
 
-    csv_data = {"row": row_labels}
-    for j, col in enumerate(col_labels):
-        csv_data[col] = data[:, j].tolist()
+        csv_data = {"row": row_labels}
+        for j, col in enumerate(col_labels):
+            csv_data[col] = data[:, j].tolist()
+        return save_figure(fig, path_stem, data=csv_data)
+
+    if data.ndim != 3:
+        raise ValueError("sensitivity_heatmap expects 2-D or 3-D data.")
+
+    n_facets = data.shape[0]
+    facet_labels = facet_labels or [f"facet_{i}" for i in range(n_facets)]
+    fig, axes = plt.subplots(
+        1,
+        n_facets,
+        figsize=(max(4, len(col_labels)) * n_facets, max(3, len(row_labels))),
+        squeeze=False,
+    )
+    vmin = float(np.nanmin(data))
+    vmax = float(np.nanmax(data))
+    for idx in range(n_facets):
+        ax = axes[0, idx]
+        im = ax.imshow(data[idx], aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+        ax.set_title(str(facet_labels[idx]))
+        ax.set_xticks(range(len(col_labels)))
+        ax.set_xticklabels(col_labels, rotation=45, ha="right")
+        ax.set_yticks(range(len(row_labels)))
+        ax.set_yticklabels(row_labels)
+    fig.colorbar(im, ax=axes.ravel().tolist())
+    fig.subplots_adjust(wspace=0.35, bottom=0.2)
+
+    csv_data = {"facet": [], "row": [], "col": [], "value": []}
+    for facet_idx, facet_label in enumerate(facet_labels):
+        for row_idx, row_label in enumerate(row_labels):
+            for col_idx, col_label in enumerate(col_labels):
+                csv_data["facet"].append(str(facet_label))
+                csv_data["row"].append(str(row_label))
+                csv_data["col"].append(str(col_label))
+                csv_data["value"].append(float(data[facet_idx, row_idx, col_idx]))
     return save_figure(fig, path_stem, data=csv_data)
 
 

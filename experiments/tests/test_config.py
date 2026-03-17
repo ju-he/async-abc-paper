@@ -185,3 +185,9 @@ class TestCPMConfigValidation:
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p)
         assert cfg["benchmark"]["name"] == "gaussian_mean"
+
+
+class TestSensitivityConfig:
+    def test_sensitivity_config_accepts_tol_init_multiplier(self):
+        cfg = load_config("configs/sensitivity.json")
+        assert "tol_init_multiplier" in cfg["sensitivity_grid"]

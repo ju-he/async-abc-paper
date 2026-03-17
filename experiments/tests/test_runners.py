@@ -159,6 +159,51 @@ class TestSensitivityRunner:
         # There should be at least one CSV for each sensitivity variant
         assert len(csvs) >= 1
 
+    def test_sensitivity_runner_applies_tol_init_multiplier(self, tmp_path):
+        cfg = json.loads((CONFIGS_DIR / "sensitivity.json").read_text())
+        cfg["sensitivity_grid"] = {
+            "tol_init_multiplier": [0.5, 2.0],
+        }
+        cfg["methods"] = ["rejection_abc"]
+        cfg["execution"]["n_replicates"] = 1
+        cfg["inference"]["max_simulations"] = 300
+        cfg_path = tmp_path / "sensitivity_tol.json"
+        cfg_path.write_text(json.dumps(cfg))
+
+        result = subprocess.run(
+            [
+                PYTHON,
+                str(SCRIPTS_DIR / "sensitivity_runner.py"),
+                "--config",
+                str(cfg_path),
+                "--output-dir",
+                str(tmp_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        assert result.returncode == 0, f"Sensitivity runner failed:\n{result.stderr}"
+
+        data_dir = tmp_path / "sensitivity" / "data"
+        csvs = sorted(data_dir.glob("sensitivity_*.csv"))
+        names = [path.stem for path in csvs]
+        assert any("tol_init_multiplier0.5" in name for name in names)
+        assert any("tol_init_multiplier2.0" in name for name in names)
+
+        methods = set()
+        tolerance_by_name = {}
+        for csv_path in csvs:
+            with open(csv_path) as f:
+                rows = list(csv.DictReader(f))
+            methods.update(row["method"] for row in rows)
+            tolerances = {float(row["tolerance"]) for row in rows if row.get("tolerance")}
+            tolerance_by_name[csv_path.stem] = tolerances
+        assert any("tol_init_multiplier_0.5" in method for method in methods)
+        assert any("tol_init_multiplier_2.0" in method for method in methods)
+        assert tolerance_by_name["sensitivity_tol_init_multiplier0.5"] == {2.5}
+        assert tolerance_by_name["sensitivity_tol_init_multiplier2.0"] == {10.0}
+
 
 # ---------------------------------------------------------------------------
 # Ablation runner (subprocess)

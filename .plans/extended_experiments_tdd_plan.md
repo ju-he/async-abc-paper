@@ -709,6 +709,8 @@ sync ABC-SMC blocks entire generations on the straggler.
 
 ## Phase 6 — tol_init Sensitivity Sweep
 
+Status: completed on 2026-03-17
+
 ### Goal
 
 Complete the hyperparameter sensitivity analysis by adding `tol_init` as a swept
@@ -737,16 +739,25 @@ hyperparameter.
 **`experiments/async_abc/plotting/common.py`** — extend `sensitivity_heatmap()`:
 - Support 3-way grid (k × perturbation_scale × tol_init) as a faceted figure
 
+Implemented note:
+- Added `tol_init_multiplier` to `configs/sensitivity.json`.
+- Updated `sensitivity_runner.py` so `tol_init_multiplier` scales the base
+  `inference.tol_init` before dispatch, while still being preserved in variant
+  filenames and method tags for provenance.
+- Extended `sensitivity_heatmap()` to accept 3-D data and render faceted
+  panels; `plot_sensitivity_summary()` now facets over `tol_init_multiplier`
+  and aggregates any remaining dimensions such as `scheduler_type`.
+
 ### TDD steps
 
-**Step 6.1 — Extend** `experiments/tests/test_config.py`:
+**Step 6.1 — Extend** `experiments/tests/test_config.py`: complete
 ```python
 def test_sensitivity_config_accepts_tol_init_multiplier():
     cfg = load_config("configs/sensitivity.json")
     assert "tol_init_multiplier" in cfg["sensitivity_grid"]
 ```
 
-**Step 6.2 — Extend** `experiments/tests/test_runners.py`:
+**Step 6.2 — Extend** `experiments/tests/test_runners.py`: complete
 ```python
 def test_sensitivity_runner_applies_tol_init_multiplier(tmp_path, sensitivity_config):
     # Inject tol_init_multiplier=[0.5, 2.0] into config
@@ -754,9 +765,14 @@ def test_sensitivity_runner_applies_tol_init_multiplier(tmp_path, sensitivity_co
     ...
 ```
 
-**Step 6.3 — Implement** runner extension and updated plot
+**Step 6.3 — Implement** runner extension and updated plot: complete
 
-**Step 6.4 — Run tests** — all Phase 6 tests green
+**Step 6.4 — Run tests**: complete
+
+Verified:
+- `python -m pytest tests/test_config.py -q` → 25 passed
+- `python -m pytest tests/test_plotting.py -q` → 23 passed
+- `python -m pytest tests/test_runners.py -q -k 'SensitivityRunner'` → 4 passed, 21 deselected
 
 ### Commit message
 ```
@@ -778,7 +794,7 @@ Mark each phase ✅ when its commit is made.
 - [✅] Phase 3 — New visualizations
 - [✅] Phase 4 — SBC runner
 - [✅] Phase 5 — Straggler experiment
-- [ ] Phase 6 — tol_init sensitivity
+- [✅] Phase 6 — tol_init sensitivity
 
 ## Resolved Design Decisions
 
