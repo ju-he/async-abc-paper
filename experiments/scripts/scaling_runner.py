@@ -23,6 +23,10 @@ from async_abc.utils.seeding import make_seeds
 
 def main() -> None:
     parser = make_arg_parser("Scaling experiment.")
+    parser.add_argument(
+        "--n-workers", type=int, default=None, dest="n_workers",
+        help="Run only this specific worker count (for HPC: match --ntasks=N).",
+    )
     args = parser.parse_args()
 
     cfg = load_config(args.config, test_mode=args.test)
@@ -34,6 +38,8 @@ def main() -> None:
 
     if args.test:
         worker_counts = [1]
+    elif args.n_workers is not None:
+        worker_counts = [args.n_workers]
 
     n_replicates = cfg["execution"]["n_replicates"]
     base_seed = cfg["execution"]["base_seed"]

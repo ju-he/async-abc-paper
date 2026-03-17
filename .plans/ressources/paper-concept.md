@@ -159,6 +159,15 @@ The experimental section should evaluate both:
 1. **statistical accuracy**
 2. **computational performance**
 
+The full experimental suite consists of:
+
+* Benchmark model evaluations (Gaussian mean, g-and-k, Lotka-Volterra, Cellular Potts)
+* Simulation-based calibration (SBC) for posterior validity
+* Runtime heterogeneity experiment (stochastic runtime noise)
+* Straggler tolerance experiment (persistent slow-worker fault mode)
+* Scaling experiments (1–256 cores)
+* Sensitivity / hyperparameter analysis (archive size, perturbation scale, tolerance schedule, initial tolerance)
+
 ---
 
 # 6. Benchmark Models
@@ -287,13 +296,35 @@ $$
 
 ### Wasserstein distance
 
-Compare posterior samples.
+Compare posterior samples using sliced Wasserstein distance for multi-parameter posteriors (POT library, `n_projections=50`); exact 1D Wasserstein for single-parameter cases.
 
 ---
 
-### Credible interval coverage
+### Wasserstein vs. wall-clock time
 
-Measure calibration.
+Track convergence curves: Wasserstein distance at fixed checkpoints in simulation count and wall time, comparing async and sync methods.
+
+---
+
+### Effective Sample Size (ESS)
+
+$$
+\text{ESS} = \frac{(\sum w_i)^2}{\sum w_i^2}
+$$
+
+Track ESS over time to measure particle diversity.
+
+---
+
+### Credible interval coverage (SBC)
+
+Empirical calibration via simulation-based calibration (SBC):
+
+* Draw θ* from prior
+* Run inference given simulated data
+* Check whether θ* falls within α-credible intervals with frequency α
+
+Produce rank histograms and empirical coverage tables at levels 0.5, 0.8, 0.9, 0.95.
 
 ---
 
@@ -329,9 +360,11 @@ Measure synchronization overhead.
 
 # 10. Runtime Heterogeneity Experiments
 
-Artificially introduce runtime variability.
+Two complementary experiments characterize the advantage of asynchrony under different failure modes.
 
-Example:
+### 10.1 Stochastic Runtime Heterogeneity
+
+Artificially introduce runtime variability via LogNormal noise:
 
 $$
 t(\theta) \sim \text{LogNormal}(\mu(\theta), \sigma)
@@ -342,9 +375,26 @@ Then compare:
 * synchronous ABC-SMC
 * asynchronous steady-state ABC
 
-Expected result:
+Expected result: Async method maintains high utilization while sync method idles at generation barriers.
 
-Async method maintains high utilization.
+---
+
+### 10.2 Straggler Tolerance Experiment
+
+Model a persistent structural HPC failure: one worker permanently runs slowly.
+
+Parameters:
+
+* `straggler_rank`: index of the slow worker
+* `base_sleep_s`: per-simulation sleep added to normal runtime
+* `slowdown_factor`: sweep over {1×, 5×, 10×, 20×}
+
+Expected result: Async ABC routes work to available workers and degrades gracefully; sync ABC-SMC blocks entire generations waiting for the straggler, causing super-linear wall-time degradation.
+
+Metrics:
+
+* throughput vs. slowdown factor
+* Gantt chart at worst slowdown level
 
 ---
 
@@ -375,37 +425,51 @@ efficiency vs cores
 
 # 12. Sensitivity Analysis
 
-Test robustness to algorithm parameters.
+Test robustness to algorithm parameters. The sensitivity grid sweeps four dimensions:
 
 ### Archive size
 
-Test:
-
 ```
-k = 50
-k = 100
-k = 200
+k = 50, 100, 200
 ```
 
 Evaluate effect on posterior accuracy.
 
 ---
 
-### Tolerance scheduling
+### Perturbation scale
 
-Compare:
+```
+perturbation_scale = 0.4, 0.8, 1.5
+```
 
-* quantile schedule
-* geometric decay
-* acceptance-rate control
+Controls the bandwidth of the perturbation kernel.
 
 ---
 
-### Runtime heterogeneity
+### Tolerance scheduling
 
-Vary variance of runtime distribution.
+```
+scheduler_type = acceptance_rate, quantile, geometric_decay
+```
 
-Measure async benefit.
+Compare three adaptive tolerance update strategies.
+
+---
+
+### Initial tolerance (`tol_init` multiplier)
+
+```
+tol_init_multiplier = 0.5×, 1×, 2×, 5×
+```
+
+Scales the base `tol_init`. This is often the most impactful hyperparameter and was added as a fourth sensitivity dimension.
+
+---
+
+Full grid: 3 × 3 × 3 × 4 = 108 variants; 5 replicates each = 540 runs.
+
+Results are presented as faceted heatmaps (one panel per `tol_init` level).
 
 ---
 
@@ -444,6 +508,42 @@ Plot archive particles over time.
 ### Posterior comparison plots
 
 Overlay posterior densities.
+
+---
+
+### Corner plots
+
+Pairwise joint marginals for multi-parameter posteriors. Diagonal: marginal KDE. Off-diagonal: scatter with KDE contours. True parameter values overlaid as reference lines.
+
+---
+
+### Gantt / worker timeline
+
+Horizontal bar chart with one row per worker; colored blocks show individual simulation intervals. Requires per-simulation `sim_start_time` and `sim_end_time` fields. Visualizes generation barriers for sync methods and continuous utilization for async.
+
+---
+
+### Posterior quality vs. wall-clock time
+
+Wasserstein distance curves per method over wall time. Shows convergence speed differences between async and sync algorithms.
+
+---
+
+### Tolerance trajectory
+
+ε over wall-clock time (log scale), sync vs. async overlaid. Shows how each method tightens the tolerance schedule.
+
+---
+
+### SBC rank histograms
+
+Uniform rank histogram indicates correct posterior calibration. Shown per method and per parameter.
+
+---
+
+### Straggler throughput curves
+
+Simulation throughput vs. slowdown factor, comparing async and sync methods.
 
 ---
 
@@ -500,6 +600,9 @@ The paper contributes:
 2. Integration into Propulate
 3. Benchmark comparison with **pyABC**
 4. Demonstration on realistic models including **cellsinsilico_nastjapy**
+5. Empirical posterior calibration validation via SBC
+6. Characterization of async advantages under both stochastic and persistent runtime heterogeneity
+7. A comprehensive sensitivity analysis including initial tolerance as a key hyperparameter
 
-The results should show that asynchronous steady-state ABC is a promising approach for **large-scale simulator-based inference on modern HPC systems**.
+The results should show that asynchronous steady-state ABC is a promising approach for **large-scale simulator-based inference on modern HPC systems**, with particular strength in environments with heterogeneous or unreliable worker performance.
 
