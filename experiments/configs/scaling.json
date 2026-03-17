@@ -25,7 +25,7 @@
     "base_seed": 0
   },
   "scaling": {
-    "worker_counts": [1, 2, 4, 8, 16, 32, 48, 96, 192]
+    "worker_counts": [1, 2, 4, 8, 16, 32, 48, 96, 192, 256]
   },
   "plots": {
     "scaling_curve": true,

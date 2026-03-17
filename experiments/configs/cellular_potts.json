@@ -28,5 +28,8 @@
   "plots": {
     "posterior": true,
     "archive_evolution": true
+  },
+  "analysis": {
+    "target_wasserstein": 2.0
   }
 }

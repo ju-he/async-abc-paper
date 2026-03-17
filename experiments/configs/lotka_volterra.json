@@ -11,7 +11,7 @@
     "true_theta3": 0.025,
     "true_theta4": 0.5
   },
-  "methods": ["async_propulate_abc", "pyabc_smc"],
+  "methods": ["async_propulate_abc", "pyabc_smc", "abc_smc_baseline"],
   "inference": {
     "max_simulations": 50000,
     "n_workers": 48,
@@ -27,5 +27,8 @@
   "plots": {
     "posterior": true,
     "archive_evolution": true
+  },
+  "analysis": {
+    "target_wasserstein": 50.0
   }
 }
