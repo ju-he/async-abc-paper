@@ -32,6 +32,18 @@ def _grid_variants(sensitivity_grid: dict) -> list:
     return variants
 
 
+def _format_variant_value(value) -> str:
+    return str(value)
+
+
+def _variant_name(variant: dict) -> str:
+    parts = [
+        f"{key}={_format_variant_value(value)}"
+        for key, value in sorted(variant.items())
+    ]
+    return "__".join(parts)
+
+
 def main() -> None:
     parser = make_arg_parser("Sensitivity analysis experiment.")
     args = parser.parse_args()
@@ -54,7 +66,7 @@ def main() -> None:
     experiment_start = time.time()
     for variant in variants:
         # Build a unique name from the variant parameters
-        variant_name = "_".join(f"{k}{v}" for k, v in sorted(variant.items()))
+        variant_name = _variant_name(variant)
         inference_cfg = {**cfg["inference"], **variant}
         if "tol_init_multiplier" in variant:
             inference_cfg["tol_init"] = (
@@ -72,7 +84,7 @@ def main() -> None:
                 )
                 # Tag records with variant info
                 for r in records:
-                    r.method = f"{method}__{'__'.join(f'{k}_{v}' for k, v in sorted(variant.items()))}"
+                    r.method = f"{method}__{variant_name}"
                 writer.write(records)
 
     experiment_elapsed = time.time() - experiment_start

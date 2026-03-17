@@ -53,14 +53,14 @@ TEST_MODE_OVERRIDES = {
     "clamp": {
         "inference": {
             "n_workers": 8,
-            "max_simulations": 500,
+            "max_simulations": 300,
             "n_generations": 3,
         },
         "execution": {
             "n_replicates": 2,
         },
         "sbc": {
-            "n_trials": 5,
+            "n_trials": 3,
         },
     },
     "set": {

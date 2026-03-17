@@ -1,7 +1,6 @@
 """Shared experiment execution logic used by all runner scripts."""
 import argparse
 import csv
-import json
 import math
 import sys
 import warnings
@@ -44,17 +43,15 @@ def compute_scaling_factor(
     note : str
         Parenthetical describing what the full run entails.
     """
-    with open(config_path) as f:
-        cfg = json.load(f)
+    cfg = load_config(config_path, test_mode=False)
+    test_cfg = load_config(config_path, test_mode=True)
 
     full_sims = cfg["inference"]["max_simulations"]
     full_workers = cfg["inference"]["n_workers"]
     full_reps = cfg["execution"]["n_replicates"]
-
-    # Apply TEST_MODE_OVERRIDES clamps to get test-mode values
-    test_sims = min(full_sims, 500)
-    test_workers = min(full_workers, 8)
-    test_reps = min(full_reps, 2)
+    test_sims = test_cfg["inference"]["max_simulations"]
+    test_workers = test_cfg["inference"]["n_workers"]
+    test_reps = test_cfg["execution"]["n_replicates"]
 
     factor = (full_sims * full_reps / full_workers) / (
         test_sims * test_reps / test_workers
@@ -66,13 +63,18 @@ def compute_scaling_factor(
         full_grid_size = 1
         for v in grid.values():
             full_grid_size *= len(v)
-        factor *= full_grid_size  # test shrinks each axis to 1 value
+        test_grid = {k: v[:1] for k, v in grid.items()}
+        test_grid_size = 1
+        for v in test_grid.values():
+            test_grid_size *= len(v)
+        factor *= full_grid_size / test_grid_size
         note = f"{full_sims} sims × {full_reps} reps, {full_grid_size} grid variants"
 
     elif "scaling" in cfg:
-        n_wc = len(cfg["scaling"].get("worker_counts", [1]))
-        factor *= n_wc  # test reduces to [1]
-        note = f"{full_sims} sims × {full_reps} reps, {n_wc} worker configs"
+        full_worker_counts = cfg["scaling"].get("worker_counts", [1])
+        test_worker_counts = [1]
+        factor *= len(full_worker_counts) / len(test_worker_counts)
+        note = f"{full_sims} sims × {full_reps} reps, {len(full_worker_counts)} worker configs"
 
     elif "heterogeneity" in cfg:
         het = cfg["heterogeneity"]
@@ -89,9 +91,10 @@ def compute_scaling_factor(
         )
 
     elif "sbc" in cfg:
-        n_trials = int(cfg["sbc"].get("n_trials", 1))
-        factor *= n_trials
-        note = f"{full_sims} sims × {n_trials} SBC trials, {full_workers} workers"
+        full_trials = int(cfg["sbc"].get("n_trials", 1))
+        test_trials = int(test_cfg.get("sbc", {}).get("n_trials", 1))
+        factor *= full_trials / test_trials
+        note = f"{full_sims} sims × {full_trials} SBC trials, {full_workers} workers"
 
     elif "straggler" in cfg:
         straggler = cfg["straggler"]
@@ -99,7 +102,6 @@ def compute_scaling_factor(
         base_sleep_s = float(straggler.get("base_sleep_s", 0.0))
         sims_per_sweep = full_sims * full_reps / full_workers
         extra_seconds = sum(float(s) * base_sleep_s * sims_per_sweep for s in slowdown_factors)
-        factor *= len(slowdown_factors)
         note = (
             f"{full_sims} sims × {full_reps} reps, {len(slowdown_factors)} slowdown levels, "
             f"+{format_duration(extra_seconds)} straggler sleep"

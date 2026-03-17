@@ -37,6 +37,32 @@ EXPERIMENT_NAMES = [
 ]
 
 
+@pytest.fixture(scope="module")
+def run_all_gaussian(tmp_path_factory):
+    root = tmp_path_factory.mktemp("run_all_gaussian")
+    result = subprocess.run(
+        [
+            PYTHON,
+            str(RUN_ALL),
+            "--test",
+            "--experiments",
+            "gaussian_mean",
+            "--output-dir",
+            str(root),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode == 0, (
+        f"run_all failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    return {
+        "result": result,
+        "output_dir": root,
+    }
+
+
 # ---------------------------------------------------------------------------
 # test_all_configs_valid
 # ---------------------------------------------------------------------------
@@ -70,54 +96,19 @@ class TestRunAll:
     def test_run_all_script_exists(self):
         assert RUN_ALL.exists(), "run_all_paper_experiments.py not found"
 
-    def test_run_all_test_mode_gaussian(self, tmp_path):
+    def test_run_all_test_mode_gaussian(self, run_all_gaussian):
         """run_all with --test and --experiments gaussian_mean completes without error."""
-        result = subprocess.run(
-            [
-                PYTHON, str(RUN_ALL),
-                "--test",
-                "--experiments", "gaussian_mean",
-                "--output-dir", str(tmp_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        assert result.returncode == 0, (
-            f"run_all failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-        )
+        assert run_all_gaussian["result"].returncode == 0
 
-    def test_run_all_creates_output_dir(self, tmp_path):
+    def test_run_all_creates_output_dir(self, run_all_gaussian):
         """Expected output directory is created for the selected experiment."""
-        subprocess.run(
-            [
-                PYTHON, str(RUN_ALL),
-                "--test",
-                "--experiments", "gaussian_mean",
-                "--output-dir", str(tmp_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        exp_dir = tmp_path / "gaussian_mean"
+        exp_dir = run_all_gaussian["output_dir"] / "gaussian_mean"
         assert exp_dir.exists()
         assert (exp_dir / "data").exists()
 
-    def test_run_all_creates_metadata(self, tmp_path):
+    def test_run_all_creates_metadata(self, run_all_gaussian):
         """metadata.json should be produced inside data/."""
-        subprocess.run(
-            [
-                PYTHON, str(RUN_ALL),
-                "--test",
-                "--experiments", "gaussian_mean",
-                "--output-dir", str(tmp_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=180,
-        )
-        meta = tmp_path / "gaussian_mean" / "data" / "metadata.json"
+        meta = run_all_gaussian["output_dir"] / "gaussian_mean" / "data" / "metadata.json"
         assert meta.exists()
 
     def test_run_all_help_flag(self):

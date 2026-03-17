@@ -205,9 +205,10 @@ def plot_sensitivity_summary(
 
         # Parse variant name from filename stem
         stem_str = csv_path.stem[len("sensitivity_"):]  # strip prefix
-        rv = _parse_variant_value(stem_str, row_key)
-        cv = _parse_variant_value(stem_str, col_key)
-        fv = _parse_variant_value(stem_str, facet_key) if facet_key else None
+        variant = _parse_variant_stem(stem_str, list(grid))
+        rv = variant.get(row_key)
+        cv = variant.get(col_key)
+        fv = variant.get(facet_key) if facet_key else None
         if rv is not None and cv is not None:
             tol_map[(rv, cv, fv)].append(mean_tol)
 
@@ -225,6 +226,8 @@ def plot_sensitivity_summary(
                     key = (rv, cv, fv)
                     if key in tol_map:
                         matrix[f_idx, i, j] = float(np.mean(tol_map[key]))
+        if not np.isfinite(matrix).any():
+            return
         sensitivity_heatmap(
             matrix,
             row_labels=row_labels,
@@ -243,6 +246,8 @@ def plot_sensitivity_summary(
                     vals.extend(key_vals)
             if vals:
                 matrix[i, j] = float(np.mean(vals))
+    if not np.isfinite(matrix).any():
+        return
     sensitivity_heatmap(matrix, row_labels=row_labels, col_labels=col_labels, path_stem=stem)
 
 
@@ -328,17 +333,7 @@ def _read_csv(path: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(f))
 
 
-def _parse_variant_value(stem_str: str, key: str):
-    """Extract the value for *key* from a variant name string like 'k10_...'."""
-    # The variant stem encodes keys without underscores between key and value,
-    # e.g. "k10", "perturbation_scale0.4", "scheduler_typeacceptance_rate"
-    import re
-    pattern = re.escape(key) + r"([^_]+(?:_[^0-9][^_]*)*)"
-    m = re.search(pattern, stem_str)
-    if not m:
-        return None
-    raw = m.group(1)
-    # Try numeric first
+def _parse_scalar(raw: str):
     try:
         return int(raw)
     except ValueError:
@@ -348,6 +343,41 @@ def _parse_variant_value(stem_str: str, key: str):
     except ValueError:
         pass
     return raw
+
+
+def _parse_variant_stem(stem_str: str, keys: List[str]) -> Dict[str, Any]:
+    """Decode a sensitivity variant filename stem into a dict."""
+    if "=" in stem_str:
+        variant = {}
+        for part in stem_str.split("__"):
+            if "=" not in part:
+                return {}
+            key, raw = part.split("=", 1)
+            variant[key] = _parse_scalar(raw)
+        return variant
+
+    # Backward compatibility for legacy stems like:
+    # "k10_perturbation_scale0.4_scheduler_typeacceptance_rate"
+    ordered_keys = sorted(keys)
+    remainder = stem_str
+    variant = {}
+    for index, key in enumerate(ordered_keys):
+        prefix = key if index == 0 else f"_{key}"
+        if not remainder.startswith(prefix):
+            return {}
+        start = len(prefix)
+        if index + 1 < len(ordered_keys):
+            next_prefix = f"_{ordered_keys[index + 1]}"
+            end = remainder.find(next_prefix, start)
+            if end == -1:
+                return {}
+            raw = remainder[start:end]
+            remainder = remainder[end:]
+        else:
+            raw = remainder[start:]
+            remainder = ""
+        variant[key] = _parse_scalar(raw)
+    return variant
 
 
 def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str, Any]) -> Dict[str, float]:

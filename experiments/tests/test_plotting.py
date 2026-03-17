@@ -30,8 +30,10 @@ from async_abc.plotting.common import (
     compute_wasserstein,
 )
 from async_abc.plotting.reporters import (
+    _parse_variant_stem,
     plot_corner,
     plot_quality_vs_time,
+    plot_sensitivity_summary,
     plot_tolerance_trajectory,
     plot_worker_gantt,
 )
@@ -189,6 +191,17 @@ class TestSensitivityHeatmap:
         )
         assert "pdf" in paths and "png" in paths and "csv" in paths
 
+    def test_sensitivity_heatmap_handles_all_nan_data(self, tmp_path):
+        data = np.full((2, 2, 2), np.nan)
+        paths = sensitivity_heatmap(
+            data,
+            row_labels=["50", "100"],
+            col_labels=["0.4", "0.8"],
+            path_stem=tmp_path / "sensitivity_nan",
+            facet_labels=["0.5x", "2.0x"],
+        )
+        assert "pdf" in paths and "png" in paths and "csv" in paths
+
 
 class TestPhase3PlotFunctions:
     def test_gantt_plot_returns_figure(self, abc_smc_records):
@@ -242,6 +255,60 @@ class TestPhase3Reporters:
         assert (output_dir.plots / "tolerance_trajectory.png").exists()
         assert (output_dir.plots / "tolerance_trajectory_data.csv").exists()
         assert (output_dir.plots / "tolerance_trajectory_meta.json").exists()
+
+    def test_plot_sensitivity_summary_exports_files(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        data_dir = output_dir.data
+        rows = [
+            {"tolerance": "2.0"},
+            {"tolerance": "1.5"},
+            {"tolerance": "1.0"},
+        ]
+        for stem in (
+            "sensitivity_k=50__perturbation_scale=0.4__tol_init_multiplier=0.5.csv",
+            "sensitivity_k=100__perturbation_scale=0.4__tol_init_multiplier=0.5.csv",
+            "sensitivity_k=50__perturbation_scale=0.8__tol_init_multiplier=2.0.csv",
+            "sensitivity_k=100__perturbation_scale=0.8__tol_init_multiplier=2.0.csv",
+        ):
+            with open(data_dir / stem, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["tolerance"])
+                writer.writeheader()
+                writer.writerows(rows)
+        grid = {
+            "k": [50, 100],
+            "perturbation_scale": [0.4, 0.8],
+            "tol_init_multiplier": [0.5, 2.0],
+        }
+        plot_sensitivity_summary(data_dir, grid, output_dir)
+        assert (output_dir.plots / "sensitivity_heatmap.pdf").exists()
+        assert (output_dir.plots / "sensitivity_heatmap.png").exists()
+        assert (output_dir.plots / "sensitivity_heatmap_data.csv").exists()
+
+
+class TestSensitivityVariantParsing:
+    def test_parses_new_variant_stem(self):
+        variant = _parse_variant_stem(
+            "k=50__perturbation_scale=0.4__scheduler_type=acceptance_rate__tol_init_multiplier=0.5",
+            ["k", "perturbation_scale", "scheduler_type", "tol_init_multiplier"],
+        )
+        assert variant == {
+            "k": 50,
+            "perturbation_scale": 0.4,
+            "scheduler_type": "acceptance_rate",
+            "tol_init_multiplier": 0.5,
+        }
+
+    def test_parses_legacy_variant_stem(self):
+        variant = _parse_variant_stem(
+            "k50_perturbation_scale0.4_scheduler_typeacceptance_rate_tol_init_multiplier0.5",
+            ["k", "perturbation_scale", "scheduler_type", "tol_init_multiplier"],
+        )
+        assert variant == {
+            "k": 50,
+            "perturbation_scale": 0.4,
+            "scheduler_type": "acceptance_rate",
+            "tol_init_multiplier": 0.5,
+        }
 
 
 class TestWassersteinMetric:

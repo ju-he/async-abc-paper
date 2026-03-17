@@ -4,6 +4,7 @@ import json
 import pytest
 
 from async_abc.io.config import load_config, ValidationError
+from async_abc.utils.runner import compute_scaling_factor
 
 
 class TestLoadConfig:
@@ -56,7 +57,7 @@ class TestLoadConfig:
 
     def test_test_mode_clamps_max_simulations(self, config_file):
         cfg = load_config(config_file, test_mode=True)
-        assert cfg["inference"]["max_simulations"] <= 500
+        assert cfg["inference"]["max_simulations"] <= 300
 
     def test_test_mode_clamps_n_replicates(self, config_file):
         cfg = load_config(config_file, test_mode=True)
@@ -191,3 +192,35 @@ class TestSensitivityConfig:
     def test_sensitivity_config_accepts_tol_init_multiplier(self):
         cfg = load_config("configs/sensitivity.json")
         assert "tol_init_multiplier" in cfg["sensitivity_grid"]
+
+
+class TestScalingFactor:
+    def test_sbc_uses_clamped_test_trial_count(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["execution"]["n_replicates"] = 2
+        minimal_config["methods"] = ["async_propulate_abc"]
+        minimal_config["sbc"] = {"n_trials": 200, "coverage_levels": [0.5, 0.9]}
+        path = tmp_path / "sbc.json"
+        path.write_text(json.dumps(minimal_config))
+
+        factor, extra, note = compute_scaling_factor(path)
+
+        assert factor == pytest.approx(200 / 3)
+        assert extra == 0.0
+        assert "200 SBC trials" in note
+
+    def test_straggler_does_not_double_count_slowdown_levels(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["execution"]["n_replicates"] = 2
+        minimal_config["straggler"] = {
+            "slowdown_factor": [1, 5],
+            "base_sleep_s": 0.1,
+        }
+        path = tmp_path / "straggler.json"
+        path.write_text(json.dumps(minimal_config))
+
+        factor, extra, note = compute_scaling_factor(path)
+
+        assert factor == pytest.approx(1.0)
+        assert extra > 0.0
+        assert "2 slowdown levels" in note

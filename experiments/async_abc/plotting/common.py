@@ -218,8 +218,12 @@ def sensitivity_heatmap(
         figsize=(max(4, len(col_labels)) * n_facets, max(3, len(row_labels))),
         squeeze=False,
     )
-    vmin = float(np.nanmin(data))
-    vmax = float(np.nanmax(data))
+    finite = data[np.isfinite(data)]
+    if finite.size == 0:
+        vmin, vmax = 0.0, 1.0
+    else:
+        vmin = float(np.min(finite))
+        vmax = float(np.max(finite))
     for idx in range(n_facets):
         ax = axes[0, idx]
         im = ax.imshow(data[idx], aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
