@@ -135,7 +135,7 @@ def main() -> None:
                     seed,
                 )
                 elapsed = time.time() - t0
-                tagged_method = f"{method}__straggler_slowdown{int(slowdown_factor) if slowdown_factor.is_integer() else slowdown_factor}x"
+                tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
                 for record in records:
                     record.method = tagged_method
                 writer.write(records)
@@ -150,7 +150,7 @@ def main() -> None:
                         "seed": seed,
                         "n_simulations": len(records),
                         "wall_time_s": elapsed,
-                        "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("inf"),
+                        "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
                     }
                 )
 

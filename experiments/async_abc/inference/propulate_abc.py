@@ -123,7 +123,7 @@ def run_propulate_abc(
         sim_end_time = (
             float(ind.evaltime) - run_start
             if hasattr(ind, "evaltime") and ind.evaltime is not None
-            else 0.0
+            else None
         )
         sim_start_time = (
             sim_end_time - float(ind.evalperiod)
@@ -140,7 +140,7 @@ def run_propulate_abc(
             loss=float(ind.loss),
             weight=weight,
             tolerance=tolerance,
-            wall_time=sim_end_time,
+            wall_time=sim_end_time if sim_end_time is not None else 0.0,
             worker_id=str(ind.rank) if getattr(ind, "rank", None) is not None else None,
             sim_start_time=sim_start_time,
             sim_end_time=sim_end_time,

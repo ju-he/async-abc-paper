@@ -202,6 +202,45 @@ class TestRunPropulateAbc:
         assert all(r.sim_end_time >= 0.0 for r in records)
         assert all(r.wall_time == pytest.approx(r.sim_end_time) for r in records)
 
+    def test_sim_end_time_is_none_when_evaltime_absent(self, tmp_output_dir, monkeypatch):
+        """When propulate Individual has no evaltime, sim_end_time must be None (not 0.0)."""
+        import async_abc.inference.propulate_abc as mod
+        from async_abc.io.paths import OutputDir
+
+        class FakeInd:
+            # intentionally no evaltime attribute
+            evalperiod = None
+            generation = 0
+            rank = None
+            loss = 0.5
+            weight = 1.0
+            tolerance = 1.0
+            def __getitem__(self, key):
+                return 0.0
+
+        class FakePropulator:
+            population = [FakeInd()]
+            def __init__(self, *args, **kwargs):
+                pass
+            def propulate(self, **kwargs):
+                pass
+            def summarize(self, **kwargs):
+                pass
+
+        monkeypatch.setattr(mod, "Propulator", FakePropulator)
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "run_no_evaltime").ensure()
+        records = run_propulate_abc(
+            bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=0,
+        )
+
+        assert all(r.sim_end_time is None for r in records), (
+            "sim_end_time should be None when Individual lacks evaltime"
+        )
+        assert all(r.wall_time == 0.0 for r in records), (
+            "wall_time should fall back to 0.0 when sim_end_time is None"
+        )
+
     def test_records_count_matches_max_simulations(self, propulate_records_default):
         cfg = _test_inference_cfg()
         assert len(propulate_records_default) == cfg["max_simulations"]

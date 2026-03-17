@@ -395,3 +395,18 @@ class TestStragglerRunner:
         methods = {r["method"] for r in rows}
         assert any("1x" in method for method in methods)
         assert any("5x" in method for method in methods)
+
+    def test_throughput_csv_has_no_inf_values(self, straggler_run):
+        import math
+        throughput_path = (
+            straggler_run["output_dir"] / "straggler" / "data" / "throughput_vs_slowdown_summary.csv"
+        )
+        assert throughput_path.exists(), "throughput_vs_slowdown_summary.csv was not created"
+        with open(throughput_path) as f:
+            rows = list(csv.DictReader(f))
+        for row in rows:
+            val = row.get("throughput_sims_per_s", "")
+            if val:
+                assert not math.isinf(float(val)), (
+                    f"throughput_sims_per_s contains inf in row: {row}"
+                )

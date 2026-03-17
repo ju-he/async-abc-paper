@@ -84,6 +84,7 @@ def time_to_threshold(
         wall_time_to_threshold = np.nan
         for step in group["step"].tolist():
             subset = group[group["step"] <= step]
+            # Fixed 50 projections per design spec (function parameter unused on this path)
             distance = _wasserstein_to_true_params(
                 subset,
                 true_params,

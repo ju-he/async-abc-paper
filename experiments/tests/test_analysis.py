@@ -71,3 +71,31 @@ def test_barrier_overhead_fraction_returns_fraction(abc_smc_records):
     assert {"method", "replicate", "barrier_overhead_fraction"} <= set(df.columns)
     assert (df["barrier_overhead_fraction"] >= 0.0).all()
     assert (df["barrier_overhead_fraction"] <= 1.0).all()
+
+
+def test_wasserstein_at_checkpoints_multiparameter():
+    """2-parameter posterior exercises the sliced-Wasserstein code path."""
+    from async_abc.io.records import ParticleRecord
+
+    records = [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=i + 1,
+            params={"mu": float(i) * 0.1, "sigma": 1.0 + float(i) * 0.05},
+            loss=float(i) * 0.1,
+            weight=1.0,
+            tolerance=5.0,
+            wall_time=float(i) * 0.5,
+        )
+        for i in range(20)
+    ]
+    df = wasserstein_at_checkpoints(
+        records,
+        true_params={"mu": 0.0, "sigma": 1.0},
+        checkpoint_steps=[10, 20],
+    )
+    assert {"method", "replicate", "step", "wall_time", "wasserstein"} <= set(df.columns)
+    assert len(df) == 2
+    assert (df["wasserstein"] >= 0.0).all()

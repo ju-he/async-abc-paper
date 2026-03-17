@@ -224,3 +224,27 @@ class TestScalingFactor:
         assert factor == pytest.approx(1.0)
         assert extra > 0.0
         assert "2 slowdown levels" in note
+
+    def test_straggler_scaling_accounts_for_num_methods(self, tmp_path, minimal_config):
+        """extra_seconds must scale with the number of configured methods."""
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 1
+        minimal_config["execution"]["n_replicates"] = 1
+        minimal_config["straggler"] = {
+            "slowdown_factor": [1],
+            "base_sleep_s": 1.0,
+        }
+
+        # One method
+        minimal_config["methods"] = ["async_propulate_abc"]
+        path1 = tmp_path / "straggler_1method.json"
+        path1.write_text(json.dumps(minimal_config))
+        _, extra_1m, _ = compute_scaling_factor(path1)
+
+        # Two methods — extra should be exactly 2×
+        minimal_config["methods"] = ["async_propulate_abc", "abc_smc_baseline"]
+        path2 = tmp_path / "straggler_2methods.json"
+        path2.write_text(json.dumps(minimal_config))
+        _, extra_2m, _ = compute_scaling_factor(path2)
+
+        assert extra_2m == pytest.approx(2.0 * extra_1m)

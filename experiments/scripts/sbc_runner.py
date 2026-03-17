@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Simulation-based calibration runner."""
+import copy
 import sys
 import time
 from pathlib import Path
@@ -42,7 +43,7 @@ def _posterior_samples(records, param_name: str) -> np.ndarray:
 
 
 def _true_param_config(base_cfg: dict, true_params: dict[str, float], observed_seed: int) -> dict:
-    cfg = dict(base_cfg)
+    cfg = copy.deepcopy(base_cfg)
     cfg["observed_data_seed"] = int(observed_seed)
     for param, value in true_params.items():
         cfg[f"true_{param}"] = float(value)

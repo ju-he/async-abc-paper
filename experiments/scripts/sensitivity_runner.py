@@ -57,6 +57,7 @@ def main() -> None:
     if args.test:
         # Shrink grid to first value of each parameter for speed
         grid = {k: v[:1] for k, v in grid.items()}
+        print(f"[{cfg['experiment_name']}] test mode: grid shrunk to 1 variant", flush=True)
 
     variants = _grid_variants(grid)
     n_replicates = cfg["execution"]["n_replicates"]

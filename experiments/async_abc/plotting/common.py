@@ -402,7 +402,7 @@ def corner_plot(records, param_names: List[str], true_params: Optional[Dict] = N
                 axis.set_ylabel(y_name)
 
     fig.suptitle("Posterior corner", y=0.995)
-    fig.tight_layout()
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
     return fig
 
 
