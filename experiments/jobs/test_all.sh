@@ -14,7 +14,7 @@ nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
 default_output_root=/p/scratch/tissuetwin/herold2/async-abc/test
 output_dir=""
 extend_flag=""
-experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
+experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
 
 usage() {
     echo "Usage: $(basename "$0") [output_dir] [--extend]" >&2
