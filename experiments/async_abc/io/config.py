@@ -15,6 +15,20 @@ from .schema import (
 )
 
 
+def _resolve_config_path(path: Union[str, Path]) -> Path:
+    """Resolve config paths from either the repo root or experiments/."""
+    path = Path(path)
+    if path.exists() or path.is_absolute():
+        return path
+
+    experiments_dir = Path(__file__).resolve().parents[2]
+    candidate = experiments_dir / path
+    if candidate.exists():
+        return candidate
+
+    return path
+
+
 def _validate(cfg: dict) -> None:
     """Raise ValidationError if cfg is missing required keys."""
     for key in REQUIRED_TOP_LEVEL:
@@ -83,7 +97,7 @@ def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
     FileNotFoundError
         If the file does not exist.
     """
-    path = Path(path)
+    path = _resolve_config_path(path)
     with open(path) as f:
         cfg = json.load(f)
 
