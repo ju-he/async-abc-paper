@@ -142,6 +142,18 @@ def _is_reference_data_dir(path: Path) -> bool:
     return (path / "000000" / "cellevents.log").is_file()
 
 
+def _discover_reference_data_dirs(search_root: Path, target_name: str) -> list[Path]:
+    """Find valid CPM reference directories below ``search_root``."""
+    if not search_root.is_dir():
+        return []
+
+    candidates: list[Path] = []
+    for candidate in search_root.rglob(target_name):
+        if _is_reference_data_dir(candidate):
+            candidates.append(candidate.resolve())
+    return sorted(set(candidates), key=lambda path: (len(path.parts), str(path)))
+
+
 def _resolve_reference_data_path(path_like: str | Path) -> Path:
     """Resolve the CPM reference directory, including nested generated layouts.
 
@@ -154,24 +166,49 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
     if _is_reference_data_dir(configured_path):
         return configured_path
 
+    search_roots = [configured_path.parent]
+    repo_data_root = (_REPO_ROOT / "experiments" / "data").resolve()
+    if repo_data_root not in search_roots:
+        search_roots.append(repo_data_root)
+
     candidates: list[Path] = []
-    path_obj = Path(path_like)
-    if not path_obj.is_absolute():
-        nested_candidate = (configured_path.parent / path_obj).resolve()
-        candidates.append(nested_candidate)
+    for search_root in search_roots:
+        candidates.extend(
+            _discover_reference_data_dirs(
+                search_root,
+                configured_path.name,
+            )
+        )
+    candidates = sorted(set(candidates), key=lambda path: (len(path.parts), str(path)))
+
+    matching_parent_name = [
+        candidate
+        for candidate in candidates
+        if configured_path.parent.name in candidate.parts
+    ]
+    if matching_parent_name:
+        candidates = matching_parent_name
+
+    if len(candidates) > 1:
+        candidate_list = ", ".join(str(candidate) for candidate in candidates[:5])
+        raise FileNotFoundError(
+            "CPM reference_data_path is ambiguous because multiple valid reference "
+            f"datasets were found while resolving {configured_path}: {candidate_list}"
+        )
 
     for candidate in candidates:
-        if _is_reference_data_dir(candidate):
-            logger.warning(
-                "Resolved CPM reference data path %s to nested generated directory %s",
-                configured_path,
-                candidate,
-            )
-            return candidate
+        logger.warning(
+            "Resolved CPM reference data path %s to discovered generated directory %s",
+            configured_path,
+            candidate,
+        )
+        return candidate
 
+    searched_roots = ", ".join(str(root) for root in search_roots)
     raise FileNotFoundError(
         "CPM reference_data_path does not point to a valid reference dataset. "
         f"Configured path: {configured_path}. "
+        f"Searched under: {searched_roots}. "
         "Expected files such as config.json, cis.out, configs/, and "
         "000000/cellevents.log. Regenerate the reference data or update "
         "'reference_data_path' to the generated directory."

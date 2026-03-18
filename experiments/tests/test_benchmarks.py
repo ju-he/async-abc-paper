@@ -309,6 +309,34 @@ class TestCellularPottsImport:
 
         assert resolved == nested.resolve()
 
+    def test_resolve_reference_data_path_finds_arbitrarily_nested_dir(self, tmp_path, monkeypatch):
+        import async_abc.benchmarks.cellular_potts as cellular_potts
+
+        configured = tmp_path / "experiments" / "data" / "cpm_reference" / "reference"
+        configured.mkdir(parents=True)
+        nested = (
+            tmp_path
+            / "experiments"
+            / "data"
+            / "cpm_reference"
+            / "archive"
+            / "2026-03-18"
+            / "reference"
+        )
+        (nested / "configs").mkdir(parents=True)
+        (nested / "000000").mkdir(parents=True)
+        (nested / "config.json").write_text("{}")
+        (nested / "cis.out").write_text("")
+        (nested / "000000" / "cellevents.log").write_text("")
+
+        monkeypatch.setattr(cellular_potts, "_REPO_ROOT", tmp_path)
+
+        resolved = cellular_potts._resolve_reference_data_path(
+            "experiments/data/cpm_reference/reference"
+        )
+
+        assert resolved == nested.resolve()
+
     def test_ensure_reference_alias_reuses_canonical_reference_path(self, tmp_path):
         from async_abc.benchmarks.cellular_potts import _ensure_reference_alias
 
@@ -324,6 +352,24 @@ class TestCellularPottsImport:
 
         assert alias == output_dir / "reference"
         assert alias.is_dir()
+        assert (alias / "config.json").is_file()
+
+    def test_ensure_reference_alias_replaces_empty_placeholder_dir(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import _ensure_reference_alias
+
+        output_dir = tmp_path / "experiments" / "data" / "cpm_reference"
+        placeholder = output_dir / "reference"
+        placeholder.mkdir(parents=True)
+        actual = output_dir / "archive" / "reference"
+        (actual / "configs").mkdir(parents=True)
+        (actual / "000000").mkdir(parents=True)
+        (actual / "config.json").write_text("{}")
+        (actual / "cis.out").write_text("")
+        (actual / "000000" / "cellevents.log").write_text("")
+
+        alias = _ensure_reference_alias(output_dir, actual)
+
+        assert alias == placeholder
         assert (alias / "config.json").is_file()
 
     def test_init_resolves_repo_relative_asset_paths(self, tmp_path, monkeypatch, cpm_mocks):
