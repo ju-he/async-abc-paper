@@ -1,0 +1,734 @@
+{
+  "Filling": {
+    "cells": [
+      {
+        "shape": "cube",
+        "box": [
+          [1, 1, 1],
+          [199, 199, 199]
+        ],
+        "pattern": "staticECM",
+        "value": 1,
+        "count": 689,
+        "cylinderlength": 10,
+        "cylinderradius": 1,
+        "centerRadial": [100, 100, 100]
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [69, 83, 99],
+        "value": 1,
+        "rotation": [11, -18, -62],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [111, 132, 100],
+        "value": 1,
+        "rotation": [-62, -11, 160],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [93, 130, 84],
+        "value": 1,
+        "rotation": [-84, 18, -159],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [93, 91, 133],
+        "value": 1,
+        "rotation": [0, -10, -2],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [124, 90, 122],
+        "value": 1,
+        "rotation": [10, 28, 41],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [112, 92, 68],
+        "value": 1,
+        "rotation": [13, -14, -86],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [133, 103, 109],
+        "value": 1,
+        "rotation": [-34, 54, -62],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [83, 107, 70],
+        "value": 1,
+        "rotation": [-68, -29, 137],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [112, 97, 67],
+        "value": 1,
+        "rotation": [1, -20, -8],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [93, 123, 75],
+        "value": 1,
+        "rotation": [-116, -29, 161],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [120, 72, 108],
+        "value": 1,
+        "rotation": [-29, -53, 54],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [115, 128, 112],
+        "value": 1,
+        "rotation": [-2, 45, -5],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [132, 86, 96],
+        "value": 1,
+        "rotation": [-96, 60, -124],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [70, 86, 86],
+        "value": 1,
+        "rotation": [-15, 35, -46],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [84, 86, 128],
+        "value": 1,
+        "rotation": [2, -24, -10],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [104, 105, 65],
+        "value": 1,
+        "rotation": [-23, 11, -127],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [125, 75, 98],
+        "value": 1,
+        "rotation": [-23, -57, 42],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [89, 71, 83],
+        "value": 1,
+        "rotation": [57, 60, 86],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [79, 124, 85],
+        "value": 1,
+        "rotation": [6, 41, 16],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [111, 70, 114],
+        "value": 1,
+        "rotation": [-54, 14, -151],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [118, 79, 78],
+        "value": 1,
+        "rotation": [16, -50, -34],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [80, 98, 71],
+        "value": 1,
+        "rotation": [-34, -18, 124],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [110, 66, 99],
+        "value": 1,
+        "rotation": [158, -86, -160],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [90, 68, 89],
+        "value": 1,
+        "rotation": [16, -47, -37],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [121, 82, 79],
+        "value": 1,
+        "rotation": [27, -17, -116],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [76, 123, 111],
+        "value": 1,
+        "rotation": [14, -6, -132],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [81, 90, 128],
+        "value": 1,
+        "rotation": [-20, -27, 72],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [87, 102, 132],
+        "value": 1,
+        "rotation": [-1, -1, 73],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [92, 133, 97],
+        "value": 1,
+        "rotation": [-13, -62, 22],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [133, 106, 93],
+        "value": 1,
+        "rotation": [54, 39, 109],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [105, 88, 132],
+        "value": 1,
+        "rotation": [-22, 16, -109],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [123, 124, 109],
+        "value": 1,
+        "rotation": [-79, -29, 145],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [104, 65, 98],
+        "value": 1,
+        "rotation": [-157, 28, -174],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [79, 79, 119],
+        "value": 1,
+        "rotation": [0, -1, -44],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [118, 106, 129],
+        "value": 1,
+        "rotation": [-1, 31, -6],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [66, 91, 97],
+        "value": 1,
+        "rotation": [20, 15, 103],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [94, 66, 90],
+        "value": 1,
+        "rotation": [1, -11, -11],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [89, 98, 66],
+        "value": 1,
+        "rotation": [19, -11, -121],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [109, 68, 112],
+        "value": 1,
+        "rotation": [-72, 67, -95],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [71, 111, 116],
+        "value": 1,
+        "rotation": [68, 51, 108],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [118, 102, 129],
+        "value": 1,
+        "rotation": [-2, 3, -74],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [106, 88, 67],
+        "value": 1,
+        "rotation": [32, 22, 112],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [72, 117, 86],
+        "value": 1,
+        "rotation": [-6, 65, -10],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [114, 122, 122],
+        "value": 1,
+        "rotation": [141, -40, -165],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [71, 90, 117],
+        "value": 1,
+        "rotation": [12, 8, 112],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [83, 73, 84],
+        "value": 1,
+        "rotation": [-175, -46, 177],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [130, 91, 115],
+        "value": 1,
+        "rotation": [19, 45, 44],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [70, 89, 83],
+        "value": 1,
+        "rotation": [24, 59, 41],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [70, 116, 92],
+        "value": 1,
+        "rotation": [-43, 30, -111],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [81, 123, 117],
+        "value": 1,
+        "rotation": [121, 58, 144],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [129, 102, 81],
+        "value": 1,
+        "rotation": [-11, -58, 19],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [121, 106, 126],
+        "value": 1,
+        "rotation": [-4, -3, 110],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [108, 89, 132],
+        "value": 1,
+        "rotation": [0, 3, 28],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [68, 105, 85],
+        "value": 1,
+        "rotation": [-17, -17, 88],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [79, 101, 128],
+        "value": 1,
+        "rotation": [29, 18, 114],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [116, 130, 101],
+        "value": 1,
+        "rotation": [124, 57, 147],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [72, 120, 104],
+        "value": 1,
+        "rotation": [63, 73, 79],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [77, 74, 91],
+        "value": 1,
+        "rotation": [63, 32, 130],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [89, 110, 131],
+        "value": 1,
+        "rotation": [1, 0, -133],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [66, 99, 91],
+        "value": 1,
+        "rotation": [20, 22, 85],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [86, 79, 75],
+        "value": 1,
+        "rotation": [21, -30, -69],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [123, 111, 123],
+        "value": 1,
+        "rotation": [26, 28, 85],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [133, 105, 90],
+        "value": 1,
+        "rotation": [-4, -3, 98],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [132, 87, 93],
+        "value": 1,
+        "rotation": [-65, 40, -120],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [73, 122, 94],
+        "value": 1,
+        "rotation": [-76, 49, -120],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [67, 108, 89],
+        "value": 1,
+        "rotation": [3, 5, 73],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [132, 87, 96],
+        "value": 1,
+        "rotation": [64, 70, 83],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [133, 91, 107],
+        "value": 1,
+        "rotation": [-51, 62, -76],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [106, 119, 71],
+        "value": 1,
+        "rotation": [-11, 22, -53],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [114, 110, 130],
+        "value": 1,
+        "rotation": [0, 0, 125],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [107, 105, 133],
+        "value": 1,
+        "rotation": [9, -9, -92],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [129, 114, 87],
+        "value": 1,
+        "rotation": [-53, 51, -93],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [118, 73, 112],
+        "value": 1,
+        "rotation": [-74, 57, -108],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [104, 90, 133],
+        "value": 1,
+        "rotation": [-25, -17, 111],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [123, 121, 115],
+        "value": 1,
+        "rotation": [34, 19, 122],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [77, 76, 86],
+        "value": 1,
+        "rotation": [178, -58, -179],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "ellipsoid",
+        "center": [97, 77, 73],
+        "value": 1,
+        "rotation": [6, 25, 27],
+        "xsemiaxis": 10,
+        "ysemiaxis": 1,
+        "zsemiaxis": 1
+      },
+      {
+        "shape": "sphere",
+        "box": [
+          [75, 75, 75],
+          [125, 125, 125]
+        ],
+        "center": [100, 100, 100],
+        "radius": 25,
+        "value": 6
+      },
+      {
+        "shape": "sphere",
+        "box": [
+          [75, 75, 75],
+          [125, 125, 125]
+        ],
+        "celltype": [0, 0, 0, 0, 0, 0, 0, 0, 0, 250, 0, 0, 0, 0, 0],
+        "pattern": "voronoi",
+        "center": [100, 100, 100],
+        "radius": 25,
+        "count": 250
+      }
+    ]
+  }
+}
