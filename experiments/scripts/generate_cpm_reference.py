@@ -20,16 +20,16 @@ import json
 import sys
 from pathlib import Path
 
-# Ensure nastjapy_copy/src is importable
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_NASTJAPY_SRC = _REPO_ROOT / "nastjapy_copy" / "src"
-if not _NASTJAPY_SRC.is_dir():
-    sys.exit(
-        f"ERROR: nastjapy_copy/src not found at {_NASTJAPY_SRC}. "
-        "Ensure the nastjapy_copy symlink is present at the repo root."
-    )
-if str(_NASTJAPY_SRC) not in sys.path:
-    sys.path.insert(0, str(_NASTJAPY_SRC))
+EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
+if str(EXPERIMENTS_DIR) not in sys.path:
+    sys.path.insert(0, str(EXPERIMENTS_DIR))
+
+from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
+
+try:
+    _ensure_nastjapy_on_path()
+except ImportError as exc:
+    sys.exit(f"ERROR: {exc}")
 
 
 def main(args=None):

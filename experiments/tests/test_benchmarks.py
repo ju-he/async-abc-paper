@@ -1,7 +1,6 @@
 """Tests for async_abc.benchmarks.*"""
 import builtins
 import math
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -12,6 +11,7 @@ from async_abc.benchmarks.gaussian_mean import GaussianMean
 from async_abc.benchmarks.gandk import GandK
 from async_abc.benchmarks.lotka_volterra import LotkaVolterra
 from async_abc.benchmarks import make_benchmark
+from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
 
 # ---------------------------------------------------------------------------
 # CPM helpers & fixtures
@@ -21,15 +21,10 @@ _CPM_TEMPLATE_DIR = Path(__file__).parents[2] / "nastjapy_copy" / "templates" / 
 
 
 def _nastjapy_available() -> bool:
-    src = Path(__file__).parents[2] / "nastjapy_copy" / "src"
-    if not src.is_dir():
-        return False
-    if str(src) not in sys.path:
-        sys.path.insert(0, str(src))
     try:
-        import nastja.parameter_space_config  # noqa: F401
+        _ensure_nastjapy_on_path()
         return True
-    except Exception:
+    except ImportError:
         return False
 
 
@@ -261,7 +256,6 @@ class TestCellularPottsImport:
             return real_import(name, globals, locals, fromlist, level)
 
         real_import = builtins.__import__
-        monkeypatch.setattr(cellular_potts, "_NASTJAPY_SRC", tmp_path / "missing-src")
         monkeypatch.setattr(builtins, "__import__", blocked_import)
 
         with pytest.raises(ImportError):

@@ -1,7 +1,7 @@
 """Cellular Potts model benchmark backed by nastjapy's simulation machinery.
 
 Requires nastjapy to run simulations. The active environment is preferred; the
-repo-local ``nastjapy_copy`` symlink is used only as a fallback.
+repo-local ``nastjapy_copy/.venv`` is used only as a fallback.
 """
 from __future__ import annotations
 
@@ -14,7 +14,17 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_NASTJAPY_SRC = Path(__file__).resolve().parents[3] / "nastjapy_copy" / "src"
+_NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
+
+
+def _nastjapy_site_packages() -> Path:
+    """Return the matching site-packages dir from the repo-local nastjapy venv."""
+    return (
+        _NASTJAPY_VENV
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
 
 
 def _ensure_nastjapy_on_path() -> None:
@@ -23,29 +33,30 @@ def _ensure_nastjapy_on_path() -> None:
     Raises
     ------
     ImportError
-        If neither the active environment nor ``nastjapy_copy/src`` is usable.
+        If neither the active environment nor ``nastjapy_copy/.venv`` is usable.
     """
     try:
         import nastja.parameter_space_config  # noqa: F401
         return
     except Exception as env_exc:
-        if not _NASTJAPY_SRC.is_dir():
+        site_packages = _nastjapy_site_packages()
+        if not site_packages.is_dir():
             raise ImportError(
                 "The cellular_potts benchmark requires a working nastjapy/nastja "
                 "installation in the active environment, or a repo-local "
-                f"'nastjapy_copy/src' fallback at {_NASTJAPY_SRC}."
+                f"'nastjapy_copy/.venv' fallback with site-packages at {site_packages}."
             ) from env_exc
 
-    src_str = str(_NASTJAPY_SRC)
-    if src_str not in sys.path:
-        sys.path.insert(0, src_str)
+    site_packages_str = str(site_packages)
+    if site_packages_str not in sys.path:
+        sys.path.insert(0, site_packages_str)
     try:
         import nastja.parameter_space_config  # noqa: F401
     except Exception as path_exc:
         raise ImportError(
             "The cellular_potts benchmark requires a working nastjapy/nastja "
             "installation. Import failed from both the active environment and "
-            f"the repo-local fallback at {_NASTJAPY_SRC}."
+            f"the repo-local .venv site-packages at {site_packages}."
         ) from path_exc
 
 
