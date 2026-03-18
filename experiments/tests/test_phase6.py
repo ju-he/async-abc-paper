@@ -18,6 +18,7 @@ CONFIG_FILES = [
     "gaussian_mean.json",
     "gandk.json",
     "lotka_volterra.json",
+    "cellular_potts.json",
     "sbc.json",
     "straggler.json",
     "runtime_heterogeneity.json",
@@ -31,6 +32,7 @@ EXPERIMENT_NAMES = [
     "gaussian_mean",
     "gandk",
     "lotka_volterra",
+    "cellular_potts",
     "sbc",
     "straggler",
     "runtime_heterogeneity",
@@ -106,6 +108,10 @@ class TestAllConfigsValid:
 class TestRunAll:
     def test_run_all_script_exists(self):
         assert RUN_ALL.exists(), "run_all_paper_experiments.py not found"
+
+    def test_run_all_registry_includes_all_paper_experiments(self):
+        run_all = test_helpers.import_runner_module("../run_all_paper_experiments.py")
+        assert set(EXPERIMENT_NAMES).issubset(run_all.EXPERIMENT_REGISTRY)
 
     def test_run_all_test_mode_gaussian(self, run_all_gaussian):
         """run_all with --test and --experiments gaussian_mean completes without error."""

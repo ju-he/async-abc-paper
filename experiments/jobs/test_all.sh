@@ -57,7 +57,7 @@ echo "Using output_dir=$output_dir"
 
 srun python "$experiments_dir/run_all_paper_experiments.py" \
     --test \
-    --experiments gaussian_mean gandk lotka_volterra sbc \
+    --experiments gaussian_mean gandk lotka_volterra cellular_potts sbc \
                   straggler runtime_heterogeneity scaling sensitivity ablation \
     --output-dir "$output_dir" \
     ${extend_flag:+"$extend_flag"}

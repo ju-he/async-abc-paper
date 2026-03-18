@@ -21,7 +21,8 @@
 nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
 output_dir="${1:?Usage: scaling_single.sh <output_dir> [--extend]}"
 extend_flag="${2:-}"
-experiments_dir="$(cd "$(dirname "$0")/.." && pwd)"
+experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
+
 
 n_workers="${SLURM_NTASKS}"
 

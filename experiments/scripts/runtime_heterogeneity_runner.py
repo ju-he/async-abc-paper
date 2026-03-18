@@ -22,7 +22,7 @@ from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
-from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_experiment, write_timing_csv
+from async_abc.utils.runner import compute_corrected_estimate, format_duration, make_arg_parser, run_experiment, write_timing_csv
 from async_abc.benchmarks import make_benchmark
 
 logger = logging.getLogger(__name__)
@@ -84,14 +84,10 @@ def main(argv: list[str] | None = None) -> None:
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
     if args.test and is_root_rank():
-        factor, extra, note = compute_scaling_factor(args.config)
-        estimated = experiment_elapsed * factor + extra
-        logger.info(
-            "[%s] Estimated full run: ~%s  (%s)",
-            name,
-            format_duration(estimated),
-            note,
+        estimated = compute_corrected_estimate(
+            experiment_elapsed, output_dir.data / "raw_results.csv", args.config
         )
+        logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if is_root_rank():
         write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 

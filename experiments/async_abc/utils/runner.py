@@ -128,6 +128,80 @@ _TIMING_FIELDNAMES = [
 ]
 
 
+def compute_corrected_estimate(
+    elapsed: float,
+    raw_results_path: Union[str, Path],
+    config_path: Union[str, Path],
+    extra_seconds: float = 0.0,
+) -> float:
+    """Return a teardown-corrected full-run timing estimate.
+
+    The naive ``elapsed * factor`` formula over-estimates when the test run is
+    dominated by fixed per-run overhead (Propulate MPI finalisation, checkpoint
+    writes) rather than simulation compute.  This function separates the two:
+
+    * **overhead_per_run** – time spent outside simulations per
+      ``run_method_distributed`` call; does *not* scale with simulation count.
+    * **compute_per_run** – time actually spent running simulations; scales
+      linearly with ``full_sims / test_sims * test_workers / full_workers``.
+
+    It reads ``wall_time`` (time-to-coordinator) per record from
+    *raw_results_path*, groups by method, and uses each method's
+    ``max(wall_time)`` as that run's compute-phase duration.
+
+    Falls back to ``elapsed * factor + extra_seconds`` if the CSV is missing,
+    empty, or lacks usable timing columns.
+    """
+    factor, extra, _ = compute_scaling_factor(config_path)
+    fallback = elapsed * factor + (extra_seconds or extra)
+
+    raw_results_path = Path(raw_results_path)
+    if not raw_results_path.exists() or raw_results_path.stat().st_size == 0:
+        return fallback
+
+    try:
+        with open(raw_results_path) as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return fallback
+
+        method_max_wt: Dict[str, float] = {}
+        for row in rows:
+            wt_str = row.get("wall_time", "")
+            m = row.get("method", "")
+            if wt_str and m:
+                try:
+                    wt = float(wt_str)
+                    method_max_wt[m] = max(method_max_wt.get(m, 0.0), wt)
+                except ValueError:
+                    pass
+
+        if not method_max_wt:
+            return fallback
+
+        n_runs_test = len(method_max_wt)
+        total_compute_test = sum(method_max_wt.values())
+        overhead_per_run = max(0.0, (elapsed - total_compute_test) / n_runs_test)
+        compute_per_run = total_compute_test / n_runs_test
+
+        cfg_full = load_config(config_path, test_mode=False)
+        cfg_test = load_config(config_path, test_mode=True)
+        full_sims = cfg_full["inference"]["max_simulations"]
+        full_workers = cfg_full["inference"]["n_workers"]
+        full_reps = cfg_full["execution"]["n_replicates"]
+        test_sims = cfg_test["inference"]["max_simulations"]
+        test_workers = cfg_test["inference"]["n_workers"]
+        test_reps = cfg_test["execution"]["n_replicates"]
+
+        compute_scale = (full_sims / full_workers) / (test_sims / test_workers)
+        n_runs_full = n_runs_test * (full_reps / test_reps)
+
+        estimated = n_runs_full * (overhead_per_run + compute_per_run * compute_scale)
+        return estimated + (extra_seconds or extra)
+    except Exception:
+        return fallback
+
+
 def write_timing_csv(
     path: Union[str, Path],
     experiment_name: str,
