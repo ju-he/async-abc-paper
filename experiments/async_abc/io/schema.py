@@ -81,14 +81,14 @@ _TEST_MODE_OVERRIDES_TEMPLATE = {
     "clamp": {
         "inference": {
             "n_workers": LOCAL_TEST_MAX_WORKERS,
-            "max_simulations": 300,
-            "n_generations": 3,
+            "max_simulations": 100,
+            "n_generations": 2,
         },
         "execution": {
-            "n_replicates": 2,
+            "n_replicates": 1,
         },
         "sbc": {
-            "n_trials": 3,
+            "n_trials": 2,
         },
     },
     "set": {

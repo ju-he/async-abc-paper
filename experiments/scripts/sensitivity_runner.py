@@ -16,7 +16,6 @@ from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
-from async_abc.plotting.reporters import plot_sensitivity_summary
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
@@ -44,9 +43,9 @@ def _variant_name(variant: dict) -> str:
     return "__".join(parts)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = make_arg_parser("Sensitivity analysis experiment.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
@@ -109,6 +108,8 @@ def main() -> None:
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("sensitivity_heatmap"):
+        from async_abc.plotting.reporters import plot_sensitivity_summary
+
         plot_sensitivity_summary(output_dir.data, grid, output_dir)
 
     write_metadata(output_dir, cfg, extra={"sensitivity_grid": grid})

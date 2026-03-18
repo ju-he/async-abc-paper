@@ -15,19 +15,18 @@ from async_abc.benchmarks import make_benchmark
 from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
-from async_abc.plotting.reporters import plot_scaling_summary
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = make_arg_parser("Scaling experiment.")
     parser.add_argument(
         "--n-workers", type=int, default=None, dest="n_workers",
         help="Run only this specific worker count (for HPC: match --ntasks=N).",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
@@ -100,6 +99,8 @@ def main() -> None:
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"):
+        from async_abc.plotting.reporters import plot_scaling_summary
+
         plot_scaling_summary(throughput_rows, output_dir)
 
     write_metadata(output_dir, cfg, extra={"worker_counts": worker_counts})

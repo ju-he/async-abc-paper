@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
-from async_abc.plotting.reporters import plot_benchmark_diagnostics, plot_worker_gantt
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_experiment, write_timing_csv
 from async_abc.benchmarks import make_benchmark
@@ -39,9 +38,9 @@ def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int
     return wrapped
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = make_arg_parser("Runtime heterogeneity experiment.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
@@ -86,8 +85,13 @@ def main() -> None:
         )
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
-    plot_benchmark_diagnostics(all_records, cfg, output_dir)
+    if any(cfg.get("plots", {}).values()):
+        from async_abc.plotting.reporters import plot_benchmark_diagnostics
+
+        plot_benchmark_diagnostics(all_records, cfg, output_dir)
     if cfg.get("plots", {}).get("gantt"):
+        from async_abc.plotting.reporters import plot_worker_gantt
+
         plot_worker_gantt(all_records, output_dir)
     write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 

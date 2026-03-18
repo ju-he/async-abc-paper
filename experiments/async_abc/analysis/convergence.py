@@ -1,7 +1,6 @@
 """Posterior convergence summaries."""
 
 import numpy as np
-import ot
 import pandas as pd
 from scipy.stats import wasserstein_distance
 
@@ -21,6 +20,19 @@ def _wasserstein_to_true_params(
     )
     if len(param_names) == 1:
         return float(wasserstein_distance(samples[:, 0], target[:, 0]))
+    try:
+        import ot
+    except ImportError:
+        # Fallback keeps multi-parameter diagnostics available in lightweight
+        # test environments without POT.
+        return float(
+            np.mean(
+                [
+                    wasserstein_distance(samples[:, idx], target[:, idx])
+                    for idx in range(samples.shape[1])
+                ]
+            )
+        )
     return float(
         ot.sliced_wasserstein_distance(
             samples,

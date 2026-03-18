@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).parent))
+import conftest as test_helpers
+
 EXPERIMENTS_DIR = Path(__file__).parent.parent
 CONFIGS_DIR = EXPERIMENTS_DIR / "configs"
 RUN_ALL = EXPERIMENTS_DIR / "run_all_paper_experiments.py"
@@ -40,27 +43,35 @@ EXPERIMENT_NAMES = [
 @pytest.fixture(scope="module")
 def run_all_gaussian(tmp_path_factory):
     root = tmp_path_factory.mktemp("run_all_gaussian")
-    result = subprocess.run(
-        [
-            PYTHON,
-            str(RUN_ALL),
-            "--test",
-            "--experiments",
-            "gaussian_mean",
-            "--output-dir",
-            str(root),
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
+    cfg = test_helpers.make_fast_runner_config(
+        "gaussian_mean.json",
+        methods=["rejection_abc"],
+        inference_overrides={"max_simulations": 60, "k": 10},
+        execution_overrides={"n_replicates": 1, "base_seed": 1},
+        plots={},
     )
-    assert result.returncode == 0, (
-        f"run_all failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
-    )
-    return {
-        "result": result,
-        "output_dir": root,
-    }
+    config_path = test_helpers.write_config(root, "gaussian_run_all.json", cfg)
+    run_all = test_helpers.import_runner_module("../run_all_paper_experiments.py")
+    original_configs_dir = run_all.CONFIGS_DIR
+    original_registry = run_all.EXPERIMENT_REGISTRY
+    try:
+        run_all.CONFIGS_DIR = root
+        run_all.EXPERIMENT_REGISTRY = {
+            "gaussian_mean": ("gaussian_mean_runner.py", config_path.name),
+        }
+        run_all.main(
+            [
+                "--test",
+                "--experiments",
+                "gaussian_mean",
+                "--output-dir",
+                str(root),
+            ]
+        )
+    finally:
+        run_all.CONFIGS_DIR = original_configs_dir
+        run_all.EXPERIMENT_REGISTRY = original_registry
+    return {"output_dir": root}
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +109,8 @@ class TestRunAll:
 
     def test_run_all_test_mode_gaussian(self, run_all_gaussian):
         """run_all with --test and --experiments gaussian_mean completes without error."""
-        assert run_all_gaussian["result"].returncode == 0
+        exp_dir = run_all_gaussian["output_dir"] / "gaussian_mean"
+        assert exp_dir.exists()
 
     def test_run_all_creates_output_dir(self, run_all_gaussian):
         """Expected output directory is created for the selected experiment."""

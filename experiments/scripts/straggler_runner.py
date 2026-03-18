@@ -20,7 +20,6 @@ from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
 from async_abc.plotting.export import save_figure
-from async_abc.plotting.reporters import plot_worker_gantt
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
 from async_abc.utils.seeding import make_seeds
@@ -91,9 +90,9 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
     save_figure(fig, output_dir.plots / "throughput_vs_slowdown", data=data)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = make_arg_parser("Persistent straggler experiment.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
@@ -188,6 +187,8 @@ def main() -> None:
     if plots_cfg.get("throughput_vs_slowdown"):
         _plot_throughput_vs_slowdown(throughput_rows, output_dir)
     if plots_cfg.get("gantt") and worst_records:
+        from async_abc.plotting.reporters import plot_worker_gantt
+
         plot_worker_gantt(worst_records, output_dir)
 
     write_metadata(

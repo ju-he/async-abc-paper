@@ -78,7 +78,7 @@ def _run_experiment(
     return result.returncode, elapsed
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         description="Run all async-ABC paper experiments."
     )
@@ -102,7 +102,7 @@ def main() -> None:
         "--extend", action="store_true",
         help="Skip parameter combinations already present in existing CSVs.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

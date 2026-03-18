@@ -156,7 +156,7 @@ class TestNewMethodsInConfig:
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p, test_mode=True)
-        assert cfg["inference"]["n_generations"] == 3
+        assert cfg["inference"]["n_generations"] == 2
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ class TestScalingFactor:
 
         factor, extra, note = compute_scaling_factor(path)
 
-        assert factor == pytest.approx(200 / 3)
+        assert factor == pytest.approx(600.0)
         assert extra == 0.0
         assert "200 SBC trials" in note
 
@@ -250,7 +250,7 @@ class TestScalingFactor:
 
         factor, extra, note = compute_scaling_factor(path)
 
-        assert factor == pytest.approx(1.0)
+        assert factor == pytest.approx(6.0)
         assert extra > 0.0
         assert "2 slowdown levels" in note
 

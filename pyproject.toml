@@ -33,3 +33,6 @@ include-package-data = false
 [tool.setuptools.packages.find]
 where = ["experiments"]
 include = ["async_abc*"]
+
+[tool.pytest.ini_options]
+testpaths = ["experiments/tests"]

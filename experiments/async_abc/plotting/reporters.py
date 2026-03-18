@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from ..analysis import tolerance_over_wall_time, wasserstein_at_checkpoints
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 from .common import (
@@ -107,6 +106,8 @@ def plot_quality_vs_time(
     if not true_params or not checkpoint_steps:
         return
 
+    from ..analysis import wasserstein_at_checkpoints
+
     quality_df = wasserstein_at_checkpoints(records, true_params, checkpoint_steps)
     if quality_df.empty:
         return
@@ -140,6 +141,8 @@ def plot_corner(
 
 def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputDir) -> None:
     """Tolerance schedule over wall-clock time."""
+    from ..analysis import tolerance_over_wall_time
+
     trajectory_df = tolerance_over_wall_time(records)
     if trajectory_df.empty:
         return
