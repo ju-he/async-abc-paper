@@ -18,10 +18,11 @@ Full production run::
     python run_all_paper_experiments.py --output-dir /path/to/results
 """
 import argparse
+import importlib.util
 import logging
-import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 EXPERIMENTS_DIR = Path(__file__).parent
@@ -61,22 +62,41 @@ def _run_experiment(
 
     Returns (returncode, elapsed_seconds).
     """
-    cmd = [
-        sys.executable,
-        str(SCRIPTS_DIR / runner),
+    runner_path = SCRIPTS_DIR / runner
+    argv = [
         "--config", str(CONFIGS_DIR / config),
         "--output-dir", str(output_dir),
     ]
     if test_mode:
-        cmd.append("--test")
+        argv.append("--test")
     if extend:
-        cmd.append("--extend")
+        argv.append("--extend")
 
     logger.info("[run_all] Starting: %s", name)
     t0 = time.time()
-    result = subprocess.run(cmd, text=True)
+    rc_local = 0
+    try:
+        module_name = f"run_all_{runner_path.stem}"
+        spec = importlib.util.spec_from_file_location(module_name, runner_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load runner module from {runner_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.main(argv)
+    except SystemExit as exc:
+        code = exc.code
+        rc_local = int(code) if isinstance(code, int) else 1
+    except Exception:
+        rc_local = 1
+        if is_root_rank():
+            logger.error(
+                "[run_all] Runner %s crashed:\n%s",
+                runner,
+                traceback.format_exc(),
+            )
+
     elapsed = time.time() - t0
-    rc = allreduce_max(result.returncode)
+    rc = allreduce_max(rc_local)
     if is_root_rank():
         if rc != 0:
             logger.error("[run_all] FAILED: %s (exit %s)", name, rc)
