@@ -6,9 +6,9 @@ Prerequisites
 Before running this script, generate the reference simulation data once::
 
     python experiments/scripts/generate_cpm_reference.py \\
-        --config-template nastjapy_copy/templates/spheroid_inf_nanospheroids/sim_config.json \\
-        --config-builder-params nastjapy_copy/templates/spheroid_inf_nanospheroids/config_builder_params.json \\
-        --parameter-space nastjapy_copy/templates/spheroid_inf_nanospheroids/parameter_space_division_motility.json \\
+        --config-template experiments/assets/cellular_potts/sim_config.json \\
+        --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
+        --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
         --true-params '{"division_rate": 0.03, "motility": 2000}' \\
         --output-dir experiments/data/cpm_reference \\
         --seed 0

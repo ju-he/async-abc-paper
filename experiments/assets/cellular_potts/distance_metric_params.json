@@ -1,0 +1,45 @@
+{
+  "feature_metadata": {
+    "log_r95": {},
+    "log_n": {},
+    "radial_fa_equal_volume": {
+      "n_bins": 32,
+      "r_ref_percentile": 95.0,
+      "k_neighbors": 20,
+      "r_cap_fraction": 0.06,
+      "explained_var": 0.88
+    },
+    "radial_s2_equal_volume": {
+      "n_bins": 32,
+      "r_ref_percentile": 95.0,
+      "k_neighbors": 20,
+      "r_cap_fraction": 0.06,
+      "explained_var": 0.85
+    },
+    "radial_density_profile_equal_volume": {
+      "n_bins": 32,
+      "r_ref": 95,
+      "explained_var": 0.92
+    },
+    "dbscan_gaslike_fraction": {
+      "eps": 20.0,
+      "min_samples": 5,
+      "metric": "euclidean",
+      "algorithm": "auto",
+      "leaf_size": 40
+    },
+    "pair_correlation_gofr": {
+      "n_bins": 32,
+      "r_ref_percentile": 95.0,
+      "r_max_fraction": 0.5,
+      "explained_var": 0.90
+    }
+  },
+  "feature_space_model": "/p/scratch/tissuetwin/herold2/spheroids/feature_spaces/microspheroids.json",
+  "reference_data": ["/p/scratch/tissuetwin/archive/behle2/behle2/param_sweeps_microspheroids_28_03_25/third_sweep_08_04_25/00764/out0"],
+  "lambda_dict": {},
+  "standardization_factors": {},
+  "sim_datahandler_kwargs": {
+    "scale_factor": 1
+  }
+}

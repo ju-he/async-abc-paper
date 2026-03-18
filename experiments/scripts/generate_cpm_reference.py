@@ -8,9 +8,9 @@ experiment to produce the reference simulation directory that
 Example
 -------
     python experiments/scripts/generate_cpm_reference.py \\
-        --config-template nastjapy_copy/templates/spheroid_inf_nanospheroids/sim_config.json \\
-        --config-builder-params nastjapy_copy/templates/spheroid_inf_nanospheroids/config_builder_params.json \\
-        --parameter-space nastjapy_copy/templates/spheroid_inf_nanospheroids/parameter_space_division_motility.json \\
+        --config-template experiments/assets/cellular_potts/sim_config.json \\
+        --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
+        --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
         --true-params '{"division_rate": 0.03, "motility": 2000}' \\
         --output-dir experiments/data/cpm_reference \\
         --seed 0
@@ -27,6 +27,7 @@ if str(EXPERIMENTS_DIR) not in sys.path:
 from async_abc.benchmarks.cellular_potts import (
     _ensure_nastjapy_on_path,
     _normalize_generated_config_paths,
+    _resolve_repo_path,
 )
 
 try:
@@ -98,11 +99,16 @@ def main(args=None):
     from simulation.simulation_config import Parameter, ParameterList
     from simulation.simulation_config_builder import SimulationConfigBuilderParams
 
+    config_template_path = _resolve_repo_path(args.config_template)
+    config_builder_params_path = _resolve_repo_path(args.config_builder_params)
+    parameter_space_path = _resolve_repo_path(args.parameter_space)
+    output_dir_path = _resolve_repo_path(args.output_dir)
+
     # Load config_builder_params and override template path + output dir
-    with open(args.config_builder_params) as f:
+    with open(config_builder_params_path) as f:
         cb_raw = json.load(f)
-    cb_raw["config_template"] = args.config_template
-    cb_raw["out_dir"] = args.output_dir
+    cb_raw["config_template"] = str(config_template_path)
+    cb_raw["out_dir"] = str(output_dir_path)
     cb_params = SimulationConfigBuilderParams.model_validate(cb_raw)
 
     # Engine backend
@@ -116,7 +122,7 @@ def main(args=None):
     true_params: dict = json.loads(args.true_params)
 
     # Load parameter space for path metadata
-    with open(args.parameter_space) as f:
+    with open(parameter_space_path) as f:
         ps_data = json.load(f)
     param_space_data = ps_data["parameters"]
 

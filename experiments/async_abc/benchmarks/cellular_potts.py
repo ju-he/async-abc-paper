@@ -18,6 +18,14 @@ _NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
+def _resolve_repo_path(path_like: str | Path) -> Path:
+    """Resolve project-relative CPM asset paths independently of the cwd."""
+    path = Path(path_like)
+    if path.is_absolute():
+        return path
+    return (_REPO_ROOT / path).resolve()
+
+
 def _nastjapy_site_packages() -> Path:
     """Return the matching site-packages dir from the repo-local nastjapy venv."""
     return (
@@ -174,7 +182,7 @@ class CellularPotts:
                 raise KeyError(f"CellularPotts config missing required key: '{key}'")
 
         # Load parameter space and derive limits dict
-        param_space_path = Path(config["parameter_space"])
+        param_space_path = _resolve_repo_path(config["parameter_space"])
         with open(param_space_path) as f:
             ps_data = json.load(f)
 
@@ -188,7 +196,7 @@ class CellularPotts:
         }
         self._seed_param_name: str = config.get("seed_param_name", "random_seed")
         self._seed_param_path: str = config.get("seed_param_path", "Settings.randomseed")
-        self._output_dir: str = config["output_dir"]
+        self._output_dir: str = str(_resolve_repo_path(config["output_dir"]))
         self._eval_counter: int = 0  # for logging only; dir names use uuid4
 
         # SimulationManager
@@ -199,11 +207,11 @@ class CellularPotts:
             from simulation.manager import SimulationManager
             from simulation.simulation_config_builder import SimulationConfigBuilderParams
 
-            cb_params_path = Path(config["config_builder_params"])
+            cb_params_path = _resolve_repo_path(config["config_builder_params"])
             with open(cb_params_path) as f:
                 cb_raw = json.load(f)
             # Override template path for portability (template JSON may have HPC paths)
-            cb_raw["config_template"] = config["nastja_config_template"]
+            cb_raw["config_template"] = str(_resolve_repo_path(config["nastja_config_template"]))
             cb_raw["out_dir"] = self._output_dir
             cb_params = SimulationConfigBuilderParams.model_validate(cb_raw)
 
@@ -223,10 +231,10 @@ class CellularPotts:
         else:
             from inference.distance import DistanceMetric, DistanceMetricParams
 
-            dm_params_path = Path(config["distance_metric_params"])
+            dm_params_path = _resolve_repo_path(config["distance_metric_params"])
             with open(dm_params_path) as f:
                 dm_raw = json.load(f)
-            dm_raw["reference_data"] = config["reference_data_path"]
+            dm_raw["reference_data"] = str(_resolve_repo_path(config["reference_data_path"]))
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 

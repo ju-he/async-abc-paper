@@ -18,7 +18,7 @@ from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
 # CPM helpers & fixtures
 # ---------------------------------------------------------------------------
 
-_CPM_TEMPLATE_DIR = Path(__file__).parents[2] / "nastjapy_copy" / "templates" / "spheroid_inf_nanospheroids"
+_CPM_TEMPLATE_DIR = Path(__file__).parents[1] / "assets" / "cellular_potts"
 
 
 def _nastjapy_available() -> bool:
@@ -279,6 +279,28 @@ class TestCellularPottsImport:
         data = json.loads(normalized.read_text())
 
         assert data["Include"] == [str(include_target.resolve())]
+
+    def test_init_resolves_repo_relative_asset_paths(self, tmp_path, monkeypatch, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        if not _NASTJAPY_AVAILABLE:
+            pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+
+        mock_sim, mock_dist = cpm_mocks
+        monkeypatch.chdir(tmp_path)
+        cfg = {
+            "name": "cellular_potts",
+            "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+            "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+            "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
+            "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_motility.json",
+            "reference_data_path": "experiments/data/cpm_reference/reference",
+            "output_dir": "experiments/data/cpm_sims",
+        }
+
+        bm = CellularPotts(cfg, _sim_manager=mock_sim, _distance_metric=mock_dist)
+
+        assert "division_rate" in bm.limits
 
 
 class TestCellularPotts:
