@@ -26,6 +26,7 @@ if str(EXPERIMENTS_DIR) not in sys.path:
 
 from async_abc.benchmarks.cellular_potts import (
     _ensure_nastjapy_on_path,
+    _ensure_reference_alias,
     _normalize_generated_config_paths,
     _resolve_repo_path,
 )
@@ -155,11 +156,15 @@ def main(args=None):
     sim_manager.run_simulation(config_path)
 
     output_path = Path(config_path).parent
+    canonical_output_path = _ensure_reference_alias(output_dir_path, output_path)
+
     print(f"Reference simulation written to: {output_path}")
+    if canonical_output_path.resolve() != output_path.resolve():
+        print(f"Created canonical reference alias: {canonical_output_path} -> {output_path}")
     print(
-        f"Set 'reference_data_path' in cellular_potts.json to: {output_path}"
+        f"Set 'reference_data_path' in cellular_potts.json to: {canonical_output_path}"
     )
-    return str(output_path)
+    return str(canonical_output_path)
 
 
 if __name__ == "__main__":

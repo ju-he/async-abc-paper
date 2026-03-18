@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -126,6 +127,86 @@ def _normalize_generated_config_paths(config_path: str | Path) -> Path:
     return config_path
 
 
+def _is_reference_data_dir(path: Path) -> bool:
+    """Return whether ``path`` looks like a generated CPM reference directory."""
+    if not path.is_dir():
+        return False
+
+    expected_files = [path / "config.json", path / "cis.out"]
+    expected_dirs = [path / "configs"]
+    if not all(file_path.is_file() for file_path in expected_files):
+        return False
+    if not all(dir_path.is_dir() for dir_path in expected_dirs):
+        return False
+
+    return (path / "000000" / "cellevents.log").is_file()
+
+
+def _resolve_reference_data_path(path_like: str | Path) -> Path:
+    """Resolve the CPM reference directory, including nested generated layouts.
+
+    Some NAStJA-generated reference datasets end up nested one level deeper than
+    the intended ``.../reference`` directory, e.g.
+    ``<root>/experiments/data/cpm_reference/reference``. Prefer the configured
+    path, but fall back to that nested layout when present.
+    """
+    configured_path = _resolve_repo_path(path_like)
+    if _is_reference_data_dir(configured_path):
+        return configured_path
+
+    candidates: list[Path] = []
+    path_obj = Path(path_like)
+    if not path_obj.is_absolute():
+        nested_candidate = (configured_path.parent / path_obj).resolve()
+        candidates.append(nested_candidate)
+
+    for candidate in candidates:
+        if _is_reference_data_dir(candidate):
+            logger.warning(
+                "Resolved CPM reference data path %s to nested generated directory %s",
+                configured_path,
+                candidate,
+            )
+            return candidate
+
+    raise FileNotFoundError(
+        "CPM reference_data_path does not point to a valid reference dataset. "
+        f"Configured path: {configured_path}. "
+        "Expected files such as config.json, cis.out, configs/, and "
+        "000000/cellevents.log. Regenerate the reference data or update "
+        "'reference_data_path' to the generated directory."
+    )
+
+
+def _ensure_reference_alias(output_dir: Path, actual_reference_dir: Path) -> Path:
+    """Create a stable ``output_dir/reference`` alias for generated reference data."""
+    alias_path = output_dir / "reference"
+    resolved_actual = actual_reference_dir.resolve()
+
+    if alias_path.exists() or alias_path.is_symlink():
+        try:
+            if alias_path.resolve() == resolved_actual:
+                return alias_path
+        except FileNotFoundError:
+            pass
+
+        if alias_path.is_symlink() or alias_path.is_file():
+            alias_path.unlink()
+        elif alias_path.is_dir() and not any(alias_path.iterdir()):
+            alias_path.rmdir()
+        elif alias_path.is_dir():
+            raise FileExistsError(
+                f"Cannot create CPM reference alias at {alias_path}: directory is not empty."
+            )
+
+    alias_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        alias_path.symlink_to(resolved_actual, target_is_directory=True)
+    except OSError:
+        shutil.copytree(resolved_actual, alias_path)
+    return alias_path
+
+
 class CellularPotts:
     """Cellular Potts model benchmark using nastjapy's SimulationManager + DistanceMetric.
 
@@ -234,7 +315,9 @@ class CellularPotts:
             dm_params_path = _resolve_repo_path(config["distance_metric_params"])
             with open(dm_params_path) as f:
                 dm_raw = json.load(f)
-            dm_raw["reference_data"] = str(_resolve_repo_path(config["reference_data_path"]))
+            dm_raw["reference_data"] = str(
+                _resolve_reference_data_path(config["reference_data_path"])
+            )
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 
