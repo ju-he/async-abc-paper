@@ -18,6 +18,7 @@ Full production run::
     python run_all_paper_experiments.py --output-dir /path/to/results
 """
 import argparse
+import logging
 import subprocess
 import sys
 import time
@@ -28,7 +29,11 @@ SCRIPTS_DIR = EXPERIMENTS_DIR / "scripts"
 CONFIGS_DIR = EXPERIMENTS_DIR / "configs"
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
+from async_abc.utils.logging_utils import configure_logging
+from async_abc.utils.mpi import allreduce_max, is_root_rank
 from async_abc.utils.runner import compute_scaling_factor, format_duration, write_timing_csv
+
+logger = logging.getLogger(__name__)
 
 # Ordered mapping: experiment_name → (runner_script, config_file)
 EXPERIMENT_REGISTRY = {
@@ -67,18 +72,22 @@ def _run_experiment(
     if extend:
         cmd.append("--extend")
 
-    print(f"[run_all] Starting: {name}", flush=True)
+    logger.info("[run_all] Starting: %s", name)
     t0 = time.time()
     result = subprocess.run(cmd, text=True)
     elapsed = time.time() - t0
-    if result.returncode != 0:
-        print(f"[run_all] FAILED: {name} (exit {result.returncode})", file=sys.stderr)
-    else:
-        print(f"[run_all] Done:    {name}", flush=True)
-    return result.returncode, elapsed
+    rc = allreduce_max(result.returncode)
+    if is_root_rank():
+        if rc != 0:
+            logger.error("[run_all] FAILED: %s (exit %s)", name, rc)
+        else:
+            logger.info("[run_all] Done:    %s", name)
+    return rc, elapsed
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Run all async-ABC paper experiments."
     )
@@ -120,33 +129,41 @@ def main(argv: list[str] | None = None) -> None:
     for name in args.experiments:
         runner, config = EXPERIMENT_REGISTRY[name]
         rc, elapsed = _run_experiment(name, runner, config, output_dir, test_mode=args.test, extend=args.extend)
-        print(f"[run_all] Time:    {name} took {format_duration(elapsed)}", flush=True)
+        if is_root_rank():
+            logger.info("[run_all] Time:    %s took %s", name, format_duration(elapsed))
         est = None
         if args.test:
             factor, extra, note = compute_scaling_factor(CONFIGS_DIR / config)
             est = elapsed * factor + extra
-            total_estimate += est
-            print(
-                f"[run_all] Estimate: {name} full run ~{format_duration(est)}  ({note})",
-                flush=True,
-            )
-        write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test)
+            if is_root_rank():
+                total_estimate += est
+                logger.info(
+                    "[run_all] Estimate: %s full run ~%s  (%s)",
+                    name,
+                    format_duration(est),
+                    note,
+                )
+        if is_root_rank():
+            write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test)
         if rc != 0:
             failures.append(name)
 
     total_elapsed = time.time() - total_start
-    print(f"\n[run_all] Total runtime: {format_duration(total_elapsed)}", flush=True)
-    if args.test and total_estimate > 0:
-        print(
-            f"[run_all] Estimated total (full run): ~{format_duration(total_estimate)}",
-            flush=True,
+    if is_root_rank():
+        logger.info("[run_all] Total runtime: %s", format_duration(total_elapsed))
+    if args.test and total_estimate > 0 and is_root_rank():
+        logger.info(
+            "[run_all] Estimated total (full run): ~%s",
+            format_duration(total_estimate),
         )
 
     if failures:
-        print(f"\n[run_all] {len(failures)} experiment(s) failed: {failures}", file=sys.stderr)
+        if is_root_rank():
+            logger.error("[run_all] %s experiment(s) failed: %s", len(failures), failures)
         sys.exit(1)
 
-    print(f"[run_all] All {len(args.experiments)} experiment(s) completed successfully.")
+    if is_root_rank():
+        logger.info("[run_all] All %s experiment(s) completed successfully.", len(args.experiments))
 
 
 if __name__ == "__main__":

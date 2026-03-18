@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Simulation-based calibration runner."""
 import copy
+import logging
 import sys
 import time
 from pathlib import Path
@@ -16,18 +17,22 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
-from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.export import save_figure
+from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
+from async_abc.utils.mpi import is_root_rank
 from async_abc.utils.runner import (
     compute_scaling_factor,
     format_duration,
     make_arg_parser,
+    run_method_distributed,
     write_timing_csv,
 )
 from async_abc.utils.seeding import make_seeds
+
+logger = logging.getLogger(__name__)
 
 
 def _write_dataframe_csv(df: pd.DataFrame, path: Path) -> None:
@@ -86,6 +91,7 @@ def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> No
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_logging()
     parser = make_arg_parser("Simulation-based calibration experiment.")
     args = parser.parse_args(argv)
 
@@ -122,7 +128,7 @@ def main(argv: list[str] | None = None) -> None:
 
         for method_idx, method in enumerate(cfg["methods"]):
             method_seed = int(seed + 1000 * (method_idx + 1))
-            records = run_method(
+            records = run_method_distributed(
                 method,
                 trial_benchmark.simulate,
                 trial_benchmark.limits,
@@ -148,14 +154,20 @@ def main(argv: list[str] | None = None) -> None:
     elapsed = time.time() - t0
     name = cfg["experiment_name"]
     estimated = None
-    print(f"[{name}] Done in {format_duration(elapsed)}", flush=True)
-    if args.test:
+    if is_root_rank():
+        logger.info("[%s] Done in %s", name, format_duration(elapsed))
+    if args.test and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = elapsed * factor + extra
-        print(
-            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
-            flush=True,
+        logger.info(
+            "[%s] Estimated full run: ~%s  (%s)",
+            name,
+            format_duration(estimated),
+            note,
         )
+    if not is_root_rank():
+        return
+
     write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
 
     ranks_df = sbc_ranks(trial_records)

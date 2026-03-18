@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Persistent straggler experiment."""
 import csv
+import logging
 import multiprocessing
 import sys
 import time
@@ -15,14 +16,17 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
 from async_abc.plotting.export import save_figure
+from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
+from async_abc.utils.mpi import is_root_rank
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
 from async_abc.utils.seeding import make_seeds
+
+logger = logging.getLogger(__name__)
 
 
 def _current_worker_rank() -> int:
@@ -91,6 +95,7 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_logging()
     parser = make_arg_parser("Persistent straggler experiment.")
     args = parser.parse_args(argv)
 
@@ -127,10 +132,14 @@ def main(argv: list[str] | None = None) -> None:
             tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
             for replicate, seed in enumerate(seeds):
                 if (tagged_method, str(replicate)) in done:
-                    print(f"[straggler] --extend: skipping {tagged_method} replicate={replicate}", flush=True)
+                    logger.info(
+                        "[straggler] --extend: skipping %s replicate=%s",
+                        tagged_method,
+                        replicate,
+                    )
                     continue
                 t0 = time.time()
-                records = run_method(
+                records = run_method_distributed(
                     method,
                     bm.simulate,
                     bm.limits,
@@ -142,21 +151,22 @@ def main(argv: list[str] | None = None) -> None:
                 elapsed = time.time() - t0
                 for record in records:
                     record.method = tagged_method
-                writer.write(records)
-                all_records.extend(records)
-                factor_records.extend(records)
-                throughput_rows.append(
-                    {
-                        "slowdown_factor": slowdown_factor,
-                        "base_method": method,
-                        "method": tagged_method,
-                        "replicate": replicate,
-                        "seed": seed,
-                        "n_simulations": len(records),
-                        "wall_time_s": elapsed,
-                        "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
-                    }
-                )
+                if is_root_rank():
+                    writer.write(records)
+                    all_records.extend(records)
+                    factor_records.extend(records)
+                    throughput_rows.append(
+                        {
+                            "slowdown_factor": slowdown_factor,
+                            "base_method": method,
+                            "method": tagged_method,
+                            "replicate": replicate,
+                            "seed": seed,
+                            "n_simulations": len(records),
+                            "wall_time_s": elapsed,
+                            "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
+                        }
+                    )
 
         if slowdown_factor == max(slowdown_factors):
             worst_records = factor_records
@@ -173,14 +183,20 @@ def main(argv: list[str] | None = None) -> None:
     elapsed = time.time() - experiment_start
     name = cfg["experiment_name"]
     estimated = None
-    print(f"[{name}] Done in {format_duration(elapsed)}", flush=True)
-    if args.test:
+    if is_root_rank():
+        logger.info("[%s] Done in %s", name, format_duration(elapsed))
+    if args.test and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = elapsed * factor + extra
-        print(
-            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
-            flush=True,
+        logger.info(
+            "[%s] Estimated full run: ~%s  (%s)",
+            name,
+            format_duration(estimated),
+            note,
         )
+    if not is_root_rank():
+        return
+
     write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
 
     plots_cfg = cfg.get("plots", {})

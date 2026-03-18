@@ -1,19 +1,24 @@
 """Shared experiment execution logic used by all runner scripts."""
 import argparse
 import csv
+import logging
 import math
 import sys
+import traceback
 import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from ..benchmarks import make_benchmark
-from ..inference.method_registry import run_method
+from ..inference.method_registry import method_execution_mode, run_method
 from ..io.config import load_config
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, RecordWriter
+from .mpi import allgather, is_root_rank
 from ..utils.seeding import make_seeds
+
+logger = logging.getLogger(__name__)
 
 
 def format_duration(seconds: float) -> str:
@@ -239,21 +244,72 @@ def run_experiment(
     for method in methods:
         for replicate, seed in enumerate(seeds):
             if (method, str(replicate)) in done:
-                print(f"[runner] --extend: skipping {method} replicate={replicate} (already done)", flush=True)
+                logger.info(
+                    "[runner] --extend: skipping %s replicate=%s (already done)",
+                    method,
+                    replicate,
+                )
                 continue
             try:
-                records = run_method(
+                records = run_method_distributed(
                     method, benchmark.simulate, benchmark.limits,
                     inference_cfg, output_dir, replicate, seed,
                 )
             except ImportError as exc:
-                warnings.warn(
-                    f"Skipping method '{method}' (missing dependency): {exc}",
-                    stacklevel=2,
-                )
-                print(f"[runner] WARNING: skipping '{method}': {exc}", file=sys.stderr)
+                if is_root_rank():
+                    warnings.warn(
+                        f"Skipping method '{method}' (missing dependency): {exc}",
+                        stacklevel=2,
+                    )
+                logger.warning("[runner] skipping '%s': %s", method, exc)
                 break  # skip all replicates for this method
-            writer.write(records)
-            all_records.extend(records)
+            if is_root_rank():
+                writer.write(records)
+                all_records.extend(records)
 
     return all_records
+
+
+def run_method_distributed(
+    name: str,
+    simulate_fn,
+    limits: Dict,
+    inference_cfg: Dict,
+    output_dir: OutputDir,
+    replicate: int,
+    seed: int,
+) -> List[ParticleRecord]:
+    """Execute one inference method with rank-aware coordination."""
+    execution_mode = method_execution_mode(name)
+    should_run_here = execution_mode == "all_ranks" or is_root_rank()
+
+    records: List[ParticleRecord] = []
+    error_payload: Optional[Tuple[str, str]] = None
+
+    if should_run_here:
+        try:
+            records = run_method(
+                name,
+                simulate_fn,
+                limits,
+                inference_cfg,
+                output_dir,
+                replicate,
+                seed,
+            )
+        except ImportError as exc:
+            error_payload = ("ImportError", str(exc))
+        except Exception:
+            error_payload = ("Exception", traceback.format_exc())
+
+    all_errors = allgather(error_payload)
+    first_error = next((payload for payload in all_errors if payload is not None), None)
+    if first_error is not None:
+        kind, message = first_error
+        if kind == "ImportError":
+            raise ImportError(message)
+        raise RuntimeError(message)
+
+    if execution_mode == "all_ranks":
+        return records if is_root_rank() else []
+    return records

@@ -5,6 +5,7 @@ For each combination in ``sensitivity_grid``, runs a full experiment and
 writes results to a separate CSV named after the variant.
 """
 import itertools
+import logging
 import sys
 import time
 from pathlib import Path
@@ -12,13 +13,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.inference.method_registry import run_method
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
+from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, write_timing_csv
+from async_abc.utils.mpi import is_root_rank
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
 from async_abc.utils.seeding import make_seeds
+
+logger = logging.getLogger(__name__)
 
 
 def _grid_variants(sensitivity_grid: dict) -> list:
@@ -44,6 +48,7 @@ def _variant_name(variant: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_logging()
     parser = make_arg_parser("Sensitivity analysis experiment.")
     args = parser.parse_args(argv)
 
@@ -56,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.test:
         # Shrink grid to first value of each parameter for speed
         grid = {k: v[:1] for k, v in grid.items()}
-        print(f"[{cfg['experiment_name']}] test mode: grid shrunk to 1 variant", flush=True)
+        logger.info("[%s] test mode: grid shrunk to 1 variant", cfg["experiment_name"])
 
     variants = _grid_variants(grid)
     n_replicates = cfg["execution"]["n_replicates"]
@@ -82,28 +87,39 @@ def main(argv: list[str] | None = None) -> None:
             tagged_method = f"{method}__{variant_name}"
             for replicate, seed in enumerate(seeds):
                 if (tagged_method, str(replicate)) in done:
-                    print(f"[sensitivity] --extend: skipping {tagged_method} replicate={replicate}", flush=True)
+                    logger.info(
+                        "[sensitivity] --extend: skipping %s replicate=%s",
+                        tagged_method,
+                        replicate,
+                    )
                     continue
-                records = run_method(
+                records = run_method_distributed(
                     method, bm.simulate, bm.limits,
                     inference_cfg, output_dir, replicate, seed,
                 )
                 # Tag records with variant info
                 for r in records:
                     r.method = tagged_method
-                writer.write(records)
+                if is_root_rank():
+                    writer.write(records)
 
     experiment_elapsed = time.time() - experiment_start
     name = cfg["experiment_name"]
     estimated = None
-    print(f"[{name}] Done in {format_duration(experiment_elapsed)}", flush=True)
-    if args.test:
+    if is_root_rank():
+        logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
+    if args.test and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = experiment_elapsed * factor + extra
-        print(
-            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
-            flush=True,
+        logger.info(
+            "[%s] Estimated full run: ~%s  (%s)",
+            name,
+            format_duration(estimated),
+            note,
         )
+    if not is_root_rank():
+        return
+
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
     plots_cfg = cfg.get("plots", {})

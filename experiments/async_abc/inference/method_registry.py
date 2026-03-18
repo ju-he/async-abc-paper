@@ -24,6 +24,13 @@ METHOD_REGISTRY: Dict[str, Callable] = {
     "abc_smc_baseline":    run_abc_smc_baseline,
 }
 
+METHOD_EXECUTION_MODE: Dict[str, str] = {
+    "async_propulate_abc": "all_ranks",
+    "pyabc_smc": "rank_zero",
+    "rejection_abc": "rank_zero",
+    "abc_smc_baseline": "rank_zero",
+}
+
 
 def run_method(
     name: str,
@@ -72,3 +79,18 @@ def run_method(
     return METHOD_REGISTRY[name](
         simulate_fn, limits, inference_cfg, output_dir, replicate, seed
     )
+
+
+def method_execution_mode(name: str) -> str:
+    """Return how a method should execute under MPI."""
+    if name in METHOD_EXECUTION_MODE:
+        return METHOD_EXECUTION_MODE[name]
+    if name in METHOD_REGISTRY:
+        return "rank_zero"
+    if name not in METHOD_REGISTRY:
+        valid = sorted(METHOD_EXECUTION_MODE.keys())
+        raise KeyError(
+            f"'{name}' is not a registered method. "
+            f"Available methods: {valid}"
+        )
+    return "rank_zero"

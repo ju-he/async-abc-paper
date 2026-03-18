@@ -8,6 +8,7 @@ The ``heterogeneity`` config block accepts either a scalar ``sigma`` (single
 variance level) or a list ``sigma_levels`` (sweep over multiple levels).
 In test mode the sleep is skipped so the pipeline completes quickly.
 """
+import logging
 import sys
 import time
 from pathlib import Path
@@ -18,9 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import load_config
 from async_abc.io.paths import OutputDir
+from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
+from async_abc.utils.mpi import is_root_rank
 from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_experiment, write_timing_csv
 from async_abc.benchmarks import make_benchmark
+
+logger = logging.getLogger(__name__)
 
 
 def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int,
@@ -39,6 +44,7 @@ def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_logging()
     parser = make_arg_parser("Runtime heterogeneity experiment.")
     args = parser.parse_args(argv)
 
@@ -75,25 +81,30 @@ def main(argv: list[str] | None = None) -> None:
     experiment_elapsed = time.time() - experiment_start
     name = cfg["experiment_name"]
     estimated = None
-    print(f"[{name}] Done in {format_duration(experiment_elapsed)}", flush=True)
-    if args.test:
+    if is_root_rank():
+        logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
+    if args.test and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = experiment_elapsed * factor + extra
-        print(
-            f"[{name}] Estimated full run: ~{format_duration(estimated)}  ({note})",
-            flush=True,
+        logger.info(
+            "[%s] Estimated full run: ~%s  (%s)",
+            name,
+            format_duration(estimated),
+            note,
         )
-    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
+    if is_root_rank():
+        write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
 
-    if any(cfg.get("plots", {}).values()):
+    if is_root_rank() and any(cfg.get("plots", {}).values()):
         from async_abc.plotting.reporters import plot_benchmark_diagnostics
 
         plot_benchmark_diagnostics(all_records, cfg, output_dir)
-    if cfg.get("plots", {}).get("gantt"):
+    if is_root_rank() and cfg.get("plots", {}).get("gantt"):
         from async_abc.plotting.reporters import plot_worker_gantt
 
         plot_worker_gantt(all_records, output_dir)
-    write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
+    if is_root_rank():
+        write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 
 
 if __name__ == "__main__":
