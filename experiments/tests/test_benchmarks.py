@@ -1,4 +1,5 @@
 """Tests for async_abc.benchmarks.*"""
+import builtins
 import math
 import sys
 from pathlib import Path
@@ -250,13 +251,21 @@ class TestCellularPottsImport:
     def test_class_importable(self):
         from async_abc.benchmarks.cellular_potts import CellularPotts  # noqa: F401
 
-    def test_missing_nastjapy_raises_import_error_on_init(self, tmp_path):
-        """When nastjapy_copy/src is absent, __init__ raises ImportError."""
-        from async_abc.benchmarks.cellular_potts import CellularPotts, _NASTJAPY_SRC
-        if _NASTJAPY_SRC.is_dir():
-            pytest.skip("nastjapy is present — this test needs it absent")
+    def test_missing_nastjapy_raises_import_error_on_init(self, tmp_path, monkeypatch):
+        """When nastja is unavailable from both env and fallback, __init__ raises ImportError."""
+        import async_abc.benchmarks.cellular_potts as cellular_potts
+
+        def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "nastja" or name.startswith("nastja."):
+                raise ModuleNotFoundError("No module named 'nastja'")
+            return real_import(name, globals, locals, fromlist, level)
+
+        real_import = builtins.__import__
+        monkeypatch.setattr(cellular_potts, "_NASTJAPY_SRC", tmp_path / "missing-src")
+        monkeypatch.setattr(builtins, "__import__", blocked_import)
+
         with pytest.raises(ImportError):
-            CellularPotts({"name": "cellular_potts"})
+            cellular_potts.CellularPotts({"name": "cellular_potts"})
 
 
 class TestCellularPotts:
