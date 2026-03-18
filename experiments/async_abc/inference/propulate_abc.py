@@ -23,6 +23,31 @@ Propulator = None
 ABCPMC = None
 
 
+def _make_propulate_comm():
+    """Return a per-run communicator to avoid cross-run message reuse."""
+    try:
+        from mpi4py import MPI
+    except Exception:
+        return None
+
+    try:
+        if MPI.COMM_WORLD.Get_size() <= 1:
+            return None
+        return MPI.COMM_WORLD.Dup()
+    except Exception:
+        return None
+
+
+def _free_propulate_comm(comm) -> None:
+    """Best-effort communicator cleanup after a completed Propulate run."""
+    if comm is None:
+        return
+    try:
+        comm.Free()
+    except Exception:
+        pass
+
+
 def _ensure_propulate_imports() -> None:
     """Resolve propulate from the active Python environment."""
     global Propulator, ABCPMC
@@ -47,6 +72,23 @@ def _ensure_propulate_imports() -> None:
 def _eval_seed(run_seed: int, generation: int) -> int:
     """Deterministic per-evaluation seed derived from the run seed and generation."""
     return abs(hash((run_seed, generation))) % (2**31)
+
+
+def _individual_params(ind, limits: Dict) -> Dict[str, float]:
+    """Extract parameter values from a Propulate individual with a clear error."""
+    params: Dict[str, float] = {}
+    for key in limits:
+        try:
+            params[key] = float(ind[key])
+        except Exception as exc:
+            available_keys = sorted(str(k) for k in getattr(ind, "keys", lambda: [])())
+            raise RuntimeError(
+                "Propulate returned an individual incompatible with the current "
+                f"limits. Expected keys {sorted(limits)}, got {available_keys}. "
+                "This usually indicates checkpoint reuse or MPI message "
+                "cross-contamination between sequential Propulate runs."
+            ) from exc
+    return params
 
 
 def run_propulate_abc(
@@ -111,7 +153,7 @@ def run_propulate_abc(
     # Propulate's loss_fn receives an Individual (dict-like).
     # We extract param values and forward to the benchmark simulator.
     def loss_fn(ind) -> float:
-        params = {key: float(ind[key]) for key in limits}
+        params = _individual_params(ind, limits)
         sim_seed = _eval_seed(seed, int(ind.generation))
         return float(simulate_fn(params, seed=sim_seed))
 
@@ -119,21 +161,41 @@ def run_propulate_abc(
     checkpoint_dir = output_dir.logs / f"propulate_rep{replicate}_seed{seed}"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    propulate_comm = _make_propulate_comm()
+    propulator_kwargs = {}
+    if propulate_comm is not None:
+        try:
+            from mpi4py import MPI
+            propulator_kwargs = {
+                "island_comm": propulate_comm,
+                "propulate_comm": propulate_comm,
+                "worker_sub_comm": MPI.COMM_SELF,
+            }
+        except Exception:
+            propulator_kwargs = {}
+
     propulator = Propulator(
         loss_fn=loss_fn,
         propagator=propagator,
         rng=random.Random(seed + 1),  # +1 to keep RNG streams separate
         generations=max_sims,
         checkpoint_path=checkpoint_dir,
+        **propulator_kwargs,
     )
 
-    propulator.propulate(logging_interval=max_sims + 1, debug=0)
+    propulate_completed = False
+    try:
+        propulator.propulate(logging_interval=max_sims + 1, debug=0)
+        propulate_completed = True
+    finally:
+        if propulate_completed:
+            _free_propulate_comm(propulate_comm)
 
     # Convert population to ParticleRecord list, sorted by generation
     population = sorted(propulator.population, key=lambda ind: ind.generation)
     records: List[ParticleRecord] = []
     for step, ind in enumerate(population, start=1):
-        params = {key: float(ind[key]) for key in limits}
+        params = _individual_params(ind, limits)
         weight = float(ind.weight) if ind.weight is not None else None
         tolerance = float(ind.tolerance) if ind.tolerance is not None else None
         sim_end_time = (

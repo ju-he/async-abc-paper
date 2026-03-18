@@ -75,13 +75,14 @@ class _FakeABCPMC:
 
 
 class _FakePropulator:
-    def __init__(self, *, loss_fn, propagator, rng, generations, checkpoint_path):
+    def __init__(self, *, loss_fn, propagator, rng, generations, checkpoint_path, **kwargs):
         self.loss_fn = loss_fn
         self.propagator = propagator
         self.rng = rng
         self.generations = generations
         self.checkpoint_path = checkpoint_path
         self.population = []
+        self.extra = kwargs
 
     def propulate(self, **kwargs):
         base_time = time.time() + 1.0
@@ -101,6 +102,14 @@ class _FakePropulator:
             )
             ind.loss = self.loss_fn(ind)
             self.population.append(ind)
+
+
+class _CapturingPropulator(_FakePropulator):
+    last_kwargs = None
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = kwargs
+        super().__init__(**kwargs)
 
 
 class _FakeNoEvaltimePropulator(_FakePropulator):
@@ -352,6 +361,74 @@ class TestRunPropulateAbc:
 
     def test_replicate_index_stored(self, propulate_records_alt_seed):
         assert all(record.replicate == 1 for record in propulate_records_alt_seed)
+
+    def test_uses_isolated_comm_for_parallel_propulate_runs(self, tmp_path_factory, monkeypatch):
+        pytest.importorskip("mpi4py", reason="mpi4py not installed")
+        import async_abc.inference.propulate_abc as mod
+
+        original = (mod.Propulator, mod.ABCPMC)
+        freed = []
+
+        class _FakeComm:
+            pass
+
+        fake_comm = _FakeComm()
+        monkeypatch.setattr(mod, "_make_propulate_comm", lambda: fake_comm)
+        monkeypatch.setattr(mod, "_free_propulate_comm", lambda comm: freed.append(comm))
+        mod.Propulator = _CapturingPropulator
+        mod.ABCPMC = _FakeABCPMC
+        try:
+            records = _run_fake_propulate(tmp_path_factory, seed=23)
+        finally:
+            mod.Propulator, mod.ABCPMC = original
+
+        assert records
+        assert _CapturingPropulator.last_kwargs["island_comm"] is fake_comm
+        assert _CapturingPropulator.last_kwargs["propulate_comm"] is fake_comm
+        assert freed == [fake_comm]
+
+    def test_incompatible_individual_raises_clear_error(self, fake_propulate_env, tmp_path):
+        from async_abc.io.paths import OutputDir
+
+        class _BadIndividual(_FakeIndividual):
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def keys(self):
+                return ["alpha", "beta"]
+
+        class _BadPropulator(_FakePropulator):
+            def propulate(self, **kwargs):
+                self.population = [
+                    _BadIndividual(
+                        {"alpha": 1.0, "beta": 2.0},
+                        generation=0,
+                        tolerance=1.0,
+                        evaltime=time.time(),
+                        evalperiod=0.01,
+                        rank=0,
+                        loss=0.0,
+                    )
+                ]
+
+        import async_abc.inference.propulate_abc as mod
+
+        original = mod.Propulator
+        mod.Propulator = _BadPropulator
+        try:
+            bm = _gaussian_bm()
+            od = OutputDir(tmp_path, "bad_individual").ensure()
+            with pytest.raises(RuntimeError, match="checkpoint reuse or MPI message cross-contamination"):
+                run_propulate_abc(
+                    bm.simulate,
+                    bm.limits,
+                    _test_inference_cfg(),
+                    od,
+                    replicate=0,
+                    seed=29,
+                )
+        finally:
+            mod.Propulator = original
 
 
 class TestPyabcWrapper:
