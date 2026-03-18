@@ -18,6 +18,7 @@ Full production run::
     python run_all_paper_experiments.py --output-dir /path/to/results
 """
 import argparse
+import csv
 import importlib.util
 import logging
 import sys
@@ -35,6 +36,22 @@ from async_abc.utils.mpi import allreduce_max, is_root_rank
 from async_abc.utils.runner import compute_scaling_factor, format_duration, write_timing_csv
 
 logger = logging.getLogger(__name__)
+
+
+def _read_runner_estimate(timing_csv: Path) -> float | None:
+    """Return estimated_full_s from the last row of a runner's timing CSV, or None."""
+    if not timing_csv.exists() or timing_csv.stat().st_size == 0:
+        return None
+    try:
+        with open(timing_csv) as f:
+            rows = list(csv.DictReader(f))
+        if rows:
+            val = rows[-1].get("estimated_full_s", "")
+            return float(val) if val else None
+    except Exception:
+        pass
+    return None
+
 
 # Ordered mapping: experiment_name → (runner_script, config_file)
 EXPERIMENT_REGISTRY = {
@@ -153,15 +170,17 @@ def main(argv: list[str] | None = None) -> None:
             logger.info("[run_all] Time:    %s took %s", name, format_duration(elapsed))
         est = None
         if args.test:
-            factor, extra, note = compute_scaling_factor(CONFIGS_DIR / config)
-            est = elapsed * factor + extra
+            runner_timing = output_dir / name / "data" / "timing.csv"
+            est = _read_runner_estimate(runner_timing)
+            if est is None:
+                factor, extra, note = compute_scaling_factor(CONFIGS_DIR / config)
+                est = elapsed * factor + extra
             if is_root_rank():
                 total_estimate += est
                 logger.info(
-                    "[run_all] Estimate: %s full run ~%s  (%s)",
+                    "[run_all] Estimate: %s full run ~%s",
                     name,
                     format_duration(est),
-                    note,
                 )
         if is_root_rank():
             write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test)

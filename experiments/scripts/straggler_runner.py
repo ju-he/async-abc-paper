@@ -165,6 +165,7 @@ def main(argv: list[str] | None = None) -> None:
                             "n_simulations": len(records),
                             "wall_time_s": elapsed,
                             "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
+                            "test_mode": args.test,
                         }
                     )
 

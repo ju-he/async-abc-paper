@@ -6,6 +6,7 @@ On HPC, call this script via ``mpirun -n N`` for each N in worker_counts.
 """
 import csv
 import logging
+import math
 import sys
 import time
 from pathlib import Path
@@ -22,6 +23,30 @@ from async_abc.utils.runner import compute_scaling_factor, find_completed_combin
 from async_abc.utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
+
+
+def _interp_time(w: int, measured: dict) -> float:
+    """Log-linearly interpolate/extrapolate wall time for worker count *w*.
+
+    *measured* maps worker count → average measured wall time (in seconds).
+    - Below the smallest tested count: scale linearly (throughput ∝ workers).
+    - Between tested counts: log-linear interpolation on wall_time vs log(workers).
+    - Above the largest tested count: use the largest tested time (throughput saturates).
+    """
+    keys = sorted(measured)
+    if w <= keys[0]:
+        # Linear throughput extrapolation: time ∝ 1/workers
+        return measured[keys[0]] * keys[0] / w
+    if w >= keys[-1]:
+        return measured[keys[-1]]
+    # Find bracketing pair
+    lo = max(k for k in keys if k <= w)
+    hi = min(k for k in keys if k >= w)
+    if lo == hi:
+        return measured[lo]
+    t_lo, t_hi = measured[lo], measured[hi]
+    frac = (math.log(w) - math.log(lo)) / (math.log(hi) - math.log(lo))
+    return math.exp(math.log(t_lo) + frac * (math.log(t_hi) - math.log(t_lo)))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -83,6 +108,7 @@ def main(argv: list[str] | None = None) -> None:
                         "n_simulations": n_sims,
                         "wall_time_s": elapsed,
                         "throughput_sims_per_s": throughput,
+                        "test_mode": args.test,
                     })
 
     experiment_elapsed = time.time() - experiment_start
@@ -91,8 +117,26 @@ def main(argv: list[str] | None = None) -> None:
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
     if args.test and is_root_rank():
-        factor, extra, note = compute_scaling_factor(args.config)
-        estimated = experiment_elapsed * factor + extra
+        cfg_full = load_config(args.config, test_mode=False)
+        full_sims = cfg_full["inference"]["max_simulations"]
+        full_reps = cfg_full["execution"]["n_replicates"]
+        test_sims = cfg["inference"]["max_simulations"]
+        test_reps = cfg["execution"]["n_replicates"]
+        sim_ratio = (full_sims * full_reps) / (test_sims * test_reps)
+        full_worker_counts = cfg_full.get("scaling", {}).get("worker_counts", worker_counts)
+
+        # Average measured wall_time per worker count (across methods and replicates)
+        from collections import defaultdict
+        times_by_w: dict = defaultdict(list)
+        for row in throughput_rows:
+            times_by_w[row["n_workers"]].append(row["wall_time_s"])
+        measured_avg = {w: sum(ts) / len(ts) for w, ts in times_by_w.items()}
+
+        # Sum per-config full-run estimates; interpolate for untested configs
+        estimated = sum(
+            _interp_time(w, measured_avg) * sim_ratio for w in full_worker_counts
+        )
+        _, _, note = compute_scaling_factor(args.config)
         logger.info(
             "[%s] Estimated full run: ~%s  (%s)",
             name,
