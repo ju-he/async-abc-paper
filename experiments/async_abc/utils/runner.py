@@ -72,7 +72,7 @@ def compute_scaling_factor(
 
     elif "scaling" in cfg:
         full_worker_counts = cfg["scaling"].get("worker_counts", [1])
-        test_worker_counts = [1]
+        test_worker_counts = cfg["scaling"].get("test_worker_counts", [1])
         factor *= len(full_worker_counts) / len(test_worker_counts)
         note = f"{full_sims} sims × {full_reps} reps, {len(full_worker_counts)} worker configs"
 
@@ -183,7 +183,7 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
     p.add_argument("--output-dir", required=True, dest="output_dir",
                    help="Root directory for results.")
     p.add_argument("--test", action="store_true",
-                   help="Test mode: small budget, ≤8 workers.")
+                   help="Test mode: small budget, ≤48 workers.")
     p.add_argument("--extend", action="store_true",
                    help="Skip parameter combinations already present in existing CSVs.")
     return p

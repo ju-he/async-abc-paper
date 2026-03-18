@@ -1,7 +1,7 @@
 #!/bin/bash -x
 #SBATCH --account=tissuetwin
 #SBATCH --nodes=1
-#SBATCH --ntasks=8
+#SBATCH --ntasks=48
 #SBATCH --cpus-per-task=1
 #SBATCH --threads-per-core=2
 #SBATCH --time=00:30:00
@@ -25,6 +25,6 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 srun python "$experiments_dir/run_all_paper_experiments.py" \
     --test \
     --experiments gaussian_mean gandk lotka_volterra sbc \
-                  straggler runtime_heterogeneity sensitivity ablation \
+                  straggler runtime_heterogeneity scaling sensitivity ablation \
     --output-dir "$output_dir" \
     ${extend_flag:+"$extend_flag"}

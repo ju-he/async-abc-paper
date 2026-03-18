@@ -37,7 +37,7 @@ def main() -> None:
     worker_counts = scaling_cfg.get("worker_counts", [1])
 
     if args.test:
-        worker_counts = [1]
+        worker_counts = scaling_cfg.get("test_worker_counts", [1])
     elif args.n_workers is not None:
         worker_counts = [args.n_workers]
 

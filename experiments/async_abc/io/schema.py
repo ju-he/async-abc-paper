@@ -52,7 +52,7 @@ def _validate_cpm_benchmark(benchmark_cfg: dict) -> None:
 TEST_MODE_OVERRIDES = {
     "clamp": {
         "inference": {
-            "n_workers": 8,
+            "n_workers": 48,
             "max_simulations": 300,
             "n_generations": 3,
         },
