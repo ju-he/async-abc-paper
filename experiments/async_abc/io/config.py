@@ -9,9 +9,9 @@ from .schema import (
     REQUIRED_EXECUTION,
     REQUIRED_INFERENCE,
     REQUIRED_TOP_LEVEL,
-    TEST_MODE_OVERRIDES,
     ValidationError,
     _validate_cpm_benchmark,
+    get_test_mode_overrides,
 )
 
 
@@ -57,15 +57,16 @@ def _validate(cfg: dict) -> None:
 def _apply_test_mode(cfg: dict) -> dict:
     """Return a deep-copied config with test-mode overrides applied."""
     cfg = copy.deepcopy(cfg)
+    test_mode_overrides = get_test_mode_overrides()
     # Clamp: use min(current, limit)
-    for section, overrides in TEST_MODE_OVERRIDES.get("clamp", {}).items():
+    for section, overrides in test_mode_overrides.get("clamp", {}).items():
         if section not in cfg:
             continue
         for key, limit in overrides.items():
             current = cfg[section].get(key)
             cfg[section][key] = min(current, limit) if current is not None else limit
     # Set: unconditionally assign
-    for section, overrides in TEST_MODE_OVERRIDES.get("set", {}).items():
+    for section, overrides in test_mode_overrides.get("set", {}).items():
         if section not in cfg:
             continue
         for key, val in overrides.items():
@@ -81,7 +82,8 @@ def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
     path:
         Path to the JSON config file.
     test_mode:
-        If True, apply test-mode overrides (reduced budgets, ≤8 workers).
+        If True, apply test-mode overrides (reduced budgets, local max 8 workers,
+        SLURM max 48 workers).
 
     Returns
     -------

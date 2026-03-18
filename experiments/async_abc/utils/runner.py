@@ -183,7 +183,7 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
     p.add_argument("--output-dir", required=True, dest="output_dir",
                    help="Root directory for results.")
     p.add_argument("--test", action="store_true",
-                   help="Test mode: small budget, ≤48 workers.")
+                   help="Test mode: small budget, local max 8 workers, SLURM max 48.")
     p.add_argument("--extend", action="store_true",
                    help="Skip parameter combinations already present in existing CSVs.")
     return p

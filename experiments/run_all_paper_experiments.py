@@ -88,7 +88,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--test", action="store_true",
-        help="Test mode: small budget, ≤48 workers, 2 replicates.",
+        help="Test mode: small budget, local max 8 workers, SLURM max 48 workers, 2 replicates.",
     )
     parser.add_argument(
         "--experiments", nargs="+", metavar="NAME",

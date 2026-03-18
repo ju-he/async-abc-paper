@@ -3,6 +3,8 @@
 REQUIRED_TOP_LEVEL lists the top-level keys that every config must contain.
 REQUIRED_BENCHMARK, REQUIRED_INFERENCE, REQUIRED_EXECUTION list required sub-keys.
 """
+import os
+from copy import deepcopy
 
 REQUIRED_TOP_LEVEL = ["experiment_name", "benchmark", "methods", "inference", "execution"]
 
@@ -47,12 +49,38 @@ def _validate_cpm_benchmark(benchmark_cfg: dict) -> None:
         )
 
 
-# Test-mode override values.
-# Keys under "clamp" are min(current, value); keys under "set" are forced to value.
-TEST_MODE_OVERRIDES = {
+# Test-mode worker limits.
+LOCAL_TEST_MAX_WORKERS = 8
+CLUSTER_TEST_MAX_WORKERS = 48
+TEST_MAX_WORKERS_ENV_VAR = "ASYNC_ABC_TEST_MAX_WORKERS"
+
+
+def get_test_mode_max_workers() -> int:
+    """Return the worker cap for test mode in the current environment."""
+    raw = os.getenv(TEST_MAX_WORKERS_ENV_VAR)
+    if raw is not None:
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(
+                f"{TEST_MAX_WORKERS_ENV_VAR} must be an integer, got {raw!r}"
+            ) from exc
+        if value < 1:
+            raise ValueError(
+                f"{TEST_MAX_WORKERS_ENV_VAR} must be >= 1, got {value}"
+            )
+        return value
+
+    if os.getenv("SLURM_JOB_ID") or os.getenv("SLURM_NTASKS"):
+        return CLUSTER_TEST_MAX_WORKERS
+
+    return LOCAL_TEST_MAX_WORKERS
+
+
+_TEST_MODE_OVERRIDES_TEMPLATE = {
     "clamp": {
         "inference": {
-            "n_workers": 48,
+            "n_workers": LOCAL_TEST_MAX_WORKERS,
             "max_simulations": 300,
             "n_generations": 3,
         },
@@ -69,3 +97,14 @@ TEST_MODE_OVERRIDES = {
         },
     },
 }
+
+
+def get_test_mode_overrides() -> dict:
+    """Return test-mode overrides with an environment-appropriate worker cap."""
+    overrides = deepcopy(_TEST_MODE_OVERRIDES_TEMPLATE)
+    overrides["clamp"]["inference"]["n_workers"] = get_test_mode_max_workers()
+    return overrides
+
+
+# Backward-compatible snapshot for callers that import the constant directly.
+TEST_MODE_OVERRIDES = get_test_mode_overrides()

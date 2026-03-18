@@ -4,6 +4,12 @@ import json
 import pytest
 
 from async_abc.io.config import load_config, ValidationError
+from async_abc.io.schema import (
+    CLUSTER_TEST_MAX_WORKERS,
+    LOCAL_TEST_MAX_WORKERS,
+    TEST_MAX_WORKERS_ENV_VAR,
+    get_test_mode_overrides,
+)
 from async_abc.utils.runner import compute_scaling_factor
 
 
@@ -53,7 +59,7 @@ class TestLoadConfig:
 
     def test_test_mode_clamps_n_workers(self, config_file):
         cfg = load_config(config_file, test_mode=True)
-        assert cfg["inference"]["n_workers"] <= 8
+        assert cfg["inference"]["n_workers"] <= get_test_mode_overrides()["clamp"]["inference"]["n_workers"]
 
     def test_test_mode_clamps_max_simulations(self, config_file):
         cfg = load_config(config_file, test_mode=True)
@@ -74,14 +80,37 @@ class TestLoadConfig:
         # Normal mode keeps original values
         assert cfg_normal["inference"]["n_workers"] == minimal_config["inference"]["n_workers"]
         # Test mode has reduced values
-        assert cfg_test["inference"]["n_workers"] <= 8
+        assert cfg_test["inference"]["n_workers"] <= get_test_mode_overrides()["clamp"]["inference"]["n_workers"]
 
-    def test_large_n_workers_clamped(self, tmp_path, minimal_config):
+    def test_large_n_workers_clamped_locally(self, tmp_path, minimal_config, monkeypatch):
+        monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+        monkeypatch.delenv("SLURM_NTASKS", raising=False)
+        monkeypatch.delenv(TEST_MAX_WORKERS_ENV_VAR, raising=False)
         minimal_config["inference"]["n_workers"] = 256
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p, test_mode=True)
-        assert cfg["inference"]["n_workers"] == 8
+        assert cfg["inference"]["n_workers"] == LOCAL_TEST_MAX_WORKERS
+
+    def test_large_n_workers_clamped_on_slurm(self, tmp_path, minimal_config, monkeypatch):
+        monkeypatch.setenv("SLURM_JOB_ID", "12345")
+        monkeypatch.delenv("SLURM_NTASKS", raising=False)
+        monkeypatch.delenv(TEST_MAX_WORKERS_ENV_VAR, raising=False)
+        minimal_config["inference"]["n_workers"] = 256
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["n_workers"] == CLUSTER_TEST_MAX_WORKERS
+
+    def test_test_mode_worker_cap_env_override(self, tmp_path, minimal_config, monkeypatch):
+        monkeypatch.setenv(TEST_MAX_WORKERS_ENV_VAR, "12")
+        monkeypatch.delenv("SLURM_JOB_ID", raising=False)
+        monkeypatch.delenv("SLURM_NTASKS", raising=False)
+        minimal_config["inference"]["n_workers"] = 256
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["n_workers"] == 12
 
     def test_small_n_workers_unchanged(self, tmp_path, minimal_config):
         minimal_config["inference"]["n_workers"] = 2
