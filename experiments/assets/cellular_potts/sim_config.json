@@ -2,27 +2,6 @@
   "Comments": ["Celltype         Usage", "0                Not Used", "1-5              Solids for blood vessels / ECM", "6                Liquid", "7                Apoptotic cell Type", "8                Basic Non Dividing Cell type (surrounding)", "9                Cancer"],
   "Application": "Cells",
   "CellsInSilico": {
-    "ecmdegradation": {
-      "enabled": true,
-      "steps": 8,
-      "probability": [
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-      ]
-    },
     "energyfunctions": ["Volume00", "Surface01", "Motility00", "Adhesion01"],
     "liquid": 6,
     "volume": {
@@ -104,19 +83,19 @@
   },
   "Geometry": {
     "blockcount": [1, 1, 1],
-    "blocksize": [200, 200, 200]
+    "blocksize": [50, 50, 50]
   },
   "Settings": {
     "randomseed": 0,
     "statusoutput": 250,
-    "timesteps": 1750
+    "timesteps": 501
   },
   "WriteActions": ["CellInfo"],
   "Writers": {
     "CellInfo": {
       "field": "cells",
       "groupsize": 0,
-      "steps": 1750,
+      "steps": 500,
       "writer": "CellInfo"
     }
   },

@@ -2,16 +2,11 @@
   "config_template": "/p/project1/tissuetwin/herold2/nastjapy/templates/spheroid_inf_nanospheroids/sim_config.json",
   "separate_filling_config": true,
   "filling_generator_params": {
-    "center": 100,
-    "spheroid_radius": 25,
-    "spheroidcount": 250,
+    "center": 25,
+    "spheroid_radius": 5,
+    "spheroidcount": 4,
     "spheroid_celltype": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
     "random_seed": 42,
-    "liquid_value": 6,
-    "#ecm_spec": {
-      "ecm_density": 0.00148,
-      "radial_fraction": 0.9,
-      "tangential_fraction": 0.1
-    }
+    "liquid_value": 6
   }
 }

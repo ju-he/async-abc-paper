@@ -1,0 +1,54 @@
+   _  _   _   ___ _      _  _
+  | \| | /_\ / __| |_ _ | |/_\   
+  | .` |/ _ \\__ \  _| || / _ \
+  |_|\_/_/ \_\___/\__|\__/_/ \_\v1.0
+  Neoteric Autonomous STencil code for Jolly Algorithms
+
+[37;1minfo     0 Load config include '/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/data/cpm_reference/reference/configs/filling.json'.[0m
+#Information: {
+  "compiler": "9.4.0",
+  "gitbranch": "refs/heads/feature/174-python-binding",
+  "githash": "68987e985951eb7773b628b12aca40e80c47b7d1-DIRTY",
+  "instructionSet": "Scalar",
+  "processes": 1,
+  "startTime": "2026-03-18 18:51:01",
+  "version": "1.0"
+}
+[37;1minfo     0 The upper bound of the MPI tag is 2,147,483,647. 31 bits can be used totally; 26 bits for block IDs (max. 67,108,863 block IDs).[0m
+[37;1minfo     0 MPITagBitsForBlockID is currently 18 (max. 262,143 block IDs).[0m
+[37;1minfo     0 Start simulation with 1 processes on 1x1x1 (1) blocks with 1 active blocks with 1 blocks/process.[0m
+[37;1minfo     0 Register function 'Volume00'[0m
+[37;1minfo     0 Register function 'Surface01'[0m
+[37;1minfo     0 Register function 'Motility00'[0m
+[37;1minfo     0 Register function 'Adhesion01'[0m
+[37;1minfo     0 Evaluator: Add variable 'volume'.[0m
+[37;1minfo     0 Evaluator: Add variable 'volume0'.[0m
+[37;1minfo     0 Evaluator: Add variable 'surface'.[0m
+[37;1minfo     0 Evaluator: Add variable 'surface0'.[0m
+[37;1minfo     0 Evaluator: Add variable 'age'.[0m
+[37;1minfo     0 Evaluator: Add variable 'generation'.[0m
+[37;1minfo     0 Evaluator: Add variable 'inhibitionstrength'.[0m
+[37;1minfo     0 Evaluator: Add function 'signal'.[0m
+[37;1minfo     0 Evaluator: Add function 'division_cond_cancer() = ( volume >= 0.9 * volume0 )  & ( rnd() <= 0.03 ) '.[0m
+[37;1minfo     0 Cell type 0 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 1 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 2 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 3 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 4 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 5 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 6 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 7 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 8 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 9 register division condition 'division_cond_cancer()'.[0m
+[37;1minfo     0 Cell type 10 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 11 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 12 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 13 register division condition 'false'.[0m
+[37;1minfo     0 Cell type 14 register division condition 'false'.[0m
+[37;1minfo     0 Reserved cellIDs per block: 4294967283[0m
+[32;1m *[0m 2026-03-18 18:51:01 Starting simulation...[0m
+[32;1m *[0m 2026-03-18 18:51:02 Time-step:     250 (250)    0.004810 s/step ETC: 00:00:01[0m
+[32;1m *[0m 2026-03-18 18:51:04 Write CellInfo             Frame:    0 (    500)[0m
+[32;1m *[0m 2026-03-18 18:51:04 Time-step:     500 (500)    0.006415 s/step ETC: 00:00:00[0m
+[32;1m *[0m 2026-03-18 18:51:04 Write CellInfo             Frame:    1 (    501)[0m
+[32;1m *[0m 2026-03-18 18:51:04 Simulation completed. Total time used: 00:00:03 average time per step: 0.00562341 s[0m
