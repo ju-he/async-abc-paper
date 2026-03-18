@@ -12,7 +12,6 @@ replace the default reference data::
         --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
         --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
         --true-params '{"division_rate": 0.03, "motility": 2000}' \\
-        --output-dir experiments/data/cpm_reference \\
         --seed 0
 
 Then update ``reference_data_path`` in ``experiments/configs/cellular_potts.json``

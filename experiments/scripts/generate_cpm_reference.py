@@ -12,7 +12,6 @@ Example
         --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
         --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
         --true-params '{"division_rate": 0.03, "motility": 2000}' \\
-        --output-dir experiments/data/cpm_reference \\
         --seed 0
 """
 import argparse
@@ -31,10 +30,9 @@ from async_abc.benchmarks.cellular_potts import (
     _resolve_repo_path,
 )
 
-try:
-    _ensure_nastjapy_on_path()
-except ImportError as exc:
-    sys.exit(f"ERROR: {exc}")
+
+DEFAULT_OUTPUT_DIR = "experiments/data/cpm_reference_generated"
+BUNDLED_ASSET_ROOT = Path("experiments/assets/cellular_potts")
 
 
 def main(args=None):
@@ -67,8 +65,11 @@ def main(args=None):
     )
     parser.add_argument(
         "--output-dir",
-        required=True,
-        help="Directory where the reference simulation will be written.",
+        default=DEFAULT_OUTPUT_DIR,
+        help=(
+            "Directory where the reference simulation will be written "
+            f"(default: {DEFAULT_OUTPUT_DIR})."
+        ),
     )
     parser.add_argument(
         "--seed",
@@ -95,6 +96,21 @@ def main(args=None):
     )
     args = parser.parse_args(args)
 
+    output_dir_path = _resolve_repo_path(args.output_dir)
+    bundled_asset_root = _resolve_repo_path(BUNDLED_ASSET_ROOT)
+    if output_dir_path == bundled_asset_root or bundled_asset_root in output_dir_path.parents:
+        parser.error(
+            "--output-dir must not point into experiments/assets/cellular_potts. "
+            "That directory contains bundled reference assets tracked by git. "
+            f"Use the default generated-data location ({DEFAULT_OUTPUT_DIR}) or another "
+            "path under experiments/data/."
+        )
+
+    try:
+        _ensure_nastjapy_on_path()
+    except ImportError as exc:
+        sys.exit(f"ERROR: {exc}")
+
     from simulation.engine_config import EngineBackendParams
     from simulation.manager import SimulationManager
     from simulation.simulation_config import Parameter, ParameterList
@@ -103,7 +119,6 @@ def main(args=None):
     config_template_path = _resolve_repo_path(args.config_template)
     config_builder_params_path = _resolve_repo_path(args.config_builder_params)
     parameter_space_path = _resolve_repo_path(args.parameter_space)
-    output_dir_path = _resolve_repo_path(args.output_dir)
 
     # Load config_builder_params and override template path + output dir
     with open(config_builder_params_path) as f:
