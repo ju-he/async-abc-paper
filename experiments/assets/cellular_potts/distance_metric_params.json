@@ -35,8 +35,8 @@
       "explained_var": 0.90
     }
   },
-  "feature_space_model": "/p/scratch/tissuetwin/herold2/spheroids/feature_spaces/microspheroids.json",
-  "reference_data": ["/p/scratch/tissuetwin/archive/behle2/behle2/param_sweeps_microspheroids_28_03_25/third_sweep_08_04_25/00764/out0"],
+  "feature_space_model": "experiments/assets/cellular_potts/sims_feature_space_model.json",
+  "reference_data": "experiments/assets/cellular_potts/reference_data",
   "lambda_dict": {},
   "standardization_factors": {},
   "sim_datahandler_kwargs": {

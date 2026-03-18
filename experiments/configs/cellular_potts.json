@@ -6,7 +6,7 @@
     "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
     "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
     "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_motility.json",
-    "reference_data_path": "experiments/data/cpm_reference/reference",
+    "reference_data_path": "experiments/assets/cellular_potts/reference_data",
     "output_dir": "experiments/data/cpm_sims",
     "engine_backend": "cis",
     "seed_param_name": "random_seed",

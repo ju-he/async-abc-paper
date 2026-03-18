@@ -1,5 +1,6 @@
 """Tests for async_abc.benchmarks.*"""
 import builtins
+import importlib
 import json
 import math
 from pathlib import Path
@@ -337,6 +338,21 @@ class TestCellularPottsImport:
 
         assert resolved == nested.resolve()
 
+    def test_resolve_reference_data_path_accepts_csv_reference_dir(self, tmp_path, monkeypatch):
+        import async_abc.benchmarks.cellular_potts as cellular_potts
+
+        configured = tmp_path / "experiments" / "assets" / "cellular_potts" / "reference_data"
+        configured.mkdir(parents=True)
+        (configured / "output_cells-00000.csv").write_text("#CellID CenterX CenterY CenterZ\n1 0 0 0\n")
+
+        monkeypatch.setattr(cellular_potts, "_REPO_ROOT", tmp_path)
+
+        resolved = cellular_potts._resolve_reference_data_path(
+            "experiments/assets/cellular_potts/reference_data"
+        )
+
+        assert resolved == configured.resolve()
+
     def test_ensure_reference_alias_reuses_canonical_reference_path(self, tmp_path):
         from async_abc.benchmarks.cellular_potts import _ensure_reference_alias
 
@@ -393,6 +409,65 @@ class TestCellularPottsImport:
         bm = CellularPotts(cfg, _sim_manager=mock_sim, _distance_metric=mock_dist)
 
         assert "division_rate" in bm.limits
+
+    def test_init_resolves_feature_space_model_and_csv_reference_assets(
+        self, tmp_path, monkeypatch, cpm_mocks
+    ):
+        import async_abc.benchmarks.cellular_potts as cellular_potts
+
+        if not _NASTJAPY_AVAILABLE:
+            pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+
+        cellular_potts._ensure_nastjapy_on_path()
+        inference_distance = importlib.import_module("inference.distance")
+
+        captured: dict[str, object] = {}
+
+        class DummyDistanceMetricParams:
+            @classmethod
+            def model_validate(cls, data):
+                captured.update(data)
+                return object()
+
+        class DummyDistanceMetric:
+            def __init__(self, params):
+                self.params = params
+
+        monkeypatch.setattr(
+            inference_distance, "DistanceMetricParams", DummyDistanceMetricParams
+        )
+        monkeypatch.setattr(inference_distance, "DistanceMetric", DummyDistanceMetric)
+
+        reference_dir = tmp_path / "reference_data"
+        reference_dir.mkdir()
+        (reference_dir / "output_cells-00000.csv").write_text(
+            "#CellID CenterX CenterY CenterZ\n1 0 0 0\n"
+        )
+
+        mock_sim, _ = cpm_mocks
+        cfg = {
+            "name": "cellular_potts",
+            "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+            "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+            "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
+            "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_motility.json",
+            "reference_data_path": str(reference_dir),
+            "output_dir": str(tmp_path / "sims"),
+        }
+
+        bm = cellular_potts.CellularPotts(cfg, _sim_manager=mock_sim)
+
+        assert isinstance(bm._distance_metric, DummyDistanceMetric)
+        assert captured["reference_data"] == str(reference_dir.resolve())
+        assert captured["feature_space_model"] == str(
+            (
+                cellular_potts._REPO_ROOT
+                / "experiments"
+                / "assets"
+                / "cellular_potts"
+                / "sims_feature_space_model.json"
+            ).resolve()
+        )
 
 
 class TestCellularPotts:

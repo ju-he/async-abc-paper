@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generate a CPM reference simulation for use as observed data in the benchmark.
 
-This is a one-off prerequisite script.  Run it once before any inference
-experiment to produce the reference simulation directory that
-``cellular_potts.json`` points to via ``reference_data_path``.
+This is an optional utility for replacing the bundled CPM reference asset.
+Run it to produce a new reference simulation directory and then point
+``cellular_potts.json`` at it via ``reference_data_path``.
 
 Example
 -------

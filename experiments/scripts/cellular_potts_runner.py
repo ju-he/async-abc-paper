@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Runner for the Cellular Potts model benchmark experiment.
 
-Prerequisites
--------------
-Before running this script, generate the reference simulation data once::
+Reference Data
+--------------
+The default CPM config already points at bundled reference assets in
+``experiments/assets/cellular_potts``. Regenerate them only if you want to
+replace the default reference data::
 
     python experiments/scripts/generate_cpm_reference.py \\
         --config-template experiments/assets/cellular_potts/sim_config.json \\
@@ -14,7 +16,7 @@ Before running this script, generate the reference simulation data once::
         --seed 0
 
 Then update ``reference_data_path`` in ``experiments/configs/cellular_potts.json``
-to match the generated directory before running this script.
+if you want this runner to use the newly generated directory instead.
 """
 import sys
 import time

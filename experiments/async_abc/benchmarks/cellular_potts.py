@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import sys
 import uuid
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
 
 
 def _resolve_repo_path(path_like: str | Path) -> Path:
@@ -142,6 +144,28 @@ def _is_reference_data_dir(path: Path) -> bool:
     return (path / "000000" / "cellevents.log").is_file()
 
 
+def _is_datahandler_compatible_reference_dir(path: Path) -> bool:
+    """Return whether ``path`` looks like a directory DataHandler can load directly."""
+    if not path.is_dir():
+        return False
+
+    for child in path.iterdir():
+        if not child.is_file():
+            continue
+        if _OUTPUT_CSV_RE.match(child.name):
+            return True
+        if child.suffix.lower() == ".h5":
+            return True
+        if child.name == "data_files.zip":
+            return True
+    return False
+
+
+def _is_supported_reference_path(path: Path) -> bool:
+    """Return whether ``path`` can serve as CPM distance-metric reference data."""
+    return _is_reference_data_dir(path) or _is_datahandler_compatible_reference_dir(path)
+
+
 def _discover_reference_data_dirs(search_root: Path, target_name: str) -> list[Path]:
     """Find valid CPM reference directories below ``search_root``."""
     if not search_root.is_dir():
@@ -149,7 +173,7 @@ def _discover_reference_data_dirs(search_root: Path, target_name: str) -> list[P
 
     candidates: list[Path] = []
     for candidate in search_root.rglob(target_name):
-        if _is_reference_data_dir(candidate):
+        if _is_supported_reference_path(candidate):
             candidates.append(candidate.resolve())
     return sorted(set(candidates), key=lambda path: (len(path.parts), str(path)))
 
@@ -163,7 +187,7 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
     path, but fall back to that nested layout when present.
     """
     configured_path = _resolve_repo_path(path_like)
-    if _is_reference_data_dir(configured_path):
+    if _is_supported_reference_path(configured_path):
         return configured_path
 
     search_roots = [configured_path.parent]
@@ -206,12 +230,14 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
 
     searched_roots = ", ".join(str(root) for root in search_roots)
     raise FileNotFoundError(
-        "CPM reference_data_path does not point to a valid reference dataset. "
+        "CPM reference_data_path does not point to a supported reference dataset. "
         f"Configured path: {configured_path}. "
         f"Searched under: {searched_roots}. "
-        "Expected files such as config.json, cis.out, configs/, and "
-        "000000/cellevents.log. Regenerate the reference data or update "
-        "'reference_data_path' to the generated directory."
+        "Expected either a generated CPM reference directory "
+        "(config.json, cis.out, configs/, 000000/cellevents.log) or a "
+        "DataHandler-compatible directory containing files such as "
+        "output_cells-00000.csv, *.h5, or data_files.zip. Update "
+        "'reference_data_path' accordingly."
     )
 
 
@@ -352,6 +378,10 @@ class CellularPotts:
             dm_params_path = _resolve_repo_path(config["distance_metric_params"])
             with open(dm_params_path) as f:
                 dm_raw = json.load(f)
+            if isinstance(dm_raw.get("feature_space_model"), str):
+                dm_raw["feature_space_model"] = str(
+                    _resolve_repo_path(dm_raw["feature_space_model"])
+                )
             dm_raw["reference_data"] = str(
                 _resolve_reference_data_path(config["reference_data_path"])
             )
