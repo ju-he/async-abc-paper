@@ -7,7 +7,7 @@
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
 #SBATCH --job-name=abc_test_all
-#SBATCH --output=/tmp/abc_test_all-%j.out
+#SBATCH --output=/p/scratch/tissuetwin/herold2/async-abc/test/abc_test_all-%j.out
 # Override SLURM log path at submission time: sbatch --output=<dir>/abc_test_all-%j.out ...
 
 nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
