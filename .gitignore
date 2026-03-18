@@ -50,6 +50,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+experiments/data/cpm_reference/
+experiments/data/cpm_reference_debug/
 
 # Translations
 *.mo

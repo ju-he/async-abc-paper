@@ -24,7 +24,10 @@ EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
 if str(EXPERIMENTS_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENTS_DIR))
 
-from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
+from async_abc.benchmarks.cellular_potts import (
+    _ensure_nastjapy_on_path,
+    _normalize_generated_config_paths,
+)
 
 try:
     _ensure_nastjapy_on_path()
@@ -142,6 +145,7 @@ def main(args=None):
 
     print(f"Running reference simulation with params: {true_params}, seed={args.seed}")
     config_path = sim_manager.build_simulation_config(param_list, out_dir_name="reference")
+    _normalize_generated_config_paths(config_path)
     sim_manager.run_simulation(config_path)
 
     output_path = Path(config_path).parent

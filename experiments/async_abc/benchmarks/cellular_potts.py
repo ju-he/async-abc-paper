@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 _NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _nastjapy_site_packages() -> Path:
@@ -58,6 +59,63 @@ def _ensure_nastjapy_on_path() -> None:
             "installation. Import failed from both the active environment and "
             f"the repo-local .venv site-packages at {site_packages}."
         ) from path_exc
+
+
+def _normalize_generated_config_paths(config_path: str | Path) -> Path:
+    """Rewrite generated include paths to absolute paths before launching NAStJA.
+
+    The nastjapy templates can emit repo-root-relative include paths such as
+    ``experiments/data/.../configs/filling.json``. NAStJA resolves those
+    relative to the generated config directory, which duplicates the prefix and
+    breaks the run. Converting include paths to absolute paths avoids that.
+    """
+    config_path = Path(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+
+    include_key = None
+    if "Include" in cfg:
+        include_key = "Include"
+    elif "include" in cfg:
+        include_key = "include"
+
+    if include_key is None:
+        return config_path
+
+    includes = cfg[include_key]
+    include_items = [includes] if isinstance(includes, str) else includes
+    if not isinstance(include_items, list):
+        return config_path
+
+    normalized = []
+    changed = False
+    for include in include_items:
+        if not isinstance(include, str):
+            normalized.append(include)
+            continue
+        path = Path(include)
+        if path.is_absolute():
+            normalized.append(include)
+            continue
+        config_relative = (config_path.parent / path).resolve()
+        cwd_relative = (Path.cwd() / path).resolve()
+        repo_relative = (_REPO_ROOT / path).resolve()
+        if config_relative.exists():
+            resolved = config_relative
+        elif cwd_relative.exists():
+            resolved = cwd_relative
+        else:
+            resolved = repo_relative
+        resolved_str = str(resolved)
+        normalized.append(resolved_str)
+        changed = changed or resolved_str != include
+
+    if changed:
+        cfg[include_key] = normalized[0] if isinstance(includes, str) else normalized
+        with open(config_path, "w") as f:
+            json.dump(cfg, f, indent=2)
+
+    return config_path
 
 
 class CellularPotts:
@@ -220,6 +278,7 @@ class CellularPotts:
             config_path = self._sim_manager.build_simulation_config(
                 param_list, out_dir_name=sim_dir_name
             )
+            _normalize_generated_config_paths(config_path)
             self._sim_manager.run_simulation(config_path)
         except Exception as exc:
             logger.error(

@@ -1,5 +1,6 @@
 """Tests for async_abc.benchmarks.*"""
 import builtins
+import json
 import math
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -260,6 +261,24 @@ class TestCellularPottsImport:
 
         with pytest.raises(ImportError):
             cellular_potts.CellularPotts({"name": "cellular_potts"})
+
+    def test_normalize_generated_config_paths_rewrites_repo_relative_include(self, tmp_path, monkeypatch):
+        from async_abc.benchmarks.cellular_potts import _normalize_generated_config_paths
+
+        include_target = tmp_path / "shared" / "filling.json"
+        include_target.parent.mkdir(parents=True)
+        include_target.write_text("{}")
+        monkeypatch.chdir(tmp_path)
+
+        config_dir = tmp_path / "runs" / "reference"
+        config_dir.mkdir(parents=True)
+        config_path = config_dir / "config.json"
+        config_path.write_text(json.dumps({"Include": [str(include_target.relative_to(tmp_path))]}))
+
+        normalized = _normalize_generated_config_paths(config_path)
+        data = json.loads(normalized.read_text())
+
+        assert data["Include"] == [str(include_target.resolve())]
 
 
 class TestCellularPotts:
