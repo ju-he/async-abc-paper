@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 pyabc = ["pyabc"]
 mpi = ["mpi4py"]
-test = ["pytest"]
+test = ["pytest", "pyabc"]
 
 [project.urls]
 Repository = "https://github.com/ju-he/async-abc-paper"
