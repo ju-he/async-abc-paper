@@ -11,10 +11,7 @@ behaves like a dict (``ind["mu"]`` etc.).  Internally, the benchmark's
 the run seed and the individual's generation counter.
 """
 import random
-import sys
 import time
-from importlib import invalidate_caches
-from pathlib import Path
 from typing import Callable, Dict, List
 
 import numpy as np
@@ -22,49 +19,24 @@ import numpy as np
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 
-_PROPULATE_ROOT = Path(__file__).resolve().parents[3] / "propulate"
 Propulator = None
 ABCPMC = None
 
 
 def _ensure_propulate_imports() -> None:
-    """Resolve propulate from the active environment or the repo-local fallback."""
+    """Resolve propulate from the active Python environment."""
     global Propulator, ABCPMC
     if Propulator is not None and ABCPMC is not None:
         return
 
-    def _import_symbols():
-        from propulate import Propulator as _Propulator
-        try:
-            from propulate.propagators.abcpmc import ABCPMC as _ABCPMC
-        except ImportError:
-            from propulate.propagators import ABCPMC as _ABCPMC
-        return _Propulator, _ABCPMC
-
     try:
-        _Propulator, _ABCPMC = _import_symbols()
+        from propulate import Propulator as _Propulator
+        from propulate.propagators.abcpmc import ABCPMC as _ABCPMC
     except ImportError as env_exc:
-        if not _PROPULATE_ROOT.is_dir():
-            raise ImportError(
-                "The async_propulate_abc method requires 'propulate'. "
-                "Install it in the active environment or provide the repo-local "
-                f"'propulate' checkout at {_PROPULATE_ROOT}."
-            ) from env_exc
-        propulate_root = str(_PROPULATE_ROOT)
-        if propulate_root not in sys.path:
-            sys.path.insert(0, propulate_root)
-        invalidate_caches()
-        for module_name in list(sys.modules):
-            if module_name == "propulate" or module_name.startswith("propulate."):
-                del sys.modules[module_name]
-        try:
-            _Propulator, _ABCPMC = _import_symbols()
-        except ImportError as path_exc:
-            raise ImportError(
-                "The async_propulate_abc method requires 'propulate'. "
-                "Import from the active environment failed, and the repo-local "
-                f"fallback at {_PROPULATE_ROOT} was not usable."
-            ) from path_exc
+        raise ImportError(
+            "The async_propulate_abc method requires 'propulate'. "
+            "Install it in the active environment."
+        ) from env_exc
 
     if Propulator is None:
         Propulator = _Propulator

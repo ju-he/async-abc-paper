@@ -21,7 +21,7 @@ Core Python dependencies installed through `pip`:
 Optional/runtime-specific dependencies:
 
 - `propulate`: required for the `async_propulate_abc` method. This is expected
-  to come from a Git checkout or an already-prepared virtual environment.
+  to be installed in the active virtual environment.
 - `pyabc`: required for `pyabc_smc` and `abc_smc_baseline`.
 - `mpi4py`: required only when `parallel_backend="mpi"`.
 - `nastjapy` plus a compiled `nastja`: required for the `cellular_potts`
