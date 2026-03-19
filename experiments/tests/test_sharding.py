@@ -14,6 +14,10 @@ def _rows(csv_path: Path):
         return list(csv.DictReader(f))
 
 
+def _plan_paths(root: Path, experiment_name: str):
+    return sorted((root / "_shards" / experiment_name / "runs").glob("*/plan.json"))
+
+
 class TestShardHelpers:
     def test_split_indices_balanced_and_contiguous(self):
         from async_abc.utils.sharding import split_indices
@@ -26,6 +30,31 @@ class TestShardHelpers:
         from async_abc.utils.sharding import estimate_sharded_wall_time
 
         assert estimate_sharded_wall_time(100.0, total_units=10, requested_num_shards=4) == 30.0
+
+    def test_detect_completed_replicates_with_holes(self, tmp_path):
+        from async_abc.utils.metadata import write_metadata
+        from async_abc.utils.sharding import detect_completed_replicates
+        from async_abc.io.paths import OutputDir
+
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 20, "k": 5},
+            execution_overrides={"n_replicates": 5, "base_seed": 1},
+            plots={},
+        )
+        output_dir = OutputDir(tmp_path, "gaussian_mean").ensure()
+        with open(output_dir.data / "raw_results.csv", "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=["method", "replicate", "step", "wall_time"],
+            )
+            writer.writeheader()
+            for replicate in (0, 1, 3, 4):
+                writer.writerow({"method": "rejection_abc", "replicate": replicate, "step": 1, "wall_time": 0.1})
+        write_metadata(output_dir, cfg)
+
+        assert detect_completed_replicates(tmp_path, cfg) == [0, 1, 3, 4]
 
 
 class TestShardedBenchmarkRunner:
@@ -62,7 +91,7 @@ class TestShardedBenchmarkRunner:
         assert "estimated_full_unsharded_s" in timing_rows[-1]
         assert "aggregate_compute_s" in timing_rows[-1]
 
-        merge_done = tmp_path / "_shards" / "gaussian_mean" / "merge.done.json"
+        merge_done = tmp_path / "_shards" / "gaussian_mean" / "runs" / "default" / "merge.done.json"
         assert merge_done.exists()
 
 
@@ -112,11 +141,12 @@ class TestShardSubmitter:
         )
         submitter.main()
 
-        plan = json.loads((tmp_path / "_shards" / "gaussian_mean" / "plan.json").read_text())
+        plan_path = _plan_paths(tmp_path, "gaussian_mean")[0]
+        plan = json.loads(plan_path.read_text())
         assert plan["requested_num_shards"] == 4
         assert plan["actual_num_shards"] == 1
 
-        scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*.sbatch"))
+        scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*/*.sbatch"))
         assert len(scripts) == 1
 
     def test_submit_replicate_shards_accepts_all_token(self, tmp_path, monkeypatch):
@@ -146,9 +176,85 @@ class TestShardSubmitter:
         )
         submitter.main()
 
-        assert (tmp_path / "_shards" / "gaussian_mean" / "plan.json").exists()
-        assert (tmp_path / "_shards" / "gandk" / "plan.json").exists()
+        assert _plan_paths(tmp_path, "gaussian_mean")
+        assert _plan_paths(tmp_path, "gandk")
         assert not (tmp_path / "_shards" / "scaling").exists()
+
+    def test_submit_replicate_shards_add_replicates_submits_missing_only(self, tmp_path, monkeypatch):
+        from async_abc.io.paths import OutputDir
+        from async_abc.utils.metadata import write_metadata
+
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        configs_dir = tmp_path / "configs"
+        scripts_dir = tmp_path / "scripts"
+        configs_dir.mkdir()
+        scripts_dir.mkdir()
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 20, "k": 5, "n_workers": 1},
+            execution_overrides={"n_replicates": 5, "base_seed": 1},
+            plots={},
+        )
+        (configs_dir / "gaussian_mean.json").write_text(json.dumps(cfg))
+        (scripts_dir / "gaussian_mean_runner.py").write_text("# placeholder\n")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+        monkeypatch.setattr(submitter, "EXPERIMENTS_DIR", tmp_path)
+        monkeypatch.setattr(submitter, "SCRIPT_DIR", tmp_path / "jobs")
+
+        output_dir = OutputDir(tmp_path, "gaussian_mean").ensure()
+        with open(output_dir.data / "raw_results.csv", "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["method", "replicate", "step", "wall_time"])
+            writer.writeheader()
+            for replicate in (0, 1, 3, 4):
+                writer.writerow({"method": "rejection_abc", "replicate": replicate, "step": 1, "wall_time": 0.1})
+        write_metadata(output_dir, cfg)
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--jobs-per-experiment",
+                "3",
+                "--add-replicates",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        plan = json.loads(_plan_paths(tmp_path, "gaussian_mean")[0].read_text())
+        assert plan["completed_unit_indices"] == [0, 1, 3, 4]
+        assert plan["pending_unit_indices"] == [2, 5, 6, 7, 8]
+        assert plan["target_total_units"] == 9
+
+    def test_submit_replicate_shards_add_replicates_rejects_test(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--add-replicates",
+                "--test",
+            ],
+        )
+        try:
+            submitter.main()
+        except SystemExit as exc:
+            assert "--add-replicates is not supported with --test" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
 
 
 class TestShardSmokeScript:

@@ -331,6 +331,8 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
                    help="Shard index for sharded execution.")
     p.add_argument("--num-shards", type=int, default=None,
                    help="Total number of active shards for sharded execution.")
+    p.add_argument("--shard-run-id", default="default",
+                   help="Batch identifier for sharded execution.")
     p.add_argument("--finalize-only", action="store_true",
                    help="Skip execution and only attempt sharded finalization.")
     return p
@@ -418,10 +420,13 @@ def run_experiment(
     inference_cfg = cfg["inference"]
     n_replicates = cfg["execution"]["n_replicates"]
     base_seed = cfg["execution"]["base_seed"]
-    seeds = make_seeds(n_replicates, base_seed)
     selected_replicates = (
         list(range(n_replicates)) if replicate_indices is None else list(replicate_indices)
     )
+    seed_count = n_replicates
+    if selected_replicates:
+        seed_count = max(seed_count, max(selected_replicates) + 1)
+    seeds = make_seeds(seed_count, base_seed)
 
     csv_path = output_dir.data / csv_name
     done = find_completed_combinations(csv_path, ["method", "replicate"]) if extend else set()

@@ -78,7 +78,7 @@ echo "Running merge smoke test shards..."
     --num-shards 2
 
 test -f "$merge_out/gaussian_mean/data/raw_results.csv"
-test -f "$merge_out/_shards/gaussian_mean/merge.done.json"
+test -f "$merge_out/_shards/gaussian_mean/runs/default/merge.done.json"
 
 echo "Preparing estimate-only sharded test plan..."
 "$python_bin" - <<'PY' "$timing_out" "$timing_cfg"
@@ -94,7 +94,7 @@ output_dir = Path(sys.argv[1]).resolve()
 config_path = Path(sys.argv[2]).resolve()
 full_cfg = load_config(config_path, test_mode=False)
 test_cfg = load_config(config_path, test_mode=True)
-layout = ShardLayout(output_dir, "gaussian_mean", 0)
+layout = ShardLayout(output_dir, "gaussian_mean", "default", 0)
 plan = build_plan_payload(
     experiment_name="gaussian_mean",
     config_path=str(config_path),
@@ -102,10 +102,14 @@ plan = build_plan_payload(
     unit_kind="replicate",
     full_total_units=int(full_cfg["execution"]["n_replicates"]),
     actual_total_units=int(test_cfg["execution"]["n_replicates"]),
+    target_total_units=int(full_cfg["execution"]["n_replicates"]),
     requested_num_shards=2,
     actual_num_shards=1,
     test_mode=True,
     extend=False,
+    run_id="default",
+    completed_unit_indices=[],
+    pending_unit_indices=[0],
     shard_assignments=[[0]],
 )
 update_plan(layout, plan)
@@ -120,7 +124,7 @@ echo "Running estimate-only sharded test shard..."
     --num-shards 1
 
 test -f "$timing_out/gaussian_mean/data/timing.csv"
-test -f "$timing_out/_shards/gaussian_mean/merge.done.json"
+test -f "$timing_out/_shards/gaussian_mean/runs/default/merge.done.json"
 
 echo "Validating timing estimate fields..."
 "$python_bin" - <<'PY' "$timing_out/gaussian_mean/data/timing.csv"

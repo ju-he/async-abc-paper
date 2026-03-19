@@ -1,6 +1,7 @@
 """Helpers for sharded experiment execution and finalization."""
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import math
@@ -11,7 +12,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from ..io.paths import OutputDir
 
@@ -20,22 +21,31 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def split_indices(total_units: int, num_shards: int) -> List[List[int]]:
-    """Return balanced contiguous slices of ``range(total_units)``."""
-    if total_units < 0:
-        raise ValueError("total_units must be >= 0")
+def make_run_id() -> str:
+    """Return a batch identifier for one sharded submission."""
+    return datetime.now().strftime("run_%Y%m%d_%H%M%S")
+
+
+def split_items(items: Sequence[int], num_shards: int) -> List[List[int]]:
+    """Split a sequence into balanced contiguous slices."""
     if num_shards < 1:
         raise ValueError("num_shards must be >= 1")
-
-    base, remainder = divmod(total_units, num_shards)
+    base, remainder = divmod(len(items), num_shards)
     assignments: List[List[int]] = []
     start = 0
     for shard_idx in range(num_shards):
         size = base + (1 if shard_idx < remainder else 0)
         stop = start + size
-        assignments.append(list(range(start, stop)))
+        assignments.append(list(items[start:stop]))
         start = stop
     return assignments
+
+
+def split_indices(total_units: int, num_shards: int) -> List[List[int]]:
+    """Return balanced contiguous slices of ``range(total_units)``."""
+    if total_units < 0:
+        raise ValueError("total_units must be >= 0")
+    return split_items(list(range(total_units)), num_shards)
 
 
 def shard_indices(total_units: int, num_shards: int, shard_index: int) -> List[int]:
@@ -64,19 +74,51 @@ def validate_shard_args(args) -> None:
         raise ValueError("--shard-index must satisfy 0 <= shard-index < num-shards")
 
 
+def _variant_name(variant: Dict[str, Any]) -> str:
+    return "__".join(f"{key}={variant[key]}" for key in sorted(variant))
+
+
+def _sensitivity_variants(sensitivity_grid: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
+    if not sensitivity_grid:
+        return []
+    variants = [{}]
+    for key in sensitivity_grid:
+        next_variants = []
+        for variant in variants:
+            for value in sensitivity_grid[key]:
+                payload = dict(variant)
+                payload[key] = value
+                next_variants.append(payload)
+        variants = next_variants
+    return variants
+
+
 @dataclass(frozen=True)
 class ShardLayout:
-    """Filesystem layout for one sharded experiment run."""
+    """Filesystem layout for one sharded experiment batch."""
 
     output_root: Path
     experiment_name: str
+    run_id: str = "default"
     shard_index: Optional[int] = None
+
+    @property
+    def experiment_root(self) -> Path:
+        return self.output_root / "_shards" / self.experiment_name
+
+    @property
+    def runs_root(self) -> Path:
+        return self.experiment_root / "runs"
+
+    @property
+    def run_root(self) -> Path:
+        return self.runs_root / self.run_id
 
     @property
     def shard_root(self) -> Path:
         if self.shard_index is None:
             raise ValueError("shard_root is only defined for a specific shard")
-        return self.output_root / "_shards" / self.experiment_name / f"shard-{self.shard_index:03d}"
+        return self.run_root / f"shard-{self.shard_index:03d}"
 
     @property
     def shard_output_dir(self) -> OutputDir:
@@ -92,19 +134,23 @@ class ShardLayout:
 
     @property
     def plan_path(self) -> Path:
-        return self.output_root / "_shards" / self.experiment_name / "plan.json"
+        return self.run_root / "plan.json"
 
     @property
     def merge_lock_path(self) -> Path:
-        return self.output_root / "_shards" / self.experiment_name / "merge.lock"
+        return self.run_root / "merge.lock"
 
     @property
     def merge_done_path(self) -> Path:
-        return self.output_root / "_shards" / self.experiment_name / "merge.done.json"
+        return self.run_root / "merge.done.json"
 
     @property
     def final_output_dir(self) -> OutputDir:
         return OutputDir(self.output_root, self.experiment_name)
+
+    @property
+    def final_metadata_path(self) -> Path:
+        return self.final_output_dir.data / "metadata.json"
 
 
 def _json_dump_atomic(path: Path, payload: Dict[str, Any]) -> None:
@@ -137,20 +183,28 @@ def build_plan_payload(
     shard_assignments: List[List[int]],
     runner_script: Optional[str] = None,
     submitted_job_ids: Optional[List[str]] = None,
+    run_id: str = "default",
+    target_total_units: Optional[int] = None,
+    completed_unit_indices: Optional[List[int]] = None,
+    pending_unit_indices: Optional[List[int]] = None,
 ) -> Dict[str, Any]:
     """Return a JSON-serializable shard plan."""
     return {
+        "run_id": run_id,
         "experiment_name": experiment_name,
         "config_path": config_path,
         "runner_script": runner_script,
         "unit_kind": unit_kind,
         "full_total_units": int(full_total_units),
         "actual_total_units": int(actual_total_units),
+        "target_total_units": int(target_total_units if target_total_units is not None else actual_total_units),
         "requested_num_shards": int(requested_num_shards),
         "actual_num_shards": int(actual_num_shards),
         "test_mode": bool(test_mode),
         "extend": bool(extend),
-        "shard_assignments": shard_assignments,
+        "completed_unit_indices": sorted(int(x) for x in (completed_unit_indices or [])),
+        "pending_unit_indices": sorted(int(x) for x in (pending_unit_indices or [])),
+        "shard_assignments": [list(map(int, assignment)) for assignment in shard_assignments],
         "submitted_job_ids": list(submitted_job_ids or []),
         "created_at": _now_iso(),
     }
@@ -201,6 +255,7 @@ def write_shard_status(
     """Persist per-shard status metadata."""
     payload = {
         "state": state,
+        "run_id": layout.run_id,
         "shard_index": layout.shard_index,
         "unit_indices": unit_indices,
         "slurm_job_id": os.getenv("SLURM_JOB_ID", ""),
@@ -225,7 +280,7 @@ def load_shard_statuses(layout: ShardLayout, num_shards: int) -> List[Dict[str, 
     """Load status payloads for all shards."""
     statuses = []
     for idx in range(num_shards):
-        shard_layout = ShardLayout(layout.output_root, layout.experiment_name, idx)
+        shard_layout = ShardLayout(layout.output_root, layout.experiment_name, layout.run_id, idx)
         statuses.append(read_json(shard_layout.shard_status_path))
     return statuses
 
@@ -255,7 +310,12 @@ def _lock_owner_alive(lock_payload: Dict[str, Any]) -> bool:
 def acquire_merge_lock(layout: ShardLayout, *, owner_id: str) -> bool:
     """Acquire the merge lock, stealing stale locks when safe."""
     layout.merge_lock_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"owner_id": owner_id, "slurm_job_id": os.getenv("SLURM_JOB_ID", ""), "timestamp": _now_iso()}
+    payload = {
+        "run_id": layout.run_id,
+        "owner_id": owner_id,
+        "slurm_job_id": os.getenv("SLURM_JOB_ID", ""),
+        "timestamp": _now_iso(),
+    }
     try:
         fd = os.open(layout.merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
@@ -323,7 +383,7 @@ def publish_directory_atomically(source_dir: Path, target_dir: Path) -> None:
 def shard_output_dirs(layout: ShardLayout, num_shards: int) -> List[OutputDir]:
     """Return shard-local output directories for all shards."""
     return [
-        ShardLayout(layout.output_root, layout.experiment_name, idx).shard_output_dir
+        ShardLayout(layout.output_root, layout.experiment_name, layout.run_id, idx).shard_output_dir
         for idx in range(num_shards)
     ]
 
@@ -360,6 +420,147 @@ def merge_csv_group(
     return len(rows)
 
 
+def cleanup_shard_payloads(layout: ShardLayout) -> None:
+    """Remove shard-local payload directories after a successful merge."""
+    if not layout.run_root.exists():
+        return
+    for path in layout.run_root.iterdir():
+        if path.name.startswith("shard-") or path.name == "_merge_tmp":
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def _csv_rows(path: Path) -> List[Dict[str, str]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _replicate_rows_by_method(path: Path) -> Dict[int, set[str]]:
+    rows_by_replicate: Dict[int, set[str]] = {}
+    for row in _csv_rows(path):
+        replicate_str = row.get("replicate", "")
+        method = row.get("method", "")
+        if not replicate_str or not method:
+            continue
+        replicate = int(replicate_str)
+        rows_by_replicate.setdefault(replicate, set()).add(method)
+    return rows_by_replicate
+
+
+def _completed_replicates_benchmark(output_dir: OutputDir, expected_methods: Sequence[str]) -> List[int]:
+    rows_by_replicate = _replicate_rows_by_method(output_dir.data / "raw_results.csv")
+    required = set(expected_methods)
+    return sorted(rep for rep, methods in rows_by_replicate.items() if required.issubset(methods))
+
+
+def _completed_replicates_sensitivity(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    variants = _sensitivity_variants(cfg.get("sensitivity_grid", {}))
+    completed_sets: List[set[int]] = []
+    for variant in variants:
+        variant_name = _variant_name(variant)
+        path = output_dir.data / f"sensitivity_{variant_name}.csv"
+        expected = {f"{method}__{variant_name}" for method in cfg["methods"]}
+        rows_by_replicate = _replicate_rows_by_method(path)
+        completed_sets.append({rep for rep, methods in rows_by_replicate.items() if expected.issubset(methods)})
+    if not completed_sets:
+        return []
+    return sorted(set.intersection(*completed_sets))
+
+
+def _completed_replicates_ablation(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    completed_sets: List[set[int]] = []
+    for variant in cfg.get("ablation_variants", []):
+        name = variant.get("name", "unnamed")
+        path = output_dir.data / f"ablation_{name}.csv"
+        expected = {f"{method}__{name}" for method in cfg["methods"]}
+        rows_by_replicate = _replicate_rows_by_method(path)
+        completed_sets.append({rep for rep, methods in rows_by_replicate.items() if expected.issubset(methods)})
+    if not completed_sets:
+        return []
+    return sorted(set.intersection(*completed_sets))
+
+
+def _completed_replicates_straggler(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    slowdown_factors = [float(x) for x in cfg.get("straggler", {}).get("slowdown_factor", [1.0])]
+    expected_methods = [
+        f"{method}__straggler_slowdown{factor:.4g}x"
+        for factor in slowdown_factors
+        for method in cfg["methods"]
+    ]
+    return _completed_replicates_benchmark(output_dir, expected_methods)
+
+
+def _completed_replicates_runtime_heterogeneity(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    het = cfg.get("heterogeneity", {})
+    sigma_levels = list(het["sigma_levels"]) if "sigma_levels" in het else [float(het.get("sigma", 1.0))]
+    expected_methods = [f"{method}__sigma{sigma}" for sigma in sigma_levels for method in cfg["methods"]]
+    return _completed_replicates_benchmark(output_dir, expected_methods)
+
+
+def detect_completed_replicates_in_output(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    """Return strictly completed replicate indices from one output directory."""
+    name = cfg["experiment_name"]
+    if name in {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}:
+        return _completed_replicates_benchmark(output_dir, cfg["methods"])
+    if name == "runtime_heterogeneity":
+        return _completed_replicates_runtime_heterogeneity(output_dir, cfg)
+    if name == "sensitivity":
+        return _completed_replicates_sensitivity(output_dir, cfg)
+    if name == "ablation":
+        return _completed_replicates_ablation(output_dir, cfg)
+    if name == "straggler":
+        return _completed_replicates_straggler(output_dir, cfg)
+    return []
+
+
+def detect_completed_replicates(output_root: Path, cfg: Dict[str, Any]) -> List[int]:
+    """Return strictly completed replicate indices from canonical merged outputs."""
+    return detect_completed_replicates_in_output(OutputDir(output_root, cfg["experiment_name"]), cfg)
+
+
+def final_output_exists(output_root: Path, experiment_name: str) -> bool:
+    output_dir = OutputDir(output_root, experiment_name)
+    return output_dir.root.exists()
+
+
+def _normalized_extension_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = copy.deepcopy(cfg)
+    normalized.setdefault("execution", {}).pop("n_replicates", None)
+    if normalized.get("benchmark", {}).get("name") == "cellular_potts":
+        normalized["benchmark"].pop("output_dir", None)
+    return normalized
+
+
+def validate_extension_compatibility(output_root: Path, cfg: Dict[str, Any]) -> None:
+    """Validate that an extension run is compatible with the existing final output."""
+    output_dir = OutputDir(output_root, cfg["experiment_name"])
+    metadata_path = output_dir.data / "metadata.json"
+    if not output_dir.root.exists():
+        return
+    if not metadata_path.exists():
+        raise ValueError(
+            f"Cannot extend {cfg['experiment_name']}: existing output is missing metadata.json"
+        )
+    metadata = read_json(metadata_path)
+    existing_cfg = metadata.get("config")
+    if not isinstance(existing_cfg, dict):
+        raise ValueError(
+            f"Cannot extend {cfg['experiment_name']}: existing metadata.json has no config payload"
+        )
+    if _normalized_extension_config(existing_cfg) != _normalized_extension_config(cfg):
+        raise ValueError(
+            f"Cannot extend {cfg['experiment_name']}: existing output was generated with an incompatible config"
+        )
+
+
+def existing_extension_history(output_root: Path, experiment_name: str) -> List[Dict[str, Any]]:
+    metadata_path = OutputDir(output_root, experiment_name).data / "metadata.json"
+    metadata = read_json(metadata_path)
+    history = metadata.get("extension_runs", [])
+    return history if isinstance(history, list) else []
+
+
 def maybe_finalize_sharded_run(
     *,
     layout: ShardLayout,
@@ -380,9 +581,11 @@ def maybe_finalize_sharded_run(
         shard_dirs = shard_output_dirs(layout, actual_num_shards)
         statuses = load_shard_statuses(layout, actual_num_shards)
         payload = finalize_fn(shard_dirs, statuses) or {}
+        payload.setdefault("run_id", layout.run_id)
         payload.setdefault("finalized_at", _now_iso())
         payload.setdefault("owner_id", owner_id)
         write_merge_done(layout, payload)
+        cleanup_shard_payloads(layout)
         return True
     finally:
         release_merge_lock(layout)

@@ -21,7 +21,16 @@ DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from async_abc.io.config import load_config  # noqa: E402
-from async_abc.utils.sharding import ShardLayout, build_plan_payload, split_indices, update_plan  # noqa: E402
+from async_abc.utils.sharding import (  # noqa: E402
+    ShardLayout,
+    build_plan_payload,
+    detect_completed_replicates,
+    make_run_id,
+    split_indices,
+    split_items,
+    update_plan,
+    validate_extension_compatibility,
+)
 import run_all_paper_experiments as run_all  # noqa: E402
 
 
@@ -76,6 +85,7 @@ def _render_script(
     output_dir: Path,
     shard_index: int,
     actual_num_shards: int,
+    shard_run_id: str,
     test_mode: bool,
     extend: bool,
     account: str,
@@ -98,6 +108,8 @@ def _render_script(
         str(shard_index),
         "--num-shards",
         str(actual_num_shards),
+        "--shard-run-id",
+        shard_run_id,
     ]
     if test_mode:
         args.append("--test")
@@ -143,6 +155,11 @@ def main() -> None:
     )
     parser.add_argument("--test", action="store_true", help="Use test-mode configs and estimate-only sharding.")
     parser.add_argument("--extend", action="store_true", help="Pass --extend to the shard jobs.")
+    parser.add_argument(
+        "--add-replicates",
+        action="store_true",
+        help="Treat config execution.n_replicates as an additional replicate count and submit only missing replicates.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Write scripts and print sbatch commands without submitting.")
     parser.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"SLURM account (default: {DEFAULT_ACCOUNT}).")
     parser.add_argument("--partition", default=DEFAULT_PARTITION, help=f"SLURM partition (default: {DEFAULT_PARTITION}).")
@@ -150,6 +167,10 @@ def main() -> None:
     parser.add_argument("--nastjapy-path", default=DEFAULT_NASTJAPY, help="Path containing the cluster virtualenv.")
     args = parser.parse_args()
     experiment_names = _resolve_experiments(args.experiments)
+
+    if args.add_replicates and args.test:
+        raise SystemExit("--add-replicates is not supported with --test")
+    extend_mode = bool(args.extend or args.add_replicates)
 
     output_dir = Path(args.output_dir).resolve()
     jobs_root = output_dir / "_jobs"
@@ -160,6 +181,8 @@ def main() -> None:
             raise SystemExit(f"Unknown experiment: {experiment_name}")
         if experiment_name == "scaling":
             raise SystemExit("Scaling remains on submit_scaling.py and is not supported here.")
+        if args.add_replicates and experiment_name == "sbc":
+            raise SystemExit("--add-replicates is only supported for replicate-based experiments, not sbc")
 
         runner_name, config_name = run_all.EXPERIMENT_REGISTRY[experiment_name]
         runner_path = EXPERIMENTS_DIR / "scripts" / runner_name
@@ -170,13 +193,35 @@ def main() -> None:
         unit_kind = "trial" if experiment_name == "sbc" else "replicate"
         full_units = int(full_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(full_cfg["execution"]["n_replicates"])
         actual_units = int(actual_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(actual_cfg["execution"]["n_replicates"])
-        requested_num_shards = max(1, min(full_units, int(args.jobs_per_experiment)))
-        actual_num_shards = 1 if args.test else max(1, min(actual_units, int(args.jobs_per_experiment)))
-        shard_assignments = split_indices(actual_units, actual_num_shards)
+        if extend_mode:
+            validate_extension_compatibility(output_dir, full_cfg)
+        completed_units = detect_completed_replicates(output_dir, full_cfg) if unit_kind == "replicate" else []
+        if args.add_replicates:
+            target_total_units = len(completed_units) + full_units
+        else:
+            target_total_units = full_units
+        if args.test:
+            pending_units = list(range(actual_units))
+            target_total_units = full_units
+            completed_units = []
+        else:
+            pending_units = [idx for idx in range(target_total_units) if idx not in set(completed_units)]
+        if extend_mode and not pending_units:
+            print(f"{experiment_name}: nothing to do; all {target_total_units} replicates are already complete")
+            continue
 
-        plan_layout = ShardLayout(output_dir, experiment_name, 0)
-        plan_path = plan_layout.plan_path
-        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        if args.test:
+            requested_num_shards = max(1, min(target_total_units, int(args.jobs_per_experiment)))
+        else:
+            requested_num_shards = max(1, min(len(pending_units), int(args.jobs_per_experiment)))
+        actual_num_shards = 1 if args.test else max(1, min(len(pending_units), int(args.jobs_per_experiment)))
+        if args.test and pending_units:
+            pending_units = pending_units[:actual_num_shards]
+        shard_assignments = split_items(pending_units, actual_num_shards)
+        run_id = make_run_id()
+
+        plan_layout = ShardLayout(output_dir, experiment_name, run_id, 0)
+        plan_layout.plan_path.parent.mkdir(parents=True, exist_ok=True)
         plan = build_plan_payload(
             experiment_name=experiment_name,
             config_path=str(config_path.resolve()),
@@ -184,16 +229,20 @@ def main() -> None:
             unit_kind=unit_kind,
             full_total_units=full_units,
             actual_total_units=actual_units,
+            target_total_units=target_total_units,
             requested_num_shards=requested_num_shards,
             actual_num_shards=actual_num_shards,
             test_mode=args.test,
-            extend=args.extend,
+            extend=extend_mode,
+            run_id=run_id,
+            completed_unit_indices=completed_units,
+            pending_unit_indices=pending_units,
             shard_assignments=shard_assignments,
         )
 
         n_tasks = int(actual_cfg["inference"]["n_workers"])
         nodes = max(1, math.ceil(n_tasks / CORES_PER_NODE))
-        script_dir = jobs_root / experiment_name
+        script_dir = jobs_root / experiment_name / run_id
         script_dir.mkdir(parents=True, exist_ok=True)
         submitted_job_ids: list[str] = []
 
@@ -218,8 +267,9 @@ def main() -> None:
                     output_dir=output_dir,
                     shard_index=shard_index,
                     actual_num_shards=actual_num_shards,
+                    shard_run_id=run_id,
                     test_mode=args.test,
-                    extend=args.extend,
+                    extend=extend_mode,
                     account=args.account,
                     partition=args.partition,
                     time_limit=time_limit,
@@ -237,7 +287,7 @@ def main() -> None:
                 result = subprocess.run(submit_cmd, check=True, capture_output=True, text=True)
                 job_id = _parse_job_id(result.stdout)
                 submitted_job_ids.append(job_id)
-                print(f"{experiment_name} shard {shard_index}: submitted job {job_id}")
+                print(f"{experiment_name} run {run_id} shard {shard_index}: submitted job {job_id}")
 
         plan["submitted_job_ids"] = submitted_job_ids
         update_plan(plan_layout, plan)

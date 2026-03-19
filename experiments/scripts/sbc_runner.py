@@ -153,7 +153,7 @@ def main(argv: list[str] | None = None) -> None:
         output_root = Path(args.output_dir)
         full_cfg = load_config(args.config, test_mode=False)
         shard_index = args.shard_index if args.shard_index is not None else 0
-        layout = ShardLayout(output_root, experiment_name, shard_index)
+        layout = ShardLayout(output_root, experiment_name, args.shard_run_id, shard_index)
         plan = read_json(layout.plan_path)
         if not plan:
             actual_num_shards = args.num_shards or 1
@@ -165,10 +165,14 @@ def main(argv: list[str] | None = None) -> None:
                     unit_kind="trial",
                     full_total_units=full_cfg["sbc"]["n_trials"],
                     actual_total_units=n_trials,
+                    target_total_units=n_trials,
                     requested_num_shards=actual_num_shards,
                     actual_num_shards=actual_num_shards,
                     test_mode=test_mode,
                     extend=args.extend,
+                    run_id=args.shard_run_id,
+                    completed_unit_indices=[],
+                    pending_unit_indices=list(range(n_trials)),
                     shard_assignments=split_indices(n_trials, actual_num_shards),
                     runner_script=str(Path(__file__).resolve()),
                 ),

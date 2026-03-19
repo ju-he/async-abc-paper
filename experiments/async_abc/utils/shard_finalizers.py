@@ -4,6 +4,8 @@ from __future__ import annotations
 import csv
 import json
 import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -26,6 +28,8 @@ from ..utils.metadata import write_metadata
 from ..utils.runner import write_timing_csv
 from .sharding import (
     ShardLayout,
+    detect_completed_replicates_in_output,
+    existing_extension_history,
     merge_csv_group,
     publish_directory_atomically,
     read_json,
@@ -67,6 +71,63 @@ def _merge_raw_records(shard_dirs: List[OutputDir], destination: Path) -> List[P
     return load_records(destination)
 
 
+def _is_extension_batch(layout: ShardLayout) -> bool:
+    return bool(read_json(layout.plan_path).get("extend"))
+
+
+def _copy_existing_timing_history(layout: ShardLayout, tmp_output: OutputDir) -> None:
+    if not _is_extension_batch(layout):
+        return
+    existing_path = layout.final_output_dir.data / "timing.csv"
+    if existing_path.exists():
+        shutil.copy2(existing_path, tmp_output.data / "timing.csv")
+
+
+def _write_batch_timing(cfg: dict, layout: ShardLayout, tmp_output: OutputDir, timing: Dict[str, float | None]) -> None:
+    _copy_existing_timing_history(layout, tmp_output)
+    write_timing_csv(
+        tmp_output.data / "timing.csv",
+        cfg["experiment_name"],
+        timing["elapsed_s"] or 0.0,
+        timing["estimated_full_s"],
+        bool(cfg.get("inference", {}).get("test_mode", False)),
+        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
+        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
+        aggregate_compute_s=timing["aggregate_compute_s"],
+    )
+
+
+def _metadata_extra(cfg: dict, layout: ShardLayout, statuses: List[Dict[str, Any]], tmp_output: OutputDir) -> Dict[str, Any]:
+    plan = read_json(layout.plan_path)
+    completed_replicates = (
+        detect_completed_replicates_in_output(tmp_output, cfg)
+        if plan.get("unit_kind") == "replicate"
+        else []
+    )
+    history = existing_extension_history(layout.output_root, cfg["experiment_name"])
+    history.append(
+        {
+            "run_id": layout.run_id,
+            "completed_unit_indices": plan.get("completed_unit_indices", []),
+            "pending_unit_indices": plan.get("pending_unit_indices", []),
+            "submitted_job_ids": plan.get("submitted_job_ids", []),
+            "finalized_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    return {
+        "completed_replicates": completed_replicates,
+        "completed_replicate_count": len(completed_replicates),
+        "last_shard_run_id": layout.run_id,
+        "extension_runs": history,
+        "sharding": {
+            "run_id": layout.run_id,
+            "actual_num_shards": len(statuses),
+            "statuses": statuses,
+            "plan": plan,
+        },
+    }
+
+
 def _timing_payload(cfg: dict, statuses: List[Dict[str, Any]]) -> Dict[str, float | None]:
     summary = shard_timing_summary(statuses)
     estimates = _timing_estimates(statuses)
@@ -84,10 +145,8 @@ def _publish_temp_output(layout: ShardLayout, tmp_output_dir: OutputDir) -> None
 
 
 def _temp_output_dir(layout: ShardLayout) -> OutputDir:
-    temp_root = layout.output_root / "_shards" / layout.experiment_name / "_merge_tmp"
+    temp_root = layout.run_root / "_merge_tmp"
     if temp_root.exists():
-        import shutil
-
         shutil.rmtree(temp_root)
     return OutputDir(temp_root, layout.experiment_name).ensure()
 
@@ -166,30 +225,16 @@ def finalize_benchmark_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    records = _merge_raw_records(shard_dirs, tmp_output.data / "raw_results.csv")
+    sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
+    if _is_extension_batch(layout):
+        sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
+    merge_csv_group(sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    records = load_records(tmp_output.data / "raw_results.csv")
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     if any(cfg.get("plots", {}).values()):
         plot_benchmark_diagnostics(records, cfg, tmp_output)
-    write_metadata(
-        tmp_output,
-        cfg,
-        extra={
-            "sharding": {
-                "actual_num_shards": len(shard_dirs),
-                "statuses": statuses,
-            }
-        },
-    )
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {
         "record_count": len(records),
@@ -205,26 +250,20 @@ def finalize_sensitivity_experiment(
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
     variant_names = sorted({path.name for shard_dir in shard_dirs for path in shard_dir.data.glob("sensitivity_*.csv")})
+    if _is_extension_batch(layout):
+        variant_names = sorted(set(variant_names) | {path.name for path in layout.final_output_dir.data.glob("sensitivity_*.csv")})
     for filename in variant_names:
         merge_csv_group(
+            ([layout.final_output_dir.data / filename] if _is_extension_batch(layout) else []) +
             [shard_dir.data / filename for shard_dir in shard_dirs],
             tmp_output.data / filename,
             sort_key=_sort_raw_result_row,
         )
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     if cfg.get("plots", {}).get("sensitivity_heatmap"):
         plot_sensitivity_summary(tmp_output.data, cfg.get("sensitivity_grid", {}), tmp_output)
-    write_metadata(tmp_output, cfg, extra={"sharding": {"actual_num_shards": len(shard_dirs), "statuses": statuses}})
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {"timing": timing}
 
@@ -237,26 +276,20 @@ def finalize_ablation_experiment(
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
     variant_names = sorted({path.name for shard_dir in shard_dirs for path in shard_dir.data.glob("ablation_*.csv")})
+    if _is_extension_batch(layout):
+        variant_names = sorted(set(variant_names) | {path.name for path in layout.final_output_dir.data.glob("ablation_*.csv")})
     for filename in variant_names:
         merge_csv_group(
+            ([layout.final_output_dir.data / filename] if _is_extension_batch(layout) else []) +
             [shard_dir.data / filename for shard_dir in shard_dirs],
             tmp_output.data / filename,
             sort_key=_sort_raw_result_row,
         )
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     if cfg.get("plots", {}).get("ablation_comparison"):
         plot_ablation_summary(tmp_output.data, cfg.get("ablation_variants", []), tmp_output)
-    write_metadata(tmp_output, cfg, extra={"sharding": {"actual_num_shards": len(shard_dirs), "statuses": statuses}})
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {"timing": timing}
 
@@ -268,8 +301,13 @@ def finalize_straggler_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    records = _merge_raw_records(shard_dirs, tmp_output.data / "raw_results.csv")
+    raw_sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
+    if _is_extension_batch(layout):
+        raw_sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
+    merge_csv_group(raw_sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    records = load_records(tmp_output.data / "raw_results.csv")
     merge_csv_group(
+        ([layout.final_output_dir.data / "throughput_vs_slowdown_summary.csv"] if _is_extension_batch(layout) else []) +
         [shard_dir.data / "throughput_vs_slowdown_summary.csv" for shard_dir in shard_dirs],
         tmp_output.data / "throughput_vs_slowdown_summary.csv",
         sort_key=lambda row: (
@@ -279,16 +317,7 @@ def finalize_straggler_experiment(
         ),
     )
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("throughput_vs_slowdown"):
         with open(tmp_output.data / "throughput_vs_slowdown_summary.csv", newline="") as f:
@@ -305,7 +334,7 @@ def finalize_straggler_experiment(
             worst = max(factors)
             worst_records = [r for r in records if slowdown_pattern.search(r.method) and float(slowdown_pattern.search(r.method).group(1)) == worst]
             plot_worker_gantt(worst_records, tmp_output)
-    write_metadata(tmp_output, cfg, extra={"sharding": {"actual_num_shards": len(shard_dirs), "statuses": statuses}})
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {"record_count": len(records), "timing": timing}
 
@@ -317,23 +346,18 @@ def finalize_runtime_heterogeneity_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    records = _merge_raw_records(shard_dirs, tmp_output.data / "raw_results.csv")
+    sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
+    if _is_extension_batch(layout):
+        sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
+    merge_csv_group(sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    records = load_records(tmp_output.data / "raw_results.csv")
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     if any(cfg.get("plots", {}).values()):
         plot_benchmark_diagnostics(records, cfg, tmp_output)
     if cfg.get("plots", {}).get("gantt"):
         plot_worker_gantt(records, tmp_output)
-    write_metadata(tmp_output, cfg, extra={"sharding": {"actual_num_shards": len(shard_dirs), "statuses": statuses}})
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {"record_count": len(records), "timing": timing}
 
@@ -363,22 +387,13 @@ def finalize_sbc_experiment(
     ranks_df.to_csv(tmp_output.data / "sbc_ranks.csv", index=False)
     coverage_df.to_csv(tmp_output.data / "coverage.csv", index=False)
     timing = _timing_payload(cfg, statuses)
-    write_timing_csv(
-        tmp_output.data / "timing.csv",
-        cfg["experiment_name"],
-        timing["elapsed_s"] or 0.0,
-        timing["estimated_full_s"],
-        bool(cfg.get("inference", {}).get("test_mode", False)),
-        estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
-        estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
-        aggregate_compute_s=timing["aggregate_compute_s"],
-    )
+    _write_batch_timing(cfg, layout, tmp_output, timing)
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("rank_histogram"):
         _plot_rank_histogram(ranks_df, tmp_output)
     if plots_cfg.get("coverage_table"):
         _plot_coverage_table(coverage_df, tmp_output)
-    write_metadata(tmp_output, cfg, extra={"sharding": {"actual_num_shards": len(shard_dirs), "statuses": statuses}})
+    write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     return {
         "trial_records": len(trial_records),
