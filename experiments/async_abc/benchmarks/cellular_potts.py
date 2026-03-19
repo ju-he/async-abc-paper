@@ -377,6 +377,7 @@ class CellularPotts:
         self._seed_param_name: str = config.get("seed_param_name", "random_seed")
         self._seed_param_path: str = config.get("seed_param_path", "Settings.randomseed")
         self._output_dir: str = str(_resolve_repo_path(config["output_dir"]))
+        self._keep_eval_dirs: bool = bool(config.get("keep_eval_dirs", False))
         self._eval_counter: int = 0  # for logging only; dir names use uuid4
 
         # SimulationManager
@@ -479,6 +480,17 @@ class CellularPotts:
                 logger.error(
                     "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
                 )
+                if not self._keep_eval_dirs:
+                    leaked_dir = Path(self._output_dir) / sim_dir_name
+                    if leaked_dir.exists():
+                        try:
+                            shutil.rmtree(leaked_dir)
+                        except Exception as cleanup_exc:
+                            logger.warning(
+                                "Cleanup of failed sim dir %s failed: %s",
+                                leaked_dir,
+                                cleanup_exc,
+                            )
                 return float("nan")
 
             sim_dir = str(Path(config_path).parent)
@@ -491,10 +503,11 @@ class CellularPotts:
                     "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
                 )
             finally:
-                try:
-                    self._sim_manager.cleanup_simdir(sim_dir)
-                except Exception as exc:
-                    logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
+                if not self._keep_eval_dirs:
+                    try:
+                        self._sim_manager.cleanup_simdir(sim_dir)
+                    except Exception as exc:
+                        logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
 
             return score
         finally:
@@ -516,3 +529,8 @@ class CellularPotts:
         self._distance_metric = None
         self._sim_manager = None
         gc.collect()
+
+        if not self._keep_eval_dirs:
+            output_dir = getattr(self, "_output_dir", None)
+            if output_dir:
+                shutil.rmtree(output_dir, ignore_errors=True)
