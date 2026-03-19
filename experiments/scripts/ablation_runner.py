@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
                         continue
                     records = run_method_distributed(
                         method, bm.simulate, bm.limits,
-                        inference_cfg, output_dir, replicate, seed,
+                        {**inference_cfg, "_checkpoint_tag": name}, output_dir, replicate, seed,
                     )
                     for r in records:
                         r.method = tagged_method

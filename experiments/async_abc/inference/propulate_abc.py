@@ -206,8 +206,13 @@ def run_propulate_abc(
         sim_seed = _eval_seed(seed, mpi_rank, int(ind.generation), params)
         return float(simulate_fn(params, seed=sim_seed))
 
-    # Each (replicate, seed) gets its own checkpoint dir to prevent cross-contamination
-    checkpoint_dir = output_dir.logs / f"propulate_rep{replicate}_seed{seed}"
+    # Each (replicate, seed) gets its own checkpoint dir to prevent cross-contamination.
+    # An optional _checkpoint_tag in inference_cfg further qualifies the path so that
+    # callers such as the ablation runner (which share output_dir across variants) do
+    # not accidentally resume a checkpoint from a different configuration variant.
+    _tag = inference_cfg.get("_checkpoint_tag", "")
+    _tag_suffix = f"__{_tag}" if _tag else ""
+    checkpoint_dir = output_dir.logs / f"propulate_rep{replicate}_seed{seed}{_tag_suffix}"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     propulate_comm = _make_propulate_comm()
