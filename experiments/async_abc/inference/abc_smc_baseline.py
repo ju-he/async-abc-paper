@@ -8,12 +8,19 @@ predictable and the comparison fairer.
 If ``pyabc`` is not installed, raises ``ImportError`` with installation
 instructions.
 """
+import logging
 from datetime import datetime
 from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
-from .pyabc_sampler import build_pyabc_sampler
+from .pyabc_sampler import (
+    build_pyabc_sampler,
+    resolve_pyabc_parallel_backend,
+    resolve_pyabc_worker_count,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def run_abc_smc_baseline(
@@ -65,7 +72,16 @@ def run_abc_smc_baseline(
     k            = inference_cfg.get("k", 100)
     n_generations = inference_cfg.get("n_generations", 5)
     n_procs          = inference_cfg.get("n_workers", 1)
-    parallel_backend = inference_cfg.get("parallel_backend", "multicore")
+    parallel_backend = resolve_pyabc_parallel_backend(
+        inference_cfg,
+        method_name="abc_smc_baseline",
+    )
+    n_procs = resolve_pyabc_worker_count(
+        simulate_fn,
+        int(n_procs),
+        parallel_backend,
+        method_name="abc_smc_baseline",
+    )
 
     # Build pyABC prior from limits
     prior = pyabc.Distribution(

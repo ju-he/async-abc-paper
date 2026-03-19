@@ -316,14 +316,14 @@ def finalize_straggler_experiment(
         _plot_throughput_vs_slowdown(rows, tmp_output)
     if plots_cfg.get("gantt"):
         slowdown_pattern = re.compile(r"__straggler_slowdown([0-9.eE+-]+)x$")
-        record_factors: Dict[Any, float] = {}
+        tagged_records: List[tuple[ParticleRecord, float]] = []
         for record in records:
             match = slowdown_pattern.search(record.method)
             if match:
-                record_factors[record] = float(match.group(1))
-        if record_factors:
-            worst = max(record_factors.values())
-            worst_records = [r for r, f in record_factors.items() if f == worst]
+                tagged_records.append((record, float(match.group(1))))
+        if tagged_records:
+            worst = max(factor for _, factor in tagged_records)
+            worst_records = [record for record, factor in tagged_records if factor == worst]
             plot_worker_gantt(worst_records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)

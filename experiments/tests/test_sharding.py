@@ -116,6 +116,22 @@ class TestShardedSbcRunner:
         assert (data_dir / "timing.csv").exists()
 
 
+class TestShardedStragglerRunner:
+    def test_straggler_runner_finalizes_single_shard(self, tmp_path, straggler_config_file):
+        test_helpers.run_runner_main(
+            "straggler_runner.py",
+            straggler_config_file,
+            tmp_path,
+            extra_args=("--shard-index", "0", "--num-shards", "1"),
+        )
+
+        data_dir = tmp_path / "straggler" / "data"
+        assert (data_dir / "raw_results.csv").exists()
+        assert (data_dir / "throughput_vs_slowdown_summary.csv").exists()
+        assert (data_dir / "timing.csv").exists()
+        assert (tmp_path / "_shards" / "straggler" / "runs" / "default" / "merge.done.json").exists()
+
+
 class TestShardSubmitter:
     def test_submit_replicate_shards_dry_run_writes_plan_and_single_test_shard(self, tmp_path, monkeypatch):
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")

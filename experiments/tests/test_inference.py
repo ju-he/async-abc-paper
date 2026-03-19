@@ -470,18 +470,29 @@ class TestPyabcWrapperFixes:
         records = run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_workers": 1}, od, replicate=0, seed=1)
         assert records
 
-    def test_multicore_sampler_when_n_workers_gt_1(self, tmp_output_dir, monkeypatch):
+    def test_mpi_sampler_when_n_workers_gt_1(self, tmp_output_dir, monkeypatch):
         import pyabc
         from async_abc.io.paths import OutputDir
         from async_abc.inference.pyabc_wrapper import run_pyabc_smc
 
         calls = []
-        original = pyabc.MulticoreEvalParallelSampler
-        monkeypatch.setattr(pyabc, "MulticoreEvalParallelSampler", lambda n: (calls.append(n), original(n))[1])
+        class DummyFutureSampler:
+            pass
+
+        monkeypatch.setattr(
+            pyabc,
+            "ConcurrentFutureSampler",
+            lambda cfuture_executor: (calls.append("mpi"), DummyFutureSampler())[1],
+        )
+        import unittest.mock
+        monkeypatch.setitem(sys.modules, "mpi4py", unittest.mock.MagicMock())
+        mock_futures = unittest.mock.MagicMock()
+        mock_futures.MPIPoolExecutor.return_value = unittest.mock.MagicMock()
+        monkeypatch.setitem(sys.modules, "mpi4py.futures", mock_futures)
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [2]
+        assert calls == ["mpi"]
 
     def test_same_seed_reproducible(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
@@ -697,6 +708,87 @@ class TestPyabcWrapperMpiBackend:
         run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1)
         assert calls == ["multicore"]
 
+    def test_parallel_run_defaults_to_mpi(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.pyabc_wrapper as wrapper_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        calls = []
+        monkeypatch.setattr(
+            wrapper_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (calls.append(parallel_backend), pyabc.SingleCoreSampler())[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc_parallel_default").ensure()
+        run_pyabc_smc(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "n_workers": 4},
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == ["mpi"]
+
+    def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.pyabc_wrapper as wrapper_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        calls = []
+        monkeypatch.setattr(
+            wrapper_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (calls.append(parallel_backend), pyabc.SingleCoreSampler())[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc_parallel_override").ensure()
+        run_pyabc_smc(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "parallel_backend": "multicore", "n_workers": 4},
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == ["mpi"]
+
+    def test_multicore_is_forced_to_single_process_for_unsafe_benchmark(
+        self, tmp_output_dir, monkeypatch
+    ):
+        import pyabc
+        import async_abc.inference.pyabc_wrapper as wrapper_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        calls = []
+        monkeypatch.setattr(
+            wrapper_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (
+                calls.append((n_procs, parallel_backend)),
+                pyabc.SingleCoreSampler(),
+            )[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        bm.MULTIPROCESSING_SAFE = False
+        od = OutputDir(tmp_output_dir, "pyabc_cpm_safe").ensure()
+        run_pyabc_smc(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "n_workers": 4},
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == [(4, "mpi")]
+
 
 class TestAbcSmcBaselineMpiBackend:
     @pytest.fixture(autouse=True)
@@ -745,6 +837,92 @@ class TestAbcSmcBaselineMpiBackend:
         od = OutputDir(tmp_output_dir, "smc_default").ensure()
         run_abc_smc_baseline(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_generations": 2}, od, replicate=0, seed=1)
         assert calls == ["multicore"]
+
+    def test_parallel_run_defaults_to_mpi(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        calls = []
+        monkeypatch.setattr(
+            baseline_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (calls.append(parallel_backend), pyabc.SingleCoreSampler())[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "smc_parallel_default").ensure()
+        run_abc_smc_baseline(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "n_generations": 2, "n_workers": 4},
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == ["mpi"]
+
+    def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        calls = []
+        monkeypatch.setattr(
+            baseline_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (calls.append(parallel_backend), pyabc.SingleCoreSampler())[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "smc_parallel_override").ensure()
+        run_abc_smc_baseline(
+            bm.simulate,
+            bm.limits,
+            {
+                **_test_inference_cfg(),
+                "n_generations": 2,
+                "parallel_backend": "multicore",
+                "n_workers": 4,
+            },
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == ["mpi"]
+
+    def test_multicore_is_forced_to_single_process_for_unsafe_benchmark(
+        self, tmp_output_dir, monkeypatch
+    ):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        calls = []
+        monkeypatch.setattr(
+            baseline_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend: (
+                calls.append((n_procs, parallel_backend)),
+                pyabc.SingleCoreSampler(),
+            )[1],
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        bm.MULTIPROCESSING_SAFE = False
+        od = OutputDir(tmp_output_dir, "smc_cpm_safe").ensure()
+        run_abc_smc_baseline(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "n_generations": 2, "n_workers": 4},
+            od,
+            replicate=0,
+            seed=1,
+        )
+        assert calls == [(4, "mpi")]
 
 
 class TestMpiIntegration:

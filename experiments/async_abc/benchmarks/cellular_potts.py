@@ -305,6 +305,10 @@ class CellularPotts:
         computation.
     """
 
+    # pyABC's local multiprocessing path is not safe here because spawned/forked
+    # workers interact badly with the native NAStJA/nastjapy stack on the cluster.
+    MULTIPROCESSING_SAFE = False
+
     REQUIRED_KEYS = [
         "nastja_config_template",
         "config_builder_params",

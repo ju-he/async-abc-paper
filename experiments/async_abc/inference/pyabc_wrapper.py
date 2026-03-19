@@ -4,11 +4,18 @@ If ``pyabc`` is not installed, :func:`run_pyabc_smc` raises ``ImportError``
 with installation instructions.  The function is still importable so that the
 method registry can reference it unconditionally.
 """
+import logging
 from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
-from .pyabc_sampler import build_pyabc_sampler
+from .pyabc_sampler import (
+    build_pyabc_sampler,
+    resolve_pyabc_parallel_backend,
+    resolve_pyabc_worker_count,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def run_pyabc_smc(
@@ -60,7 +67,16 @@ def run_pyabc_smc(
     k = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
     n_procs          = inference_cfg.get("n_workers", 1)
-    parallel_backend = inference_cfg.get("parallel_backend", "multicore")
+    parallel_backend = resolve_pyabc_parallel_backend(
+        inference_cfg,
+        method_name="pyabc_smc",
+    )
+    n_procs = resolve_pyabc_worker_count(
+        simulate_fn,
+        int(n_procs),
+        parallel_backend,
+        method_name="pyabc_smc",
+    )
 
     # Build pyABC prior from limits
     prior = pyabc.Distribution(
