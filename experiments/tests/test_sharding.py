@@ -230,6 +230,98 @@ class TestShardSubmitter:
         scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*/*.sbatch"))
         assert len(scripts) == 1
 
+    def test_submit_replicate_shards_caps_auto_derived_time_limit(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+
+        data_dir = tmp_path / "gaussian_mean" / "data"
+        data_dir.mkdir(parents=True)
+        with open(data_dir / "timing.csv", "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "experiment_name",
+                    "elapsed_s",
+                    "estimated_full_s",
+                    "estimated_full_unsharded_s",
+                    "estimated_full_sharded_wall_s",
+                    "aggregate_compute_s",
+                    "test_mode",
+                    "timestamp",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "experiment_name": "gaussian_mean",
+                    "elapsed_s": "1.0",
+                    "estimated_full_s": "1.0",
+                    "estimated_full_unsharded_s": "1.0",
+                    "estimated_full_sharded_wall_s": "9999999.0",
+                    "aggregate_compute_s": "1.0",
+                    "test_mode": "True",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--jobs-per-experiment",
+                "4",
+                "--test",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*/*.sbatch"))
+        assert len(scripts) == 1
+        script_text = scripts[0].read_text()
+        assert "#SBATCH --time=24:00:00" in script_text
+
+    def test_submit_replicate_shards_surfaces_sbatch_stderr(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+
+        def fake_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(
+                returncode=1,
+                cmd=args[0],
+                stderr="Requested time limit is invalid for partition batch",
+            )
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--jobs-per-experiment",
+                "4",
+                "--test",
+            ],
+        )
+
+        with pytest.raises(SystemExit, match="Requested time limit is invalid for partition batch"):
+            submitter.main()
+
     def test_submit_replicate_shards_accepts_all_token(self, tmp_path, monkeypatch):
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
         monkeypatch.setattr(

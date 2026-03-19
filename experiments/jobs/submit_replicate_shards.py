@@ -16,6 +16,7 @@ CORES_PER_NODE = 48
 DEFAULT_ACCOUNT = "tissuetwin"
 DEFAULT_PARTITION = "batch"
 DEFAULT_TIME = "04:00:00"
+DEFAULT_MAX_TIME = "24:00:00"
 DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
@@ -71,6 +72,20 @@ def _format_slurm_time(seconds: float) -> str:
     h, rem = divmod(s, 3600)
     m, sec = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{sec:02d}"
+
+
+def _parse_slurm_time(time_str: str) -> int:
+    """Parse SLURM time strings HH:MM:SS or D-HH:MM:SS into seconds."""
+    day_part: str | None = None
+    rest = time_str.strip()
+    if "-" in rest:
+        day_part, rest = rest.split("-", 1)
+    parts = rest.split(":")
+    if len(parts) != 3:
+        raise ValueError(f"Unsupported SLURM time format: {time_str!r}")
+    h, m, s = (int(part) for part in parts)
+    days = int(day_part) if day_part is not None else 0
+    return ((days * 24 + h) * 60 + m) * 60 + s
 
 
 def _parse_job_id(output: str) -> str:
@@ -164,6 +179,12 @@ def main() -> None:
     parser.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"SLURM account (default: {DEFAULT_ACCOUNT}).")
     parser.add_argument("--partition", default=DEFAULT_PARTITION, help=f"SLURM partition (default: {DEFAULT_PARTITION}).")
     parser.add_argument("--time", dest="time_limit", default=DEFAULT_TIME, help=f"SLURM wall time (default: {DEFAULT_TIME}).")
+    parser.add_argument(
+        "--max-time",
+        dest="max_time_limit",
+        default=DEFAULT_MAX_TIME,
+        help=f"Maximum auto-derived SLURM wall time for estimated runs (default: {DEFAULT_MAX_TIME}).",
+    )
     parser.add_argument("--nastjapy-path", default=DEFAULT_NASTJAPY, help="Path containing the cluster virtualenv.")
     args = parser.parse_args()
     experiment_names = _resolve_experiments(args.experiments)
@@ -249,10 +270,19 @@ def main() -> None:
         # Use timing estimate from a prior test run if available; add 50 % margin.
         _TIMING_MARGIN = 1.5
         _MIN_WALL_S = 30 * 60  # 30 minutes floor
+        _MAX_WALL_S = _parse_slurm_time(args.max_time_limit)
         estimated_s = _read_sharded_estimate(output_dir, experiment_name)
         if estimated_s is not None:
-            time_limit = _format_slurm_time(max(_MIN_WALL_S, estimated_s * _TIMING_MARGIN))
-            print(f"{experiment_name}: using estimated wall time {time_limit} (estimate={estimated_s:.0f}s × {_TIMING_MARGIN})")
+            unclamped_s = max(_MIN_WALL_S, estimated_s * _TIMING_MARGIN)
+            clamped_s = min(_MAX_WALL_S, unclamped_s)
+            time_limit = _format_slurm_time(clamped_s)
+            if clamped_s < unclamped_s:
+                print(
+                    f"{experiment_name}: using estimated wall time {time_limit} "
+                    f"(estimate={estimated_s:.0f}s × {_TIMING_MARGIN}, capped at {args.max_time_limit})"
+                )
+            else:
+                print(f"{experiment_name}: using estimated wall time {time_limit} (estimate={estimated_s:.0f}s × {_TIMING_MARGIN})")
         else:
             time_limit = args.time_limit
 
@@ -284,7 +314,15 @@ def main() -> None:
             if args.dry_run:
                 print(f"[dry-run] {' '.join(submit_cmd)}")
             else:
-                result = subprocess.run(submit_cmd, check=True, capture_output=True, text=True)
+                try:
+                    result = subprocess.run(submit_cmd, check=True, capture_output=True, text=True)
+                except subprocess.CalledProcessError as exc:
+                    stderr = (exc.stderr or "").strip()
+                    stdout = (exc.stdout or "").strip()
+                    details = stderr or stdout or f"sbatch exited with code {exc.returncode}"
+                    raise SystemExit(
+                        f"Failed to submit {experiment_name} shard {shard_index} with sbatch: {details}"
+                    ) from exc
                 job_id = _parse_job_id(result.stdout)
                 submitted_job_ids.append(job_id)
                 print(f"{experiment_name} run {run_id} shard {shard_index}: submitted job {job_id}")
