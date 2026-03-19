@@ -158,6 +158,36 @@ def _publish_temp_output(layout: ShardLayout, tmp_output_dir: OutputDir) -> None
     publish_directory_atomically(tmp_output_dir.root, layout.final_output_dir.root)
 
 
+def _rewrite_root_timing_summary(output_root: Path) -> None:
+    """Rebuild the run-level timing summary from finalized per-experiment timing CSVs."""
+    timing_rows: List[Dict[str, str]] = []
+
+    for experiment_dir in sorted(output_root.iterdir()):
+        if not experiment_dir.is_dir() or experiment_dir.name.startswith("_"):
+            continue
+        timing_path = experiment_dir / "data" / "timing.csv"
+        if not timing_path.exists() or timing_path.stat().st_size == 0:
+            continue
+        with open(timing_path, newline="") as f:
+            timing_rows.extend(csv.DictReader(f))
+
+    summary_path = output_root / "timing_summary.csv"
+    if not timing_rows:
+        if summary_path.exists():
+            summary_path.unlink()
+        return
+
+    with open(summary_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(timing_rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(
+            sorted(
+                timing_rows,
+                key=lambda row: (row.get("timestamp", ""), row.get("experiment_name", "")),
+            )
+        )
+
+
 def _temp_output_dir(layout: ShardLayout) -> OutputDir:
     temp_root = layout.run_root / "_merge_tmp"
     if temp_root.exists():
@@ -247,6 +277,7 @@ def finalize_benchmark_experiment(
         plot_benchmark_diagnostics(records, cfg, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {
         "record_count": len(records),
         "timing": timing,
@@ -271,6 +302,7 @@ def finalize_sensitivity_experiment(
         plot_sensitivity_summary(tmp_output.data, cfg.get("sensitivity_grid", {}), tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {"timing": timing}
 
 
@@ -292,6 +324,7 @@ def finalize_ablation_experiment(
         plot_ablation_summary(tmp_output.data, cfg.get("ablation_variants", []), tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {"timing": timing}
 
 
@@ -327,12 +360,13 @@ def finalize_straggler_experiment(
             match = slowdown_pattern.search(record.method)
             if match:
                 tagged_records.append((record, float(match.group(1))))
-        if tagged_records:
+    if tagged_records:
             worst = max(factor for _, factor in tagged_records)
             worst_records = [record for record, factor in tagged_records if factor == worst]
             plot_worker_gantt(worst_records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {"record_count": len(records), "timing": timing}
 
 
@@ -353,6 +387,7 @@ def finalize_runtime_heterogeneity_experiment(
         plot_worker_gantt(records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {"record_count": len(records), "timing": timing}
 
 
@@ -395,6 +430,7 @@ def finalize_sbc_experiment(
         _plot_coverage_table(coverage_df, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
+    _rewrite_root_timing_summary(layout.output_root)
     return {
         "trial_records": len(trial_records),
         "timing": timing,

@@ -92,6 +92,9 @@ class TestShardedBenchmarkRunner:
         assert timing_rows
         assert "estimated_full_unsharded_s" in timing_rows[-1]
         assert "aggregate_compute_s" in timing_rows[-1]
+        root_timing_rows = _rows(tmp_path / "timing_summary.csv")
+        assert root_timing_rows
+        assert root_timing_rows[-1]["experiment_name"] == "gaussian_mean"
 
         merge_done = tmp_path / "_shards" / "gaussian_mean" / "runs" / "default" / "merge.done.json"
         assert merge_done.exists()
