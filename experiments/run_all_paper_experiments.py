@@ -68,6 +68,13 @@ EXPERIMENT_REGISTRY = {
 }
 
 
+def _resolve_experiments(requested: list[str]) -> list[str]:
+    """Expand the special 'all' token to every registered experiment."""
+    if "all" in requested:
+        return list(EXPERIMENT_REGISTRY.keys())
+    return requested
+
+
 def _run_experiment(
     name: str,
     runner: str,
@@ -141,7 +148,7 @@ def main(argv: list[str] | None = None) -> None:
         "--experiments", nargs="+", metavar="NAME",
         default=list(EXPERIMENT_REGISTRY.keys()),
         help=(
-            "Experiments to run (default: all). "
+            "Experiments to run, or 'all' (default). "
             f"Choices: {', '.join(EXPERIMENT_REGISTRY)}"
         ),
     )
@@ -150,6 +157,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Skip parameter combinations already present in existing CSVs.",
     )
     args = parser.parse_args(argv)
+    args.experiments = _resolve_experiments(args.experiments)
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

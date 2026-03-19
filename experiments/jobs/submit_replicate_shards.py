@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import math
 import subprocess
 import sys
@@ -16,13 +17,51 @@ DEFAULT_ACCOUNT = "tissuetwin"
 DEFAULT_PARTITION = "batch"
 DEFAULT_TIME = "04:00:00"
 DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
-DEFAULT_EXPERIMENTS_DIR = "/p/project1/tissuetwin/herold2/async-abc-paper/experiments"
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from async_abc.io.config import load_config  # noqa: E402
 from async_abc.utils.sharding import ShardLayout, build_plan_payload, split_indices, update_plan  # noqa: E402
 import run_all_paper_experiments as run_all  # noqa: E402
+
+
+def _default_sharded_experiments() -> list[str]:
+    """Return all shard-supported experiments in registry order."""
+    return [name for name in run_all.EXPERIMENT_REGISTRY if name != "scaling"]
+
+
+def _resolve_experiments(requested: list[str]) -> list[str]:
+    """Expand the special 'all' token to every shard-supported experiment."""
+    if "all" in requested:
+        return _default_sharded_experiments()
+    return requested
+
+
+def _read_sharded_estimate(output_dir: Path, experiment_name: str) -> float | None:
+    """Return the most recent estimated_full_sharded_wall_s from a prior test run, or None."""
+    timing_csv = output_dir / experiment_name / "data" / "timing.csv"
+    if not timing_csv.exists() or timing_csv.stat().st_size == 0:
+        return None
+    try:
+        with open(timing_csv, newline="") as f:
+            rows = list(csv.DictReader(f))
+        for row in reversed(rows):
+            if row.get("test_mode", "").lower() not in ("true", "1"):
+                continue
+            val = row.get("estimated_full_sharded_wall_s", "").strip()
+            if val:
+                return float(val)
+    except Exception:
+        pass
+    return None
+
+
+def _format_slurm_time(seconds: float) -> str:
+    """Convert seconds to HH:MM:SS for SLURM --time."""
+    s = max(1, int(math.ceil(seconds)))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h:02d}:{m:02d}:{sec:02d}"
 
 
 def _parse_job_id(output: str) -> str:
@@ -47,7 +86,6 @@ def _render_script(
     job_name: str,
     log_path: Path,
     nastjapy_path: str,
-    experiments_dir_override: str,
 ) -> str:
     args = [
         "python",
@@ -78,7 +116,6 @@ def _render_script(
 #SBATCH --output={log_path}
 
 nastjapy_path={nastjapy_path}
-experiments_dir={experiments_dir_override}
 
 module restore nastjapy
 module load ParaStationMPI
@@ -95,8 +132,8 @@ def main() -> None:
     parser.add_argument(
         "--experiments",
         nargs="+",
-        default=[name for name in run_all.EXPERIMENT_REGISTRY if name != "scaling"],
-        help="Experiments to shard-submit (default: all except scaling).",
+        default=_default_sharded_experiments(),
+        help="Experiments to shard-submit, or 'all' for all except scaling (default).",
     )
     parser.add_argument(
         "--jobs-per-experiment",
@@ -111,18 +148,14 @@ def main() -> None:
     parser.add_argument("--partition", default=DEFAULT_PARTITION, help=f"SLURM partition (default: {DEFAULT_PARTITION}).")
     parser.add_argument("--time", dest="time_limit", default=DEFAULT_TIME, help=f"SLURM wall time (default: {DEFAULT_TIME}).")
     parser.add_argument("--nastjapy-path", default=DEFAULT_NASTJAPY, help="Path containing the cluster virtualenv.")
-    parser.add_argument(
-        "--experiments-dir",
-        default=DEFAULT_EXPERIMENTS_DIR,
-        help="Cluster path to the experiments directory used inside batch scripts.",
-    )
     args = parser.parse_args()
+    experiment_names = _resolve_experiments(args.experiments)
 
     output_dir = Path(args.output_dir).resolve()
     jobs_root = output_dir / "_jobs"
     jobs_root.mkdir(parents=True, exist_ok=True)
 
-    for experiment_name in args.experiments:
+    for experiment_name in experiment_names:
         if experiment_name not in run_all.EXPERIMENT_REGISTRY:
             raise SystemExit(f"Unknown experiment: {experiment_name}")
         if experiment_name == "scaling":
@@ -164,6 +197,16 @@ def main() -> None:
         script_dir.mkdir(parents=True, exist_ok=True)
         submitted_job_ids: list[str] = []
 
+        # Use timing estimate from a prior test run if available; add 50 % margin.
+        _TIMING_MARGIN = 1.5
+        _MIN_WALL_S = 30 * 60  # 30 minutes floor
+        estimated_s = _read_sharded_estimate(output_dir, experiment_name)
+        if estimated_s is not None:
+            time_limit = _format_slurm_time(max(_MIN_WALL_S, estimated_s * _TIMING_MARGIN))
+            print(f"{experiment_name}: using estimated wall time {time_limit} (estimate={estimated_s:.0f}s × {_TIMING_MARGIN})")
+        else:
+            time_limit = args.time_limit
+
         for shard_index in range(actual_num_shards):
             script_path = script_dir / f"{experiment_name}_shard_{shard_index:03d}.sbatch"
             log_path = script_dir / f"{experiment_name}_shard_{shard_index:03d}-%j.out"
@@ -179,13 +222,12 @@ def main() -> None:
                     extend=args.extend,
                     account=args.account,
                     partition=args.partition,
-                    time_limit=args.time_limit,
+                    time_limit=time_limit,
                     ntasks=n_tasks,
                     nodes=nodes,
                     job_name=job_name,
                     log_path=log_path,
                     nastjapy_path=args.nastjapy_path,
-                    experiments_dir_override=args.experiments_dir,
                 )
             )
             submit_cmd = ["sbatch", str(script_path)]

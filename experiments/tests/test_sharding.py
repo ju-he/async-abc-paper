@@ -119,6 +119,37 @@ class TestShardSubmitter:
         scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*.sbatch"))
         assert len(scripts) == 1
 
+    def test_submit_replicate_shards_accepts_all_token(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {
+                "gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json"),
+                "gandk": ("gandk_runner.py", "gandk.json"),
+                "scaling": ("scaling_runner.py", "scaling.json"),
+            },
+        )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "all",
+                "--jobs-per-experiment",
+                "1",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        assert (tmp_path / "_shards" / "gaussian_mean" / "plan.json").exists()
+        assert (tmp_path / "_shards" / "gandk" / "plan.json").exists()
+        assert not (tmp_path / "_shards" / "scaling").exists()
+
 
 class TestShardSmokeScript:
     def test_local_sharded_smoke_script(self, tmp_path):

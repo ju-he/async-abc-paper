@@ -268,7 +268,10 @@ def acquire_merge_lock(layout: ShardLayout, *, owner_id: str) -> bool:
             layout.merge_lock_path.unlink()
         except FileNotFoundError:
             return False
-        fd = os.open(layout.merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        try:
+            fd = os.open(layout.merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            return False
     with os.fdopen(fd, "w") as f:
         json.dump(payload, f, indent=2)
     return True

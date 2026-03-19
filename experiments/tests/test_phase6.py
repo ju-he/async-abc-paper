@@ -155,6 +155,38 @@ class TestRunAll:
         )
         assert result.returncode != 0
 
+    def test_run_all_accepts_all_token(self, tmp_path):
+        run_all = test_helpers.import_runner_module("../run_all_paper_experiments.py")
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 40, "k": 10},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        config_path = test_helpers.write_config(tmp_path, "gaussian_all.json", cfg)
+        original_configs_dir = run_all.CONFIGS_DIR
+        original_registry = run_all.EXPERIMENT_REGISTRY
+        try:
+            run_all.CONFIGS_DIR = tmp_path
+            run_all.EXPERIMENT_REGISTRY = {
+                "gaussian_mean": ("gaussian_mean_runner.py", config_path.name),
+            }
+            run_all.main(
+                [
+                    "--test",
+                    "--experiments",
+                    "all",
+                    "--output-dir",
+                    str(tmp_path),
+                ]
+            )
+        finally:
+            run_all.CONFIGS_DIR = original_configs_dir
+            run_all.EXPERIMENT_REGISTRY = original_registry
+
+        assert (tmp_path / "gaussian_mean" / "data" / "metadata.json").exists()
+
 
 class TestGaussianMeanConfigMethods:
     def test_gaussian_mean_has_rejection_abc(self):
