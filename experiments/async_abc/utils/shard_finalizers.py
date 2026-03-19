@@ -26,7 +26,7 @@ from ..plotting.reporters import (
 from ..io.config import get_run_mode
 from ..plotting.export import save_figure
 from ..utils.metadata import write_metadata
-from ..utils.runner import write_timing_csv
+from ..utils.runner import write_timing_comparison_csv, write_timing_csv
 from .sharding import (
     ShardLayout,
     detect_completed_replicates_in_output,
@@ -177,6 +177,7 @@ def _rewrite_root_timing_summary(output_root: Path) -> None:
     if not timing_rows:
         if summary_path.exists():
             summary_path.unlink()
+        write_timing_comparison_csv(output_root)
         return
 
     with open(summary_path, "w", newline="") as f:
@@ -188,6 +189,7 @@ def _rewrite_root_timing_summary(output_root: Path) -> None:
                 key=lambda row: (row.get("timestamp", ""), row.get("experiment_name", "")),
             )
         )
+    write_timing_comparison_csv(output_root)
 
 
 def _temp_output_dir(layout: ShardLayout) -> OutputDir:

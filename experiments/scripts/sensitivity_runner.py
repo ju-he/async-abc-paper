@@ -35,7 +35,7 @@ from async_abc.utils.sharding import (
     write_shard_failure_status,
     write_shard_status,
 )
-from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_comparison_csv, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
@@ -258,6 +258,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
+    write_timing_comparison_csv(Path(args.output_dir))
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("sensitivity_heatmap"):

@@ -19,7 +19,7 @@ from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
-from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_comparison_csv, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
@@ -155,6 +155,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
+    write_timing_comparison_csv(Path(args.output_dir))
 
     # Write throughput summary — append when extending, overwrite otherwise
     if throughput_rows:

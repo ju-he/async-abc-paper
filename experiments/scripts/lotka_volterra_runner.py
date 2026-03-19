@@ -33,6 +33,7 @@ from async_abc.utils.runner import (
     format_duration,
     make_arg_parser,
     run_experiment,
+    write_timing_comparison_csv,
     write_timing_csv,
 )
 
@@ -190,6 +191,7 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if is_root_rank():
         write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode, run_mode)
+        write_timing_comparison_csv(Path(args.output_dir))
 
     if is_root_rank() and any(cfg.get("plots", {}).values()):
         from async_abc.plotting.reporters import plot_benchmark_diagnostics

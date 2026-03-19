@@ -45,6 +45,7 @@ from async_abc.utils.runner import (
     format_duration,
     make_arg_parser,
     run_method_distributed,
+    write_timing_comparison_csv,
     write_timing_csv,
 )
 from async_abc.utils.seeding import make_seeds
@@ -307,6 +308,7 @@ def main(argv: list[str] | None = None) -> None:
         _finalize_sharded(cfg, layout, actual_num_shards)
         return
 
+    write_timing_comparison_csv(Path(args.output_dir))
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, coverage_levels)
     _write_dataframe_csv(ranks_df, output_dir.data / "sbc_ranks.csv")

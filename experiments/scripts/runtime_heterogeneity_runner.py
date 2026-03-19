@@ -39,7 +39,7 @@ from async_abc.utils.sharding import (
     write_shard_failure_status,
     write_shard_status,
 )
-from async_abc.utils.runner import compute_corrected_estimate, format_duration, make_arg_parser, run_experiment, write_timing_csv
+from async_abc.utils.runner import compute_corrected_estimate, format_duration, make_arg_parser, run_experiment, write_timing_comparison_csv, write_timing_csv
 from async_abc.benchmarks import make_benchmark
 
 logger = logging.getLogger(__name__)
@@ -281,6 +281,7 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if is_root_rank():
         write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
+        write_timing_comparison_csv(Path(args.output_dir))
 
     if is_root_rank() and any(cfg.get("plots", {}).values()):
         from async_abc.plotting.reporters import plot_benchmark_diagnostics

@@ -179,6 +179,102 @@ _TIMING_FIELDNAMES = [
     "timestamp",
 ]
 
+_COMPARISON_FIELDNAMES = [
+    "experiment_name",
+    "estimated_full_s",
+    "estimated_full_unsharded_s",
+    "estimated_full_sharded_wall_s",
+    "actual_elapsed_s",
+    "actual_aggregate_compute_s",
+    "ratio_elapsed",
+    "test_run_mode",
+    "test_timestamp",
+    "full_timestamp",
+]
+
+
+def _parse_float(val: Optional[str]) -> Optional[float]:
+    """Return float from string, or None if missing/invalid."""
+    if not val:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _fmt_float(val: Optional[str]) -> Union[float, str]:
+    """Round a string float to 3 dp, or return empty string."""
+    f = _parse_float(val)
+    return round(f, 3) if f is not None else ""
+
+
+def write_timing_comparison_csv(output_root: Union[str, Path]) -> None:
+    """Regenerate timing_comparison.csv from all per-experiment timing.csv files.
+
+    Reads ``<output_root>/*/data/timing.csv``, pairs each experiment's latest
+    test/small-mode estimate with its latest full-run actual, and writes a
+    summary to ``<output_root>/timing_comparison.csv``.  Safe to call even when
+    only test runs or only full runs exist yet.
+    """
+    output_root = Path(output_root)
+    rows_by_experiment: Dict[str, List[Dict[str, str]]] = {}
+    for exp_dir in sorted(output_root.iterdir()):
+        if not exp_dir.is_dir() or exp_dir.name.startswith("_"):
+            continue
+        timing_path = exp_dir / "data" / "timing.csv"
+        if not timing_path.exists() or timing_path.stat().st_size == 0:
+            continue
+        try:
+            with open(timing_path, newline="") as f:
+                for row in csv.DictReader(f):
+                    name = row.get("experiment_name") or exp_dir.name
+                    rows_by_experiment.setdefault(name, []).append(row)
+        except Exception:
+            continue
+
+    comparison_rows = []
+    for exp_name, rows in sorted(rows_by_experiment.items()):
+        test_rows = [
+            r for r in rows
+            if r.get("test_mode", "").lower() in ("true", "1")
+            and r.get("estimated_full_s", "")
+        ]
+        full_rows = [
+            r for r in rows
+            if r.get("run_mode", "") == "full"
+            and r.get("elapsed_s", "")
+        ]
+        if not test_rows and not full_rows:
+            continue
+        test_row = test_rows[-1] if test_rows else {}
+        full_row = full_rows[-1] if full_rows else {}
+        est = _parse_float(test_row.get("estimated_full_s"))
+        actual = _parse_float(full_row.get("elapsed_s"))
+        ratio: Union[float, str] = ""
+        if est and actual and est > 0:
+            ratio = round(actual / est, 4)
+        comparison_rows.append({
+            "experiment_name": exp_name,
+            "estimated_full_s": round(est, 3) if est is not None else "",
+            "estimated_full_unsharded_s": _fmt_float(test_row.get("estimated_full_unsharded_s")),
+            "estimated_full_sharded_wall_s": _fmt_float(test_row.get("estimated_full_sharded_wall_s")),
+            "actual_elapsed_s": round(actual, 3) if actual is not None else "",
+            "actual_aggregate_compute_s": _fmt_float(full_row.get("aggregate_compute_s")),
+            "ratio_elapsed": ratio,
+            "test_run_mode": test_row.get("run_mode", ""),
+            "test_timestamp": test_row.get("timestamp", ""),
+            "full_timestamp": full_row.get("timestamp", ""),
+        })
+
+    if not comparison_rows:
+        return
+    comparison_path = output_root / "timing_comparison.csv"
+    with open(comparison_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_COMPARISON_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(comparison_rows)
+
 
 def compute_corrected_estimate(
     elapsed: float,
