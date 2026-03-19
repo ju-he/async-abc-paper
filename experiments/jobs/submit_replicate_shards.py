@@ -242,6 +242,10 @@ def main() -> None:
             pending_units = list(range(actual_units))
             target_total_units = full_units
             completed_units = []
+        elif args.small:
+            # In small mode run only the reduced replicate count from the small config.
+            target_total_units = actual_units
+            pending_units = [idx for idx in range(target_total_units) if idx not in set(completed_units)]
         else:
             pending_units = [idx for idx in range(target_total_units) if idx not in set(completed_units)]
         if extend_mode and not pending_units:

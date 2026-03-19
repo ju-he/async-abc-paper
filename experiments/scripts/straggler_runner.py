@@ -235,7 +235,7 @@ def main(argv: list[str] | None = None) -> None:
                         method,
                         bm.simulate,
                         bm.limits,
-                        cfg["inference"],
+                        {**cfg["inference"], "_checkpoint_tag": f"slowdown{slowdown_factor:.4g}x"},
                         output_dir,
                         replicate,
                         seed,

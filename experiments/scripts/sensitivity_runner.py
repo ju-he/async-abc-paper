@@ -186,7 +186,7 @@ def main(argv: list[str] | None = None) -> None:
                         continue
                     records = run_method_distributed(
                         method, bm.simulate, bm.limits,
-                        inference_cfg, output_dir, replicate, seed,
+                        {**inference_cfg, "_checkpoint_tag": variant_name}, output_dir, replicate, seed,
                     )
                     # Tag records with variant info
                     for r in records:
