@@ -1,4 +1,5 @@
 """Tests for Phase 6: configs + run_all orchestration."""
+import csv
 import json
 import subprocess
 import sys
@@ -26,6 +27,8 @@ CONFIG_FILES = [
     "sensitivity.json",
     "ablation.json",
 ]
+
+SMALL_CONFIG_FILES = [f"small/{name}" for name in CONFIG_FILES]
 
 # Map experiment name → expected output directory name (matches experiment_name in config)
 EXPERIMENT_NAMES = [
@@ -99,6 +102,18 @@ class TestAllConfigsValid:
         text = (CONFIGS_DIR / config_file).read_text()
         obj = json.loads(text)
         assert isinstance(obj, dict)
+
+    @pytest.mark.parametrize("config_file", SMALL_CONFIG_FILES)
+    def test_small_config_file_exists(self, config_file):
+        assert (CONFIGS_DIR / config_file).exists(), f"Missing small config: {config_file}"
+
+    @pytest.mark.parametrize("config_file", SMALL_CONFIG_FILES)
+    def test_small_config_passes_schema_validation(self, config_file):
+        from async_abc.io.config import load_config
+
+        cfg = load_config(CONFIGS_DIR / config_file)
+        assert isinstance(cfg, dict)
+        assert cfg["execution"]["config_tier"] == "small"
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +201,44 @@ class TestRunAll:
             run_all.EXPERIMENT_REGISTRY = original_registry
 
         assert (tmp_path / "gaussian_mean" / "data" / "metadata.json").exists()
+
+    def test_run_all_forwards_small_and_test_flags(self, tmp_path, monkeypatch):
+        run_all = test_helpers.import_runner_module("../run_all_paper_experiments.py")
+        captured = {}
+
+        monkeypatch.setattr(
+            run_all,
+            "_run_experiment",
+            lambda name, runner, config, output_dir, test_mode, small_mode, extend=False: (
+                captured.update(
+                    {
+                        "name": name,
+                        "runner": runner,
+                        "config": config,
+                        "test_mode": test_mode,
+                        "small_mode": small_mode,
+                        "extend": extend,
+                    }
+                ) or (0, 0.1)
+            ),
+        )
+        monkeypatch.setattr(run_all, "_read_runner_estimate", lambda _: 1.0)
+
+        run_all.main(
+            [
+                "--small",
+                "--test",
+                "--experiments",
+                "gaussian_mean",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+
+        timing_rows = list(csv.DictReader(open(tmp_path / "timing_summary.csv")))
+        assert captured["small_mode"] is True
+        assert captured["test_mode"] is True
+        assert timing_rows[-1]["run_mode"] == "small_test"
 
 
 class TestGaussianMeanConfigMethods:

@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from ..io.config import get_run_mode, is_test_mode
 from ..io.paths import OutputDir
 
 
@@ -63,6 +64,8 @@ def write_metadata(
         "python_version": sys.version,
         "platform": platform.platform(),
         "packages": _installed_packages(),
+        "run_mode": get_run_mode(cfg),
+        "test_mode": is_test_mode(cfg),
         "config": cfg,
     }
     if extra:

@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from async_abc.io.config import load_config, ValidationError
+from async_abc.io.config import get_run_mode, load_config, ValidationError
 from async_abc.io.schema import (
     CLUSTER_TEST_MAX_WORKERS,
     LOCAL_TEST_MAX_WORKERS,
@@ -118,6 +118,46 @@ class TestLoadConfig:
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p, test_mode=True)
         assert cfg["inference"]["n_workers"] == 2
+
+    def test_small_mode_loads_sibling_config(self, tmp_path, minimal_config):
+        base_path = tmp_path / "cfg.json"
+        base_path.write_text(json.dumps(minimal_config))
+        small_dir = tmp_path / "small"
+        small_dir.mkdir()
+        small_cfg = json.loads(json.dumps(minimal_config))
+        small_cfg["inference"]["max_simulations"] = 123
+        (small_dir / "cfg.json").write_text(json.dumps(small_cfg))
+
+        cfg = load_config(base_path, small_mode=True)
+
+        assert cfg["inference"]["max_simulations"] == 123
+        assert cfg["execution"]["config_tier"] == "small"
+        assert get_run_mode(cfg) == "small"
+        assert cfg["inference"]["test_mode"] is False
+
+    def test_small_mode_then_test_mode_stacks(self, tmp_path, minimal_config):
+        base_path = tmp_path / "cfg.json"
+        base_path.write_text(json.dumps(minimal_config))
+        small_dir = tmp_path / "small"
+        small_dir.mkdir()
+        small_cfg = json.loads(json.dumps(minimal_config))
+        small_cfg["inference"]["max_simulations"] = 250
+        small_cfg["execution"]["n_replicates"] = 2
+        (small_dir / "cfg.json").write_text(json.dumps(small_cfg))
+
+        cfg = load_config(base_path, small_mode=True, test_mode=True)
+
+        assert cfg["inference"]["max_simulations"] <= 100
+        assert cfg["execution"]["config_tier"] == "small"
+        assert get_run_mode(cfg) == "small_test"
+        assert cfg["inference"]["test_mode"] is True
+
+    def test_small_mode_missing_sibling_raises(self, tmp_path, minimal_config):
+        base_path = tmp_path / "cfg.json"
+        base_path.write_text(json.dumps(minimal_config))
+
+        with pytest.raises(FileNotFoundError, match="Small config not found"):
+            load_config(base_path, small_mode=True)
 
 
 class TestNewMethodsInConfig:

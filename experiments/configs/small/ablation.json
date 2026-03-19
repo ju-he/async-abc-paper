@@ -1,0 +1,67 @@
+{
+  "experiment_name": "ablation",
+  "benchmark": {
+    "name": "gaussian_mean",
+    "observed_data_seed": 42,
+    "n_obs": 100,
+    "true_mu": 0.0,
+    "sigma_obs": 1.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": ["async_propulate_abc"],
+  "inference": {
+    "max_simulations": 500,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 5.0,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8
+  },
+  "execution": {
+    "n_replicates": 1,
+    "base_seed": 0
+  },
+  "ablation_variants": [
+    {
+      "name": "full_model",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 0.8
+    },
+    {
+      "name": "small_archive",
+      "k": 10,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 0.8
+    },
+    {
+      "name": "slow_decay",
+      "k": 100,
+      "scheduler_type": "geometric_decay",
+      "decay_factor": 0.9999,
+      "perturbation_scale": 0.8
+    },
+    {
+      "name": "large_perturbation",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 3.0
+    },
+    {
+      "name": "fixed_perturbation",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 5.0
+    },
+    {
+      "name": "no_archive_truncation",
+      "k": 5000,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 0.8
+    }
+  ],
+  "plots": {
+    "ablation_comparison": true
+  }
+}

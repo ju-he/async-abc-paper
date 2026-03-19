@@ -74,6 +74,7 @@ def run_runner_main(
     output_dir: Path,
     *,
     test_mode: bool = False,
+    small_mode: bool = False,
     extra_args: tuple[str, ...] = (),
 ) -> Path:
     module = import_runner_module(script_name)
@@ -85,6 +86,8 @@ def run_runner_main(
     ]
     if test_mode:
         argv.append("--test")
+    if small_mode:
+        argv.append("--small")
     argv.extend(extra_args)
     module.main(argv)
     return output_dir
@@ -96,6 +99,7 @@ def run_runner_subprocess(
     output_dir: Path,
     *,
     test_mode: bool = False,
+    small_mode: bool = False,
     extra_args: tuple[str, ...] = (),
     timeout: int = 180,
 ) -> subprocess.CompletedProcess:
@@ -109,6 +113,8 @@ def run_runner_subprocess(
     ]
     if test_mode:
         cmd.append("--test")
+    if small_mode:
+        cmd.append("--small")
     cmd.extend(extra_args)
     return subprocess.run(
         cmd,

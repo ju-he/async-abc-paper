@@ -1,0 +1,35 @@
+{
+  "experiment_name": "scaling",
+  "benchmark": {
+    "name": "lotka_volterra",
+    "observed_data_seed": 42,
+    "T_max": 30.0,
+    "x0": 50,
+    "y0": 100,
+    "true_theta1": 0.5,
+    "true_theta2": 0.025,
+    "true_theta3": 0.025,
+    "true_theta4": 0.5
+  },
+  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "inference": {
+    "max_simulations": 20000,
+    "k": 100,
+    "tol_init": 500000.0,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "n_workers": 1
+  },
+  "execution": {
+    "n_replicates": 1,
+    "base_seed": 0
+  },
+  "scaling": {
+    "worker_counts": [1, 16, 48, 96, 256],
+    "test_worker_counts": [1, 4, 48]
+  },
+  "plots": {
+    "scaling_curve": true,
+    "efficiency": true
+  }
+}

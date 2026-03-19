@@ -429,6 +429,36 @@ class TestShardSubmitter:
         else:
             raise AssertionError("expected SystemExit")
 
+    def test_submit_replicate_shards_small_keeps_normal_shard_count(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--jobs-per-experiment",
+                "4",
+                "--small",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        plan = json.loads(_plan_paths(tmp_path, "gaussian_mean")[0].read_text())
+        assert plan["requested_num_shards"] == 4
+        assert plan["actual_num_shards"] == 4
+        assert plan["small_mode"] is True
+        assert plan["run_mode"] == "small"
+
 
 class TestShardSmokeScript:
     def test_local_sharded_smoke_script(self, tmp_path):

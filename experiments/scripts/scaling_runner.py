@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import is_test_mode, load_config
+from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
@@ -58,8 +58,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     args = parser.parse_args(argv)
 
-    cfg = load_config(args.config, test_mode=args.test)
+    cfg = load_config(args.config, test_mode=args.test, small_mode=args.small)
     test_mode = is_test_mode(cfg)
+    small_mode = is_small_mode(cfg)
+    run_mode = get_run_mode(cfg)
+    estimate_mode = run_mode != "full"
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     bm = make_benchmark(cfg["benchmark"])
@@ -117,8 +120,8 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
-    if test_mode and is_root_rank():
-        cfg_full = load_config(args.config, test_mode=False)
+    if estimate_mode and is_root_rank():
+        cfg_full = load_config(args.config, test_mode=False, small_mode=False)
         full_sims = cfg_full["inference"]["max_simulations"]
         full_reps = cfg_full["execution"]["n_replicates"]
         test_sims = cfg["inference"]["max_simulations"]
@@ -137,7 +140,11 @@ def main(argv: list[str] | None = None) -> None:
         estimated = sum(
             _interp_time(w, measured_avg) * sim_ratio for w in full_worker_counts
         )
-        _, _, note = compute_scaling_factor(args.config)
+        _, _, note = compute_scaling_factor(
+            args.config,
+            small_mode=small_mode,
+            test_mode=test_mode,
+        )
         logger.info(
             "[%s] Estimated full run: ~%s  (%s)",
             name,
@@ -147,7 +154,7 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode)
+    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
 
     # Write throughput summary — append when extending, overwrite otherwise
     if throughput_rows:

@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import is_test_mode, load_config
+from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.export import save_figure
 from async_abc.utils.logging_utils import configure_logging
@@ -132,8 +132,11 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     validate_shard_args(args)
 
-    cfg = load_config(args.config, test_mode=args.test)
+    cfg = load_config(args.config, test_mode=args.test, small_mode=args.small)
     test_mode = is_test_mode(cfg)
+    small_mode = is_small_mode(cfg)
+    run_mode = get_run_mode(cfg)
+    estimate_mode = run_mode != "full"
     experiment_name = cfg["experiment_name"]
 
     sbc_cfg = cfg["sbc"]
@@ -152,7 +155,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if is_shard_mode(args):
         output_root = Path(args.output_dir)
-        full_cfg = load_config(args.config, test_mode=False)
+        full_cfg = load_config(args.config, test_mode=False, small_mode=False)
         shard_index = args.shard_index if args.shard_index is not None else 0
         layout = ShardLayout(output_root, experiment_name, args.shard_run_id, shard_index)
         plan = read_json(layout.plan_path)
@@ -170,6 +173,8 @@ def main(argv: list[str] | None = None) -> None:
                     requested_num_shards=actual_num_shards,
                     actual_num_shards=actual_num_shards,
                     test_mode=test_mode,
+                    small_mode=small_mode,
+                    run_mode=run_mode,
                     extend=args.extend,
                     run_id=args.shard_run_id,
                     completed_unit_indices=[],
@@ -194,7 +199,7 @@ def main(argv: list[str] | None = None) -> None:
                 layout,
                 state="running",
                 unit_indices=selected_trials,
-                extra={"started_at_s": time.time()},
+                extra={"started_at_s": time.time(), "run_mode": run_mode},
             )
         output_dir = layout.shard_output_dir
     else:
@@ -256,15 +261,19 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(elapsed))
-    if test_mode and is_root_rank():
-        factor, extra, _ = compute_scaling_factor(args.config)
+    if estimate_mode and is_root_rank():
+        factor, extra, _ = compute_scaling_factor(
+            args.config,
+            small_mode=small_mode,
+            test_mode=test_mode,
+        )
         estimated = elapsed * factor + extra
         logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if not is_root_rank():
         return
 
     estimated_sharded = None
-    if test_mode and is_shard_mode(args) and estimated is not None:
+    if estimate_mode and is_shard_mode(args) and estimated is not None:
         estimated_sharded = estimate_sharded_wall_time(
             estimated,
             int(plan.get("full_total_units", full_cfg["sbc"]["n_trials"])),
@@ -276,6 +285,7 @@ def main(argv: list[str] | None = None) -> None:
         elapsed,
         estimated,
         test_mode,
+        run_mode,
         estimated_full_unsharded_s=estimated,
         estimated_full_sharded_wall_s=estimated_sharded,
         aggregate_compute_s=elapsed,
@@ -292,7 +302,7 @@ def main(argv: list[str] | None = None) -> None:
             estimated_full_unsharded_s=estimated,
             estimated_full_sharded_wall_s=estimated_sharded,
             aggregate_compute_s=elapsed,
-            extra={"started_at_s": t0, "finished_at_s": time.time()},
+            extra={"started_at_s": t0, "finished_at_s": time.time(), "run_mode": run_mode},
         )
         _finalize_sharded(cfg, layout, actual_num_shards)
         return

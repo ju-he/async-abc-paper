@@ -1,4 +1,5 @@
 """Tests for experiment runner scripts."""
+import copy
 import csv
 import json
 import math
@@ -94,7 +95,7 @@ class TestRunnerCliSmoke:
         )
 
         monkeypatch.setattr(module, "configure_logging", lambda: None)
-        monkeypatch.setattr(module, "load_config", lambda path, test_mode=False: cfg)
+        monkeypatch.setattr(module, "load_config", lambda path, test_mode=False, small_mode=False: cfg)
         monkeypatch.setattr(module, "is_root_rank", lambda: True)
         monkeypatch.setattr(module, "compute_corrected_estimate", lambda *args, **kwargs: 0.0)
         monkeypatch.setattr(module, "write_timing_csv", lambda *args, **kwargs: None)
@@ -148,6 +149,37 @@ class TestGaussianMeanRunner:
         assert (plots_dir / "quality_vs_time.pdf").exists()
         assert (plots_dir / "tolerance_trajectory.pdf").exists()
         assert (plots_dir / "corner.pdf").exists()
+
+    def test_small_mode_writes_run_mode_metadata_and_timing(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 80, "k": 20},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        small_cfg = copy.deepcopy(cfg)
+        small_cfg["inference"]["max_simulations"] = 40
+        config_path = test_helpers.write_config(tmp_path, "gaussian_small.json", cfg)
+        small_dir = tmp_path / "small"
+        small_dir.mkdir()
+        test_helpers.write_config(small_dir, config_path.name, small_cfg)
+
+        test_helpers.run_runner_main(
+            "gaussian_mean_runner.py",
+            config_path,
+            tmp_path,
+            small_mode=True,
+        )
+
+        metadata = json.loads((tmp_path / "gaussian_mean" / "data" / "metadata.json").read_text())
+        timing_rows = _rows(tmp_path / "gaussian_mean" / "data" / "timing.csv")
+
+        assert metadata["run_mode"] == "small"
+        assert metadata["test_mode"] is False
+        assert metadata["config"]["execution"]["config_tier"] == "small"
+        assert timing_rows[-1]["run_mode"] == "small"
+        assert timing_rows[-1]["test_mode"] == "False"
 
 
 class TestBenchmarkRunnerArtifacts:
@@ -208,6 +240,50 @@ class TestSensitivityRunner:
         assert any("tol_init_multiplier=2.0" in method for method in methods)
         assert tolerance_by_name["sensitivity_tol_init_multiplier=0.5"] == {2.5}
         assert tolerance_by_name["sensitivity_tol_init_multiplier=2.0"] == {10.0}
+
+    def test_small_mode_uses_small_grid_without_test_collapse(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "sensitivity.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 40, "k": 10, "n_workers": 1},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={"sensitivity_heatmap": False},
+            replace_top_level={
+                "sensitivity_grid": {
+                    "k": [10, 20, 30],
+                    "perturbation_scale": [0.4, 0.8, 1.2],
+                }
+            },
+        )
+        small_cfg = copy.deepcopy(cfg)
+        small_cfg["sensitivity_grid"] = {
+            "k": [10, 20],
+            "perturbation_scale": [0.4, 0.8],
+        }
+        config_path = test_helpers.write_config(tmp_path, "sensitivity_small.json", cfg)
+        small_dir = tmp_path / "small"
+        small_dir.mkdir()
+        test_helpers.write_config(small_dir, config_path.name, small_cfg)
+
+        test_helpers.run_runner_main(
+            "sensitivity_runner.py",
+            config_path,
+            tmp_path / "small_only",
+            small_mode=True,
+        )
+        test_helpers.run_runner_main(
+            "sensitivity_runner.py",
+            config_path,
+            tmp_path / "small_test",
+            small_mode=True,
+            test_mode=True,
+        )
+
+        small_csvs = list((tmp_path / "small_only" / "sensitivity" / "data").glob("sensitivity_*.csv"))
+        small_test_csvs = list((tmp_path / "small_test" / "sensitivity" / "data").glob("sensitivity_*.csv"))
+
+        assert len(small_csvs) == 4
+        assert len(small_test_csvs) == 1
 
 
 class TestAblationRunner:

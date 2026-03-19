@@ -78,8 +78,11 @@ def format_duration(seconds: float) -> str:
 
 def compute_scaling_factor(
     config_path: Union[str, Path],
+    *,
+    small_mode: bool = False,
+    test_mode: bool = True,
 ) -> Tuple[float, float, str]:
-    """Estimate how much longer the full run takes compared to a test run.
+    """Estimate how much longer the full run takes compared to the active run tier.
 
     Returns
     -------
@@ -91,15 +94,15 @@ def compute_scaling_factor(
     note : str
         Parenthetical describing what the full run entails.
     """
-    cfg = load_config(config_path, test_mode=False)
-    test_cfg = load_config(config_path, test_mode=True)
+    cfg = load_config(config_path, test_mode=False, small_mode=False)
+    active_cfg = load_config(config_path, test_mode=test_mode, small_mode=small_mode)
 
     full_sims = cfg["inference"]["max_simulations"]
     full_workers = cfg["inference"]["n_workers"]
     full_reps = cfg["execution"]["n_replicates"]
-    test_reps = test_cfg["execution"]["n_replicates"]
+    active_reps = active_cfg["execution"]["n_replicates"]
 
-    factor = _base_method_scale(cfg, test_cfg) * (full_reps / test_reps)
+    factor = _base_method_scale(cfg, active_cfg) * (full_reps / active_reps)
     extra_seconds = 0.0
 
     if "sensitivity_grid" in cfg:
@@ -107,17 +110,23 @@ def compute_scaling_factor(
         full_grid_size = 1
         for v in grid.values():
             full_grid_size *= len(v)
-        test_grid = {k: v[:1] for k, v in grid.items()}
-        test_grid_size = 1
-        for v in test_grid.values():
-            test_grid_size *= len(v)
-        factor *= full_grid_size / test_grid_size
+        active_grid = active_cfg.get("sensitivity_grid", {})
+        if test_mode:
+            active_grid = {key: values[:1] for key, values in active_grid.items()}
+        active_grid_size = 1
+        for v in active_grid.values():
+            active_grid_size *= len(v)
+        factor *= full_grid_size / active_grid_size
         note = f"{full_sims} sims × {full_reps} reps, {full_grid_size} grid variants"
 
     elif "scaling" in cfg:
         full_worker_counts = cfg["scaling"].get("worker_counts", [1])
-        test_worker_counts = cfg["scaling"].get("test_worker_counts", [1])
-        factor *= len(full_worker_counts) / len(test_worker_counts)
+        active_scaling_cfg = active_cfg.get("scaling", {})
+        if test_mode:
+            active_worker_counts = active_scaling_cfg.get("test_worker_counts", [1])
+        else:
+            active_worker_counts = active_scaling_cfg.get("worker_counts", [1])
+        factor *= len(full_worker_counts) / len(active_worker_counts)
         note = f"{full_sims} sims × {full_reps} reps, {len(full_worker_counts)} worker configs"
 
     elif "heterogeneity" in cfg:
@@ -136,8 +145,8 @@ def compute_scaling_factor(
 
     elif "sbc" in cfg:
         full_trials = int(cfg["sbc"].get("n_trials", 1))
-        test_trials = int(test_cfg.get("sbc", {}).get("n_trials", 1))
-        factor *= full_trials / test_trials
+        active_trials = int(active_cfg.get("sbc", {}).get("n_trials", 1))
+        factor *= full_trials / active_trials
         note = f"{full_sims} sims × {full_trials} SBC trials, {full_workers} workers"
 
     elif "straggler" in cfg:
@@ -166,6 +175,7 @@ _TIMING_FIELDNAMES = [
     "estimated_full_sharded_wall_s",
     "aggregate_compute_s",
     "test_mode",
+    "run_mode",
     "timestamp",
 ]
 
@@ -174,6 +184,9 @@ def compute_corrected_estimate(
     elapsed: float,
     raw_results_path: Union[str, Path],
     config_path: Union[str, Path],
+    *,
+    small_mode: bool = False,
+    test_mode: bool = True,
     extra_seconds: float = 0.0,
 ) -> float:
     """Return a teardown-corrected full-run timing estimate.
@@ -194,7 +207,11 @@ def compute_corrected_estimate(
     Falls back to ``elapsed * factor + extra_seconds`` if the CSV is missing,
     empty, or lacks usable timing columns.
     """
-    factor, extra, _ = compute_scaling_factor(config_path)
+    factor, extra, _ = compute_scaling_factor(
+        config_path,
+        small_mode=small_mode,
+        test_mode=test_mode,
+    )
     fallback = elapsed * factor + (extra_seconds or extra)
 
     raw_results_path = Path(raw_results_path)
@@ -226,15 +243,15 @@ def compute_corrected_estimate(
         overhead_per_run = max(0.0, (elapsed - total_compute_test) / n_runs_test)
         compute_per_run = total_compute_test / n_runs_test
 
-        cfg_full = load_config(config_path, test_mode=False)
-        cfg_test = load_config(config_path, test_mode=True)
+        cfg_full = load_config(config_path, test_mode=False, small_mode=False)
+        cfg_active = load_config(config_path, test_mode=test_mode, small_mode=small_mode)
         full_reps = cfg_full["execution"]["n_replicates"]
-        test_reps = cfg_test["execution"]["n_replicates"]
-        replicate_scale = full_reps / test_reps
+        active_reps = cfg_active["execution"]["n_replicates"]
+        replicate_scale = full_reps / active_reps
 
         estimated = 0.0
         for method, method_compute_test in method_max_wt.items():
-            method_scale = _method_compute_scale(method, cfg_full, cfg_test)
+            method_scale = _method_compute_scale(method, cfg_full, cfg_active)
             estimated += replicate_scale * (
                 overhead_per_run + method_compute_test * method_scale
             )
@@ -249,6 +266,7 @@ def write_timing_csv(
     elapsed_s: float,
     estimated_full_s: Optional[float],
     test_mode: bool,
+    run_mode: str = "full",
     estimated_full_unsharded_s: Optional[float] = None,
     estimated_full_sharded_wall_s: Optional[float] = None,
     aggregate_compute_s: Optional[float] = None,
@@ -285,6 +303,7 @@ def write_timing_csv(
                 round(aggregate_compute_s, 3) if aggregate_compute_s is not None else ""
             ),
             "test_mode": test_mode,
+            "run_mode": run_mode,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         })
 
@@ -325,6 +344,8 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
                    help="Root directory for results.")
     p.add_argument("--test", action="store_true",
                    help="Test mode: small budget, local max 8 workers, SLURM max 48.")
+    p.add_argument("--small", action="store_true",
+                   help="Small mode: reduced ~10% compute config tier, stackable with --test.")
     p.add_argument("--extend", action="store_true",
                    help="Skip parameter combinations already present in existing CSVs.")
     p.add_argument("--shard-index", type=int, default=None,

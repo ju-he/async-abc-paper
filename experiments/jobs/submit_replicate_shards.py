@@ -22,6 +22,7 @@ DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from async_abc.io.config import load_config  # noqa: E402
+from async_abc.io.config import compose_run_mode  # noqa: E402
 from async_abc.utils.sharding import (  # noqa: E402
     ShardLayout,
     build_plan_payload,
@@ -47,8 +48,12 @@ def _resolve_experiments(requested: list[str]) -> list[str]:
     return requested
 
 
-def _read_sharded_estimate(output_dir: Path, experiment_name: str) -> float | None:
-    """Return the most recent estimated_full_sharded_wall_s from a prior test run, or None."""
+def _read_sharded_estimate(
+    output_dir: Path,
+    experiment_name: str,
+    run_mode: str | None = None,
+) -> float | None:
+    """Return the most recent estimated_full_sharded_wall_s for the requested run mode."""
     timing_csv = output_dir / experiment_name / "data" / "timing.csv"
     if not timing_csv.exists() or timing_csv.stat().st_size == 0:
         return None
@@ -56,7 +61,14 @@ def _read_sharded_estimate(output_dir: Path, experiment_name: str) -> float | No
         with open(timing_csv, newline="") as f:
             rows = list(csv.DictReader(f))
         for row in reversed(rows):
-            if row.get("test_mode", "").lower() not in ("true", "1"):
+            row_run_mode = row.get("run_mode", "")
+            if run_mode is None:
+                if row.get("test_mode", "").lower() not in ("true", "1"):
+                    continue
+            elif row_run_mode:
+                if row_run_mode != run_mode:
+                    continue
+            elif run_mode != "test":
                 continue
             val = row.get("estimated_full_sharded_wall_s", "").strip()
             if val:
@@ -102,6 +114,7 @@ def _render_script(
     actual_num_shards: int,
     shard_run_id: str,
     test_mode: bool,
+    small_mode: bool,
     extend: bool,
     account: str,
     partition: str,
@@ -128,6 +141,8 @@ def _render_script(
     ]
     if test_mode:
         args.append("--test")
+    if small_mode:
+        args.append("--small")
     if extend:
         args.append("--extend")
     command = " ".join(args)
@@ -169,6 +184,7 @@ def main() -> None:
         help="Requested shard count per experiment before test-mode reduction. Default: 4.",
     )
     parser.add_argument("--test", action="store_true", help="Use test-mode configs and estimate-only sharding.")
+    parser.add_argument("--small", action="store_true", help="Use small-tier configs while keeping normal sharding.")
     parser.add_argument("--extend", action="store_true", help="Pass --extend to the shard jobs.")
     parser.add_argument(
         "--add-replicates",
@@ -209,8 +225,9 @@ def main() -> None:
         runner_path = EXPERIMENTS_DIR / "scripts" / runner_name
         config_path = EXPERIMENTS_DIR / "configs" / config_name
 
-        full_cfg = load_config(config_path, test_mode=False)
-        actual_cfg = load_config(config_path, test_mode=args.test)
+        full_cfg = load_config(config_path, test_mode=False, small_mode=False)
+        actual_cfg = load_config(config_path, test_mode=args.test, small_mode=args.small)
+        run_mode = compose_run_mode("small" if args.small else "full", args.test)
         unit_kind = "trial" if experiment_name == "sbc" else "replicate"
         full_units = int(full_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(full_cfg["execution"]["n_replicates"])
         actual_units = int(actual_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(actual_cfg["execution"]["n_replicates"])
@@ -254,6 +271,8 @@ def main() -> None:
             requested_num_shards=requested_num_shards,
             actual_num_shards=actual_num_shards,
             test_mode=args.test,
+            small_mode=args.small,
+            run_mode=run_mode,
             extend=extend_mode,
             run_id=run_id,
             completed_unit_indices=completed_units,
@@ -271,7 +290,7 @@ def main() -> None:
         _TIMING_MARGIN = 1.5
         _MIN_WALL_S = 30 * 60  # 30 minutes floor
         _MAX_WALL_S = _parse_slurm_time(args.max_time_limit)
-        estimated_s = _read_sharded_estimate(output_dir, experiment_name)
+        estimated_s = _read_sharded_estimate(output_dir, experiment_name, run_mode if (args.test or args.small) else None)
         if estimated_s is not None:
             unclamped_s = max(_MIN_WALL_S, estimated_s * _TIMING_MARGIN)
             clamped_s = min(_MAX_WALL_S, unclamped_s)
@@ -299,6 +318,7 @@ def main() -> None:
                     actual_num_shards=actual_num_shards,
                     shard_run_id=run_id,
                     test_mode=args.test,
+                    small_mode=args.small,
                     extend=extend_mode,
                     account=args.account,
                     partition=args.partition,

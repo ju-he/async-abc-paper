@@ -31,6 +31,7 @@ SCRIPTS_DIR = EXPERIMENTS_DIR / "scripts"
 CONFIGS_DIR = EXPERIMENTS_DIR / "configs"
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
+from async_abc.io.config import compose_run_mode
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.mpi import allreduce_max, is_root_rank
 from async_abc.utils.runner import compute_scaling_factor, format_duration, write_timing_csv
@@ -81,6 +82,7 @@ def _run_experiment(
     config: str,
     output_dir: Path,
     test_mode: bool,
+    small_mode: bool,
     extend: bool = False,
 ) -> tuple:
     """Run a single experiment script as a subprocess.
@@ -94,6 +96,8 @@ def _run_experiment(
     ]
     if test_mode:
         argv.append("--test")
+    if small_mode:
+        argv.append("--small")
     if extend:
         argv.append("--extend")
 
@@ -145,6 +149,10 @@ def main(argv: list[str] | None = None) -> None:
         help="Test mode: small budget, local max 8 workers, SLURM max 48 workers, 2 replicates.",
     )
     parser.add_argument(
+        "--small", action="store_true",
+        help="Small mode: reduced ~10%%-compute config tier, stackable with --test.",
+    )
+    parser.add_argument(
         "--experiments", nargs="+", metavar="NAME",
         default=list(EXPERIMENT_REGISTRY.keys()),
         help=(
@@ -171,18 +179,31 @@ def main(argv: list[str] | None = None) -> None:
     failures = []
     total_start = time.time()
     total_estimate = 0.0
+    run_mode = compose_run_mode("small" if args.small else "full", args.test)
 
     for name in args.experiments:
         runner, config = EXPERIMENT_REGISTRY[name]
-        rc, elapsed = _run_experiment(name, runner, config, output_dir, test_mode=args.test, extend=args.extend)
+        rc, elapsed = _run_experiment(
+            name,
+            runner,
+            config,
+            output_dir,
+            test_mode=args.test,
+            small_mode=args.small,
+            extend=args.extend,
+        )
         if is_root_rank():
             logger.info("[run_all] Time:    %s took %s", name, format_duration(elapsed))
         est = None
-        if args.test:
+        if args.test or args.small:
             runner_timing = output_dir / name / "data" / "timing.csv"
             est = _read_runner_estimate(runner_timing)
             if est is None:
-                factor, extra, note = compute_scaling_factor(CONFIGS_DIR / config)
+                factor, extra, note = compute_scaling_factor(
+                    CONFIGS_DIR / config,
+                    small_mode=args.small,
+                    test_mode=args.test,
+                )
                 est = elapsed * factor + extra
             if is_root_rank():
                 total_estimate += est
@@ -192,14 +213,14 @@ def main(argv: list[str] | None = None) -> None:
                     format_duration(est),
                 )
         if is_root_rank():
-            write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test)
+            write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test, run_mode)
         if rc != 0:
             failures.append(name)
 
     total_elapsed = time.time() - total_start
     if is_root_rank():
         logger.info("[run_all] Total runtime: %s", format_duration(total_elapsed))
-    if args.test and total_estimate > 0 and is_root_rank():
+    if (args.test or args.small) and total_estimate > 0 and is_root_rank():
         logger.info(
             "[run_all] Estimated total (full run): ~%s",
             format_duration(total_estimate),

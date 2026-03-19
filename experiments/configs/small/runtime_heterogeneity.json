@@ -1,0 +1,37 @@
+{
+  "experiment_name": "runtime_heterogeneity",
+  "benchmark": {
+    "name": "gaussian_mean",
+    "observed_data_seed": 42,
+    "n_obs": 100,
+    "true_mu": 0.0,
+    "sigma_obs": 1.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "inference": {
+    "max_simulations": 20000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 5.0,
+    "n_generations": 5,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8
+  },
+  "execution": {
+    "n_replicates": 1,
+    "base_seed": 0
+  },
+  "heterogeneity": {
+    "distribution": "lognormal",
+    "mu": 0.0,
+    "sigma_levels": [0.0, 1.0, 2.0]
+  },
+  "plots": {
+    "idle_fraction": true,
+    "throughput_over_time": true,
+    "idle_fraction_comparison": true,
+    "gantt": true
+  }
+}

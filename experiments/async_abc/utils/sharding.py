@@ -185,6 +185,8 @@ def build_plan_payload(
     actual_num_shards: int,
     test_mode: bool,
     extend: bool,
+    small_mode: bool = False,
+    run_mode: str = "full",
     shard_assignments: List[List[int]],
     runner_script: Optional[str] = None,
     submitted_job_ids: Optional[List[str]] = None,
@@ -206,6 +208,8 @@ def build_plan_payload(
         "requested_num_shards": int(requested_num_shards),
         "actual_num_shards": int(actual_num_shards),
         "test_mode": bool(test_mode),
+        "small_mode": bool(small_mode),
+        "run_mode": str(run_mode),
         "extend": bool(extend),
         "completed_unit_indices": sorted(int(x) for x in (completed_unit_indices or [])),
         "pending_unit_indices": sorted(int(x) for x in (pending_unit_indices or [])),
@@ -577,7 +581,11 @@ def final_output_exists(output_root: Path, experiment_name: str) -> bool:
 
 def _normalized_extension_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     normalized = copy.deepcopy(cfg)
-    normalized.setdefault("execution", {}).pop("n_replicates", None)
+    execution = normalized.setdefault("execution", {})
+    execution.pop("n_replicates", None)
+    execution.setdefault("config_tier", "full")
+    execution.pop("run_mode", None)
+    normalized.setdefault("inference", {}).pop("test_mode", None)
     if normalized.get("benchmark", {}).get("name") == "cellular_potts":
         normalized["benchmark"].pop("output_dir", None)
     return normalized

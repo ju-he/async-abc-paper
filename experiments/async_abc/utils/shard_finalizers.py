@@ -23,6 +23,7 @@ from ..plotting.reporters import (
     plot_sensitivity_summary,
     plot_worker_gantt,
 )
+from ..io.config import get_run_mode
 from ..plotting.export import save_figure
 from ..utils.metadata import write_metadata
 from ..utils.runner import write_timing_csv
@@ -99,6 +100,7 @@ def _write_batch_timing(cfg: dict, layout: ShardLayout, tmp_output: OutputDir, t
         timing["elapsed_s"] or 0.0,
         timing["estimated_full_s"],
         bool(cfg.get("inference", {}).get("test_mode", False)),
+        get_run_mode(cfg),
         estimated_full_unsharded_s=timing["estimated_full_unsharded_s"],
         estimated_full_sharded_wall_s=timing["estimated_full_sharded_wall_s"],
         aggregate_compute_s=timing["aggregate_compute_s"],

@@ -29,6 +29,20 @@ def _resolve_config_path(path: Union[str, Path]) -> Path:
     return path
 
 
+def _resolve_small_config_path(path: Path) -> Path:
+    """Return the sibling small-tier config path for *path*."""
+    if path.parent.name == "small":
+        return path
+
+    candidate = path.parent / "small" / path.name
+    if candidate.exists():
+        return candidate
+
+    raise FileNotFoundError(
+        f"Small config not found for {path}. Expected {candidate}."
+    )
+
+
 def _validate(cfg: dict) -> None:
     """Raise ValidationError if cfg is missing required keys."""
     for key in REQUIRED_TOP_LEVEL:
@@ -71,9 +85,6 @@ def _apply_test_mode(cfg: dict) -> dict:
             continue
         for key, val in overrides.items():
             cfg[section][key] = val
-    # Preserve an explicit test-mode marker for runners/inference wrappers.
-    cfg.setdefault("inference", {})["test_mode"] = True
-
     # CPM runs are substantially heavier than the toy benchmarks. Shrink the
     # test budget further so cluster smoke tests stay cheap even under MPI.
     if cfg.get("benchmark", {}).get("name") == "cellular_potts":
@@ -84,12 +95,48 @@ def _apply_test_mode(cfg: dict) -> dict:
     return cfg
 
 
+def compose_run_mode(config_tier: str, test_mode: bool) -> str:
+    """Return the canonical run-mode label for a resolved config."""
+    if config_tier not in {"full", "small"}:
+        raise ValueError(f"Unsupported config tier: {config_tier!r}")
+    if config_tier == "small":
+        return "small_test" if test_mode else "small"
+    return "test" if test_mode else "full"
+
+
+def _annotate_mode(cfg: dict, *, config_tier: str, test_mode: bool) -> dict:
+    """Persist run-tier metadata on the resolved config."""
+    cfg = copy.deepcopy(cfg)
+    cfg.setdefault("inference", {})["test_mode"] = bool(test_mode)
+    cfg.setdefault("execution", {})["config_tier"] = config_tier
+    cfg["execution"]["run_mode"] = compose_run_mode(config_tier, bool(test_mode))
+    return cfg
+
+
 def is_test_mode(cfg: dict) -> bool:
     """Return whether a loaded config represents a test-mode run."""
     return bool(cfg.get("inference", {}).get("test_mode", False))
 
 
-def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
+def is_small_mode(cfg: dict) -> bool:
+    """Return whether a loaded config represents the small tier."""
+    return cfg.get("execution", {}).get("config_tier", "full") == "small"
+
+
+def get_run_mode(cfg: dict) -> str:
+    """Return the canonical run mode for a loaded config."""
+    execution = cfg.get("execution", {})
+    run_mode = execution.get("run_mode")
+    if isinstance(run_mode, str) and run_mode:
+        return run_mode
+    return compose_run_mode(str(execution.get("config_tier", "full")), is_test_mode(cfg))
+
+
+def load_config(
+    path: Union[str, Path],
+    test_mode: bool = False,
+    small_mode: bool = False,
+) -> dict:
     """Load and validate a JSON experiment config.
 
     Parameters
@@ -99,6 +146,9 @@ def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
     test_mode:
         If True, apply test-mode overrides (reduced budgets, local max 8 workers,
         SLURM max 48 workers).
+    small_mode:
+        If True, load the sibling config from ``small/<filename>`` before
+        applying test-mode overrides.
 
     Returns
     -------
@@ -115,6 +165,8 @@ def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
         If the file does not exist.
     """
     path = _resolve_config_path(path)
+    if small_mode:
+        path = _resolve_small_config_path(path)
     with open(path) as f:
         cfg = json.load(f)
 
@@ -123,4 +175,5 @@ def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
     if test_mode:
         cfg = _apply_test_mode(cfg)
 
-    return cfg
+    config_tier = "small" if path.parent.name == "small" else "full"
+    return _annotate_mode(cfg, config_tier=config_tier, test_mode=test_mode)
