@@ -5,6 +5,7 @@ always a `_meta.json` with provenance fields (git hash, timestamp).
 """
 import csv
 import json
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,32 @@ def get_git_hash() -> str:
         return result.stdout.strip() or "unknown"
     except Exception:
         return "unknown"
+
+
+def _save_png_via_pdftoppm(pdf_path: Path, png_path: Path, dpi: int = 150) -> bool:
+    """Rasterize *pdf_path* into *png_path* using pdftoppm when available."""
+    pdftoppm = shutil.which("pdftoppm")
+    if not pdftoppm:
+        return False
+
+    try:
+        subprocess.run(
+            [
+                pdftoppm,
+                "-singlefile",
+                "-png",
+                "-r",
+                str(int(dpi)),
+                str(pdf_path),
+                str(png_path.with_suffix("")),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return False
+    return png_path.exists()
 
 
 def save_figure(
@@ -56,7 +83,8 @@ def save_figure(
     pdf_path = stem.with_suffix(".pdf")
     png_path = stem.with_suffix(".png")
     fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(png_path, bbox_inches="tight", dpi=150)
+    if not _save_png_via_pdftoppm(pdf_path, png_path, dpi=150):
+        fig.savefig(png_path, bbox_inches="tight", dpi=150)
     out["pdf"] = pdf_path
     out["png"] = png_path
 

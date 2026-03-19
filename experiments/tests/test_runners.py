@@ -96,7 +96,7 @@ class TestRunnerCliSmoke:
         monkeypatch.setattr(module, "configure_logging", lambda: None)
         monkeypatch.setattr(module, "load_config", lambda path, test_mode=False: cfg)
         monkeypatch.setattr(module, "is_root_rank", lambda: True)
-        monkeypatch.setattr(module, "compute_corrected_estimate", lambda *args, **kwargs: None)
+        monkeypatch.setattr(module, "compute_corrected_estimate", lambda *args, **kwargs: 0.0)
         monkeypatch.setattr(module, "write_timing_csv", lambda *args, **kwargs: None)
         monkeypatch.setattr(module, "write_metadata", lambda *args, **kwargs: None)
 
