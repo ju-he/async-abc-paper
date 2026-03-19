@@ -1,9 +1,11 @@
 """Shared experiment execution logic used by all runner scripts."""
 import argparse
 import csv
+import json
 import logging
 import math
 import sys
+import time
 import traceback
 import warnings
 from datetime import datetime
@@ -19,6 +21,8 @@ from .mpi import allgather, is_root_rank
 from ..utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
+
+_RANK_ZERO_STATUS_POLL_S = 0.2
 
 
 def _propulate_test_generation_budget(test_cfg: Dict[str, Any]) -> int:
@@ -302,6 +306,46 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
     return p
 
 
+def _rank_zero_status_path(
+    output_dir: OutputDir,
+    method: str,
+    replicate: int,
+    seed: int,
+) -> Path:
+    """Return the per-run status file used for rank-zero coordination."""
+    safe_method = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in method)
+    return output_dir.logs / f"rank_zero_{safe_method}_rep{replicate}_seed{seed}.json"
+
+
+def _write_rank_zero_status(path: Path, payload: Dict[str, str]) -> None:
+    """Atomically publish rank-zero method status for non-root ranks."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    with open(tmp_path, "w") as f:
+        json.dump(payload, f)
+    tmp_path.replace(path)
+
+
+def _wait_for_rank_zero_status(path: Path) -> Dict[str, str]:
+    """Poll until root writes a terminal status for a rank-zero method."""
+    while True:
+        try:
+            with open(path) as f:
+                payload = json.load(f)
+            if isinstance(payload, dict) and payload.get("kind") in {
+                "ok",
+                "ImportError",
+                "Exception",
+            }:
+                return payload
+        except FileNotFoundError:
+            pass
+        except json.JSONDecodeError:
+            # Root may still be replacing the status file.
+            pass
+        time.sleep(_RANK_ZERO_STATUS_POLL_S)
+
+
 def run_experiment(
     cfg: Dict[str, Any],
     output_dir: OutputDir,
@@ -333,6 +377,7 @@ def run_experiment(
     List[ParticleRecord]
         All records produced (across all methods and replicates).
     """
+    created_benchmark = benchmark is None
     if benchmark is None:
         benchmark = make_benchmark(cfg["benchmark"])
     if methods is None:
@@ -349,31 +394,40 @@ def run_experiment(
     writer = RecordWriter(csv_path)
     all_records: List[ParticleRecord] = []
 
-    for method in methods:
-        for replicate, seed in enumerate(seeds):
-            if (method, str(replicate)) in done:
-                logger.info(
-                    "[runner] --extend: skipping %s replicate=%s (already done)",
-                    method,
-                    replicate,
-                )
-                continue
-            try:
-                records = run_method_distributed(
-                    method, benchmark.simulate, benchmark.limits,
-                    inference_cfg, output_dir, replicate, seed,
-                )
-            except ImportError as exc:
-                if is_root_rank():
-                    warnings.warn(
-                        f"Skipping method '{method}' (missing dependency): {exc}",
-                        stacklevel=2,
+    try:
+        for method in methods:
+            for replicate, seed in enumerate(seeds):
+                if (method, str(replicate)) in done:
+                    logger.info(
+                        "[runner] --extend: skipping %s replicate=%s (already done)",
+                        method,
+                        replicate,
                     )
-                logger.warning("[runner] skipping '%s': %s", method, exc)
-                break  # skip all replicates for this method
-            if is_root_rank():
-                writer.write(records)
-                all_records.extend(records)
+                    continue
+                try:
+                    records = run_method_distributed(
+                        method, benchmark.simulate, benchmark.limits,
+                        inference_cfg, output_dir, replicate, seed,
+                    )
+                except ImportError as exc:
+                    if is_root_rank():
+                        warnings.warn(
+                            f"Skipping method '{method}' (missing dependency): {exc}",
+                            stacklevel=2,
+                        )
+                    logger.warning("[runner] skipping '%s': %s", method, exc)
+                    break  # skip all replicates for this method
+                if is_root_rank():
+                    writer.write(records)
+                    all_records.extend(records)
+    finally:
+        if created_benchmark:
+            closer = getattr(benchmark, "close", None)
+            if callable(closer):
+                try:
+                    closer()
+                except Exception:
+                    logger.warning("Benchmark teardown failed", exc_info=True)
 
     return all_records
 
@@ -389,7 +443,54 @@ def run_method_distributed(
 ) -> List[ParticleRecord]:
     """Execute one inference method with rank-aware coordination."""
     execution_mode = method_execution_mode(name)
-    should_run_here = execution_mode == "all_ranks" or is_root_rank()
+    root_rank = is_root_rank()
+
+    if execution_mode == "rank_zero":
+        status_path = _rank_zero_status_path(output_dir, name, replicate, seed)
+        if root_rank:
+            try:
+                status_path.unlink(missing_ok=True)  # type: ignore[call-arg]
+            except TypeError:
+                if status_path.exists():
+                    status_path.unlink()
+
+            try:
+                records = run_method(
+                    name,
+                    simulate_fn,
+                    limits,
+                    inference_cfg,
+                    output_dir,
+                    replicate,
+                    seed,
+                )
+            except ImportError as exc:
+                _write_rank_zero_status(
+                    status_path,
+                    {"kind": "ImportError", "message": str(exc)},
+                )
+                raise
+            except Exception:
+                message = traceback.format_exc()
+                _write_rank_zero_status(
+                    status_path,
+                    {"kind": "Exception", "message": message},
+                )
+                raise RuntimeError(message)
+
+            _write_rank_zero_status(status_path, {"kind": "ok", "message": ""})
+            return records
+
+        payload = _wait_for_rank_zero_status(status_path)
+        kind = payload.get("kind", "Exception")
+        message = payload.get("message", "")
+        if kind == "ok":
+            return []
+        if kind == "ImportError":
+            raise ImportError(message)
+        raise RuntimeError(message)
+
+    should_run_here = execution_mode == "all_ranks" or root_rank
 
     records: List[ParticleRecord] = []
     error_payload: Optional[Tuple[str, str]] = None
@@ -419,5 +520,5 @@ def run_method_distributed(
         raise RuntimeError(message)
 
     if execution_mode == "all_ranks":
-        return records if is_root_rank() else []
+        return records if root_rank else []
     return records

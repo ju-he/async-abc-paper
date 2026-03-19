@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 import uuid
+import gc
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -460,3 +461,20 @@ class CellularPotts:
                 logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
 
         return score
+
+    def close(self) -> None:
+        """Best-effort teardown for CPM helper objects between experiment runs."""
+        distance_metric = getattr(self, "_distance_metric", None)
+        reference_data = getattr(distance_metric, "reference_data", []) if distance_metric else []
+        for datahandler in reference_data:
+            # Some DataHandler variants keep a private sqlite connection open.
+            conn = getattr(datahandler, "_SimDir__con", None)
+            if conn not in (None, 0):
+                try:
+                    conn.close()
+                except Exception:
+                    logger.debug("Failed to close CPM reference-data connection", exc_info=True)
+
+        self._distance_metric = None
+        self._sim_manager = None
+        gc.collect()
