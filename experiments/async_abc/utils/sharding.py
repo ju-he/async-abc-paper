@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from ..io.paths import OutputDir
+from .mpi import allgather, is_root_rank
 
 
 def _now_iso() -> str:
@@ -162,11 +163,14 @@ def _json_dump_atomic(path: Path, payload: Dict[str, Any]) -> None:
 
 
 def read_json(path: Path) -> Dict[str, Any]:
-    """Return parsed JSON or ``{}`` if the file is missing."""
+    """Return parsed JSON or ``{}`` if the file is missing or corrupt."""
     if not path.exists() or path.stat().st_size == 0:
         return {}
-    with open(path) as f:
-        return json.load(f)
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
 
 
 def build_plan_payload(
@@ -237,6 +241,16 @@ def prepare_shard_workspace(layout: ShardLayout) -> str:
     if shard_out.root.exists():
         shutil.rmtree(shard_out.root)
     shard_out.ensure()
+    return "run"
+
+
+def prepare_shard_workspace_distributed(layout: ShardLayout) -> str:
+    """Prepare one shard workspace on root rank and synchronize the mode."""
+    mode = prepare_shard_workspace(layout) if is_root_rank() else None
+    gathered = allgather(mode)
+    for value in gathered:
+        if value is not None:
+            return str(value)
     return "run"
 
 
@@ -426,7 +440,10 @@ def cleanup_shard_payloads(layout: ShardLayout) -> None:
         return
     for path in layout.run_root.iterdir():
         if path.name.startswith("shard-") or path.name == "_merge_tmp":
-            shutil.rmtree(path, ignore_errors=True)
+            try:
+                shutil.rmtree(path)
+            except OSError as exc:
+                print(f"Warning: failed to remove shard payload {path}: {exc}")
 
 
 def _csv_rows(path: Path) -> List[Dict[str, str]]:
@@ -498,20 +515,28 @@ def _completed_replicates_runtime_heterogeneity(output_dir: OutputDir, cfg: Dict
     return _completed_replicates_benchmark(output_dir, expected_methods)
 
 
+def _completed_replicates_benchmark_cfg(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
+    return _completed_replicates_benchmark(output_dir, cfg["methods"])
+
+
+_COMPLETED_REPLICATES_REGISTRY: Dict[str, Callable[[OutputDir, Dict[str, Any]], List[int]]] = {
+    "gaussian_mean": _completed_replicates_benchmark_cfg,
+    "gandk": _completed_replicates_benchmark_cfg,
+    "lotka_volterra": _completed_replicates_benchmark_cfg,
+    "cellular_potts": _completed_replicates_benchmark_cfg,
+    "runtime_heterogeneity": _completed_replicates_runtime_heterogeneity,
+    "sensitivity": _completed_replicates_sensitivity,
+    "ablation": _completed_replicates_ablation,
+    "straggler": _completed_replicates_straggler,
+}
+
+
 def detect_completed_replicates_in_output(output_dir: OutputDir, cfg: Dict[str, Any]) -> List[int]:
     """Return strictly completed replicate indices from one output directory."""
-    name = cfg["experiment_name"]
-    if name in {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}:
-        return _completed_replicates_benchmark(output_dir, cfg["methods"])
-    if name == "runtime_heterogeneity":
-        return _completed_replicates_runtime_heterogeneity(output_dir, cfg)
-    if name == "sensitivity":
-        return _completed_replicates_sensitivity(output_dir, cfg)
-    if name == "ablation":
-        return _completed_replicates_ablation(output_dir, cfg)
-    if name == "straggler":
-        return _completed_replicates_straggler(output_dir, cfg)
-    return []
+    fn = _COMPLETED_REPLICATES_REGISTRY.get(cfg["experiment_name"])
+    if fn is None:
+        return []
+    return fn(output_dir, cfg)
 
 
 def detect_completed_replicates(output_root: Path, cfg: Dict[str, Any]) -> List[int]:

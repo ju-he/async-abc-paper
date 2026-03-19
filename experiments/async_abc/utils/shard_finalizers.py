@@ -75,6 +75,14 @@ def _is_extension_batch(layout: ShardLayout) -> bool:
     return bool(read_json(layout.plan_path).get("extend"))
 
 
+def _merge_sources(layout: ShardLayout, shard_dirs: List[OutputDir], filename: str) -> List[Path]:
+    """Return source paths for a merge: existing output first (if extending), then all shard outputs."""
+    sources = [shard_dir.data / filename for shard_dir in shard_dirs]
+    if _is_extension_batch(layout):
+        return [layout.final_output_dir.data / filename] + sources
+    return sources
+
+
 def _copy_existing_timing_history(layout: ShardLayout, tmp_output: OutputDir) -> None:
     if not _is_extension_batch(layout):
         return
@@ -225,10 +233,7 @@ def finalize_benchmark_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
-    if _is_extension_batch(layout):
-        sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
-    merge_csv_group(sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    merge_csv_group(_merge_sources(layout, shard_dirs, "raw_results.csv"), tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
     records = load_records(tmp_output.data / "raw_results.csv")
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
@@ -253,12 +258,7 @@ def finalize_sensitivity_experiment(
     if _is_extension_batch(layout):
         variant_names = sorted(set(variant_names) | {path.name for path in layout.final_output_dir.data.glob("sensitivity_*.csv")})
     for filename in variant_names:
-        merge_csv_group(
-            ([layout.final_output_dir.data / filename] if _is_extension_batch(layout) else []) +
-            [shard_dir.data / filename for shard_dir in shard_dirs],
-            tmp_output.data / filename,
-            sort_key=_sort_raw_result_row,
-        )
+        merge_csv_group(_merge_sources(layout, shard_dirs, filename), tmp_output.data / filename, sort_key=_sort_raw_result_row)
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
     if cfg.get("plots", {}).get("sensitivity_heatmap"):
@@ -279,12 +279,7 @@ def finalize_ablation_experiment(
     if _is_extension_batch(layout):
         variant_names = sorted(set(variant_names) | {path.name for path in layout.final_output_dir.data.glob("ablation_*.csv")})
     for filename in variant_names:
-        merge_csv_group(
-            ([layout.final_output_dir.data / filename] if _is_extension_batch(layout) else []) +
-            [shard_dir.data / filename for shard_dir in shard_dirs],
-            tmp_output.data / filename,
-            sort_key=_sort_raw_result_row,
-        )
+        merge_csv_group(_merge_sources(layout, shard_dirs, filename), tmp_output.data / filename, sort_key=_sort_raw_result_row)
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
     if cfg.get("plots", {}).get("ablation_comparison"):
@@ -301,14 +296,10 @@ def finalize_straggler_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    raw_sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
-    if _is_extension_batch(layout):
-        raw_sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
-    merge_csv_group(raw_sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    merge_csv_group(_merge_sources(layout, shard_dirs, "raw_results.csv"), tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
     records = load_records(tmp_output.data / "raw_results.csv")
     merge_csv_group(
-        ([layout.final_output_dir.data / "throughput_vs_slowdown_summary.csv"] if _is_extension_batch(layout) else []) +
-        [shard_dir.data / "throughput_vs_slowdown_summary.csv" for shard_dir in shard_dirs],
+        _merge_sources(layout, shard_dirs, "throughput_vs_slowdown_summary.csv"),
         tmp_output.data / "throughput_vs_slowdown_summary.csv",
         sort_key=lambda row: (
             float(row.get("slowdown_factor", 0.0) or 0.0),
@@ -325,14 +316,14 @@ def finalize_straggler_experiment(
         _plot_throughput_vs_slowdown(rows, tmp_output)
     if plots_cfg.get("gantt"):
         slowdown_pattern = re.compile(r"__straggler_slowdown([0-9.eE+-]+)x$")
-        factors = []
+        record_factors: Dict[Any, float] = {}
         for record in records:
             match = slowdown_pattern.search(record.method)
             if match:
-                factors.append(float(match.group(1)))
-        if factors:
-            worst = max(factors)
-            worst_records = [r for r in records if slowdown_pattern.search(r.method) and float(slowdown_pattern.search(r.method).group(1)) == worst]
+                record_factors[record] = float(match.group(1))
+        if record_factors:
+            worst = max(record_factors.values())
+            worst_records = [r for r, f in record_factors.items() if f == worst]
             plot_worker_gantt(worst_records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
@@ -346,10 +337,7 @@ def finalize_runtime_heterogeneity_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    sources = [shard_dir.data / "raw_results.csv" for shard_dir in shard_dirs]
-    if _is_extension_batch(layout):
-        sources.insert(0, layout.final_output_dir.data / "raw_results.csv")
-    merge_csv_group(sources, tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
+    merge_csv_group(_merge_sources(layout, shard_dirs, "raw_results.csv"), tmp_output.data / "raw_results.csv", sort_key=_sort_raw_result_row)
     records = load_records(tmp_output.data / "raw_results.csv")
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
@@ -369,11 +357,11 @@ def finalize_sbc_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
-    trial_records: List[Dict[str, Any]] = []
-    for shard_dir in shard_dirs:
-        path = shard_dir.data / "sbc_trials.jsonl"
+
+    def _load_jsonl_trials(path: Path) -> List[Dict[str, Any]]:
+        result = []
         if not path.exists():
-            continue
+            return result
         with open(path) as f:
             for line in f:
                 line = line.strip()
@@ -381,7 +369,13 @@ def finalize_sbc_experiment(
                     continue
                 payload = json.loads(line)
                 payload["posterior_samples"] = np.asarray(payload["posterior_samples"], dtype=float)
-                trial_records.append(payload)
+                result.append(payload)
+        return result
+
+    trial_sources = _merge_sources(layout, shard_dirs, "sbc_trials.jsonl")
+    trial_records: List[Dict[str, Any]] = []
+    for path in trial_sources:
+        trial_records.extend(_load_jsonl_trials(path))
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, cfg["sbc"]["coverage_levels"])
     ranks_df.to_csv(tmp_output.data / "sbc_ranks.csv", index=False)
@@ -401,6 +395,19 @@ def finalize_sbc_experiment(
     }
 
 
+_FINALIZER_REGISTRY: Dict[str, Any] = {
+    "gaussian_mean": finalize_benchmark_experiment,
+    "gandk": finalize_benchmark_experiment,
+    "lotka_volterra": finalize_benchmark_experiment,
+    "cellular_potts": finalize_benchmark_experiment,
+    "sensitivity": finalize_sensitivity_experiment,
+    "ablation": finalize_ablation_experiment,
+    "straggler": finalize_straggler_experiment,
+    "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,
+    "sbc": finalize_sbc_experiment,
+}
+
+
 def finalize_experiment_by_name(
     cfg: dict,
     layout: ShardLayout,
@@ -409,16 +416,7 @@ def finalize_experiment_by_name(
 ) -> Dict[str, Any]:
     """Dispatch to the appropriate shard finalizer for *cfg*."""
     name = cfg["experiment_name"]
-    if name in {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}:
-        return finalize_benchmark_experiment(cfg, layout, shard_dirs, statuses)
-    if name == "sensitivity":
-        return finalize_sensitivity_experiment(cfg, layout, shard_dirs, statuses)
-    if name == "ablation":
-        return finalize_ablation_experiment(cfg, layout, shard_dirs, statuses)
-    if name == "straggler":
-        return finalize_straggler_experiment(cfg, layout, shard_dirs, statuses)
-    if name == "runtime_heterogeneity":
-        return finalize_runtime_heterogeneity_experiment(cfg, layout, shard_dirs, statuses)
-    if name == "sbc":
-        return finalize_sbc_experiment(cfg, layout, shard_dirs, statuses)
-    raise ValueError(f"No shard finalizer registered for experiment_name={name!r}")
+    fn = _FINALIZER_REGISTRY.get(name)
+    if fn is None:
+        raise ValueError(f"No shard finalizer registered for experiment_name={name!r}")
+    return fn(cfg, layout, shard_dirs, statuses)

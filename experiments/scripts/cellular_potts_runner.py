@@ -38,7 +38,7 @@ from async_abc.utils.sharding import (
     estimate_sharded_wall_time,
     is_shard_mode,
     maybe_finalize_sharded_run,
-    prepare_shard_workspace,
+    prepare_shard_workspace_distributed,
     read_json,
     split_indices,
     validate_shard_args,
@@ -120,11 +120,12 @@ def main(argv: list[str] | None = None) -> None:
             return
 
         unit_indices = [int(idx) for idx in plan["shard_assignments"][shard_index]]
-        if is_root_rank():
-            mode = prepare_shard_workspace(layout)
-            if mode == "skip":
+        mode = prepare_shard_workspace_distributed(layout)
+        if mode == "skip":
+            if is_root_rank():
                 _finalize_sharded(cfg, layout, actual_num_shards)
-                return
+            return
+        if is_root_rank():
             write_shard_status(
                 layout,
                 state="running",
@@ -132,7 +133,7 @@ def main(argv: list[str] | None = None) -> None:
                 extra={"started_at_s": time.time()},
             )
 
-        output_dir = layout.shard_output_dir.ensure()
+        output_dir = layout.shard_output_dir
         cfg = _prepare_runtime_cfg(cfg, output_dir)
         t0 = time.time()
         run_experiment(cfg, output_dir, replicate_indices=unit_indices)
