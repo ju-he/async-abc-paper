@@ -10,9 +10,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _pyabc_parallel_safe(simulate_fn) -> bool:
+    """Return whether a benchmark can be shipped to parallel pyABC workers."""
+    owner = getattr(simulate_fn, "__self__", None)
+    if owner is None:
+        return True
+
+    if hasattr(owner, "PYABC_PARALLEL_SAFE"):
+        return bool(getattr(owner, "PYABC_PARALLEL_SAFE"))
+    return bool(getattr(owner, "MULTIPROCESSING_SAFE", True))
+
+
 def resolve_pyabc_parallel_backend(
     inference_cfg,
     method_name: str,
+    simulate_fn=None,
 ) -> str:
     """Return the pyABC backend that should be used for this run.
 
@@ -21,6 +33,8 @@ def resolve_pyabc_parallel_backend(
     - parallel runs always use ``mpi`` for consistent comparisons
     - an explicit ``multicore`` request is overridden to ``mpi`` when
       ``n_workers > 1``
+    - benchmarks marked unsafe for parallel pyABC execution fall back to
+      single-process rank-zero execution
     """
     n_workers = max(1, int(inference_cfg.get("n_workers", 1)))
     configured = inference_cfg.get("parallel_backend")
@@ -40,7 +54,17 @@ def resolve_pyabc_parallel_backend(
         )
         return "mpi"
 
-    return configured
+    backend = configured
+    if backend == "mpi" and simulate_fn is not None and not _pyabc_parallel_safe(simulate_fn):
+        logger.warning(
+            "Forcing %s to single-process pyABC execution because %s is marked "
+            "unsafe for parallel pyABC workers.",
+            method_name,
+            simulate_fn.__self__.__class__.__name__,
+        )
+        return "multicore"
+
+    return backend
 
 
 def resolve_pyabc_worker_count(
@@ -58,18 +82,17 @@ def resolve_pyabc_worker_count(
     if parallel_backend != "multicore" or n_procs <= 1:
         return n_procs
 
-    owner = getattr(simulate_fn, "__self__", None)
-    if owner is None:
+    if _pyabc_parallel_safe(simulate_fn):
         return n_procs
 
-    if getattr(owner, "MULTIPROCESSING_SAFE", True):
-        return n_procs
+    owner = getattr(simulate_fn, "__self__", None)
+    owner_name = owner.__class__.__name__ if owner is not None else type(simulate_fn).__name__
 
     logger.warning(
         "Forcing %s to single-process pyABC execution because %s is marked "
-        "MULTIPROCESSING_SAFE=False.",
+        "unsafe for parallel pyABC workers.",
         method_name,
-        owner.__class__.__name__,
+        owner_name,
     )
     return 1
 

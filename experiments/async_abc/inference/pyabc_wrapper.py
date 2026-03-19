@@ -162,6 +162,7 @@ def run_pyabc_smc(
     parallel_backend = resolve_pyabc_parallel_backend(
         inference_cfg,
         method_name="pyabc_smc",
+        simulate_fn=simulate_fn,
     )
     n_procs = resolve_pyabc_worker_count(
         simulate_fn,

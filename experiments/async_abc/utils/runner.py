@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ..benchmarks import make_benchmark
-from ..inference.pyabc_sampler import resolve_pyabc_parallel_backend
-from ..inference.method_registry import method_execution_mode, run_method
+from ..inference.method_registry import method_execution_mode_for_cfg, run_method
 from ..io.config import load_config
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, RecordWriter
@@ -505,14 +504,7 @@ def run_method_distributed(
     seed: int,
 ) -> List[ParticleRecord]:
     """Execute one inference method with rank-aware coordination."""
-    execution_mode = method_execution_mode(name)
-    if name in {"pyabc_smc", "abc_smc_baseline"}:
-        parallel_backend = resolve_pyabc_parallel_backend(
-            inference_cfg,
-            method_name=name,
-        )
-        if parallel_backend == "mpi":
-            execution_mode = "all_ranks"
+    execution_mode = method_execution_mode_for_cfg(name, inference_cfg, simulate_fn)
     root_rank = is_root_rank()
 
     if execution_mode == "rank_zero":

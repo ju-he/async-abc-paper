@@ -305,8 +305,11 @@ class CellularPotts:
         computation.
     """
 
-    # pyABC's local multiprocessing path is not safe here because spawned/forked
-    # workers interact badly with the native NAStJA/nastjapy stack on the cluster.
+    # pyABC parallel workers are not safe here because they need to serialize
+    # the bound benchmark object, which carries native NAStJA/nastjapy state.
+    PYABC_PARALLEL_SAFE = False
+
+    # Keep the older flag for callers/tests that still check it directly.
     MULTIPROCESSING_SAFE = False
 
     REQUIRED_KEYS = [

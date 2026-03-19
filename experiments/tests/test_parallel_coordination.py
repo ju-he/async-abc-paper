@@ -25,7 +25,7 @@ class TestRunMethodDistributed:
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
 
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -58,7 +58,7 @@ class TestRunMethodDistributed:
             "allgather",
             lambda value: (_ for _ in ()).throw(AssertionError("allgather should not be used")),
         )
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -83,7 +83,7 @@ class TestRunMethodDistributed:
 
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
         monkeypatch.setattr(runner_utils, "allgather", lambda value: [value])
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "all_ranks")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "all_ranks")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -110,7 +110,6 @@ class TestRunMethodDistributed:
 
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
         monkeypatch.setattr(runner_utils, "allgather", lambda value: [value])
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -136,7 +135,7 @@ class TestRunMethodDistributed:
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
 
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -161,10 +160,50 @@ class TestRunMethodDistributed:
         assert records == []
         assert calls == []
 
+    @pytest.mark.parametrize("method_name", ["pyabc_smc", "abc_smc_baseline"])
+    def test_unsafe_pyabc_benchmark_stays_rank_zero_even_when_mpi_requested(
+        self, monkeypatch, tmp_output_dir, method_name
+    ):
+        calls = []
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        class UnsafeBenchmark:
+            MULTIPROCESSING_SAFE = False
+
+            def simulate(self, params, seed):
+                return 0.0
+
+        benchmark = UnsafeBenchmark()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
+        monkeypatch.setattr(
+            runner_utils,
+            "run_method",
+            lambda *args, **kwargs: calls.append((args, kwargs)) or _sentinel_records(),
+        )
+        monkeypatch.setattr(
+            runner_utils,
+            "_wait_for_rank_zero_status",
+            lambda path: {"kind": "ok", "message": ""},
+        )
+
+        records = runner_utils.run_method_distributed(
+            method_name,
+            benchmark.simulate,
+            {"x": (-1.0, 1.0)},
+            {"max_simulations": 1, "n_workers": 4, "parallel_backend": "mpi"},
+            output_dir,
+            replicate=0,
+            seed=1,
+        )
+
+        assert records == []
+        assert calls == []
+
     def test_distributed_import_error_is_re_raised_as_import_error(self, monkeypatch, tmp_output_dir):
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: True)
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "run_method",
@@ -189,7 +228,7 @@ class TestRunMethodDistributed:
     def test_non_root_re_raises_root_exception_from_status_file(self, monkeypatch, tmp_output_dir):
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
-        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
         monkeypatch.setattr(
             runner_utils,
             "_wait_for_rank_zero_status",

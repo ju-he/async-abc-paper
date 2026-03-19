@@ -8,14 +8,17 @@ All runners share the same signature::
 
 Use :func:`run_method` as the single dispatch point in experiment scripts.
 """
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 from .propulate_abc import run_propulate_abc
+from .pyabc_sampler import resolve_pyabc_parallel_backend
 from .pyabc_wrapper import run_pyabc_smc
 from .rejection_abc import run_rejection_abc
 from .abc_smc_baseline import run_abc_smc_baseline
+
+_PYABC_METHODS = {"pyabc_smc", "abc_smc_baseline"}
 
 METHOD_REGISTRY: Dict[str, Callable] = {
     "async_propulate_abc": run_propulate_abc,
@@ -94,3 +97,26 @@ def method_execution_mode(name: str) -> str:
             f"Available methods: {valid}"
         )
     return "rank_zero"
+
+
+def method_execution_mode_for_cfg(
+    name: str,
+    inference_cfg: Dict[str, Any],
+    simulate_fn: Callable | None = None,
+) -> str:
+    """Return the effective execution mode for a method given a runtime config.
+
+    Identical to :func:`method_execution_mode` for most methods. For pyABC
+    methods whose backend resolves to ``"mpi"`` the static ``"rank_zero"``
+    default is upgraded to ``"all_ranks"`` so that all pre-allocated MPI ranks
+    participate in the run.
+    """
+    mode = method_execution_mode(name)
+    if mode == "rank_zero" and name in _PYABC_METHODS:
+        if resolve_pyabc_parallel_backend(
+            inference_cfg,
+            method_name=name,
+            simulate_fn=simulate_fn,
+        ) == "mpi":
+            return "all_ranks"
+    return mode
