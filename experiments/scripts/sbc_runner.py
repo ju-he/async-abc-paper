@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Simulation-based calibration runner."""
 import copy
+import json
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -23,8 +25,22 @@ from async_abc.plotting.export import save_figure
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
+from async_abc.utils.shard_finalizers import finalize_experiment_by_name
+from async_abc.utils.sharding import (
+    ShardLayout,
+    build_plan_payload,
+    ensure_plan,
+    estimate_sharded_wall_time,
+    is_shard_mode,
+    maybe_finalize_sharded_run,
+    prepare_shard_workspace,
+    read_json,
+    split_indices,
+    validate_shard_args,
+    write_shard_status,
+)
 from async_abc.utils.runner import (
-    compute_corrected_estimate,
+    compute_scaling_factor,
     format_duration,
     make_arg_parser,
     run_method_distributed,
@@ -37,6 +53,15 @@ logger = logging.getLogger(__name__)
 
 def _write_dataframe_csv(df: pd.DataFrame, path: Path) -> None:
     df.to_csv(path, index=False)
+
+
+def _write_trial_records_jsonl(trial_records: list[dict], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w") as f:
+        for row in trial_records:
+            payload = dict(row)
+            payload["posterior_samples"] = [float(x) for x in np.asarray(payload["posterior_samples"], dtype=float)]
+            f.write(json.dumps(payload) + "\n")
 
 
 def _posterior_samples(records, param_name: str) -> np.ndarray:
@@ -90,14 +115,25 @@ def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> No
     save_figure(fig, output_dir.plots / "coverage_table", data={col: coverage_df[col].tolist() for col in coverage_df.columns})
 
 
+def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
+    owner_id = f"{os.getenv('SLURM_JOB_ID', 'manual')}:{layout.shard_index}"
+    maybe_finalize_sharded_run(
+        layout=layout,
+        actual_num_shards=actual_num_shards,
+        owner_id=owner_id,
+        finalize_fn=lambda shard_dirs, statuses: finalize_experiment_by_name(cfg, layout, shard_dirs, statuses),
+    )
+
+
 def main(argv: list[str] | None = None) -> None:
     configure_logging()
     parser = make_arg_parser("Simulation-based calibration experiment.")
     args = parser.parse_args(argv)
+    validate_shard_args(args)
 
     cfg = load_config(args.config, test_mode=args.test)
     test_mode = is_test_mode(cfg)
-    output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
+    experiment_name = cfg["experiment_name"]
 
     sbc_cfg = cfg["sbc"]
     benchmark_cfg = cfg["benchmark"]
@@ -111,9 +147,56 @@ def main(argv: list[str] | None = None) -> None:
 
     seeds = make_seeds(n_trials, int(cfg["execution"]["base_seed"]))
     trial_records = []
+    selected_trials = list(range(n_trials))
+
+    if is_shard_mode(args):
+        output_root = Path(args.output_dir)
+        full_cfg = load_config(args.config, test_mode=False)
+        shard_index = args.shard_index if args.shard_index is not None else 0
+        layout = ShardLayout(output_root, experiment_name, shard_index)
+        plan = read_json(layout.plan_path)
+        if not plan:
+            actual_num_shards = args.num_shards or 1
+            plan = ensure_plan(
+                layout,
+                build_plan_payload(
+                    experiment_name=experiment_name,
+                    config_path=str(Path(args.config).resolve()),
+                    unit_kind="trial",
+                    full_total_units=full_cfg["sbc"]["n_trials"],
+                    actual_total_units=n_trials,
+                    requested_num_shards=actual_num_shards,
+                    actual_num_shards=actual_num_shards,
+                    test_mode=test_mode,
+                    extend=args.extend,
+                    shard_assignments=split_indices(n_trials, actual_num_shards),
+                    runner_script=str(Path(__file__).resolve()),
+                ),
+            )
+        actual_num_shards = int(plan["actual_num_shards"])
+        if args.finalize_only:
+            if is_root_rank():
+                _finalize_sharded(cfg, layout, actual_num_shards)
+            return
+        selected_trials = [int(idx) for idx in plan["shard_assignments"][shard_index]]
+        if is_root_rank():
+            mode = prepare_shard_workspace(layout)
+            if mode == "skip":
+                _finalize_sharded(cfg, layout, actual_num_shards)
+                return
+            write_shard_status(
+                layout,
+                state="running",
+                unit_indices=selected_trials,
+                extra={"started_at_s": time.time()},
+            )
+        output_dir = layout.shard_output_dir.ensure()
+    else:
+        output_dir = OutputDir(args.output_dir, experiment_name).ensure()
 
     t0 = time.time()
-    for trial_idx, seed in enumerate(seeds):
+    for trial_idx in selected_trials:
+        seed = seeds[trial_idx]
         rng = np.random.default_rng(seed)
         true_params = {
             name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
@@ -158,14 +241,45 @@ def main(argv: list[str] | None = None) -> None:
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(elapsed))
     if test_mode and is_root_rank():
-        estimated = compute_corrected_estimate(
-            elapsed, output_dir.data / "raw_results.csv", args.config
-        )
+        factor, extra, _ = compute_scaling_factor(args.config)
+        estimated = elapsed * factor + extra
         logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode)
+    estimated_sharded = None
+    if test_mode and is_shard_mode(args) and estimated is not None:
+        estimated_sharded = estimate_sharded_wall_time(
+            estimated,
+            int(plan.get("full_total_units", full_cfg["sbc"]["n_trials"])),
+            int(plan.get("requested_num_shards", actual_num_shards)),
+        )
+    write_timing_csv(
+        output_dir.data / "timing.csv",
+        name,
+        elapsed,
+        estimated,
+        test_mode,
+        estimated_full_unsharded_s=estimated,
+        estimated_full_sharded_wall_s=estimated_sharded,
+        aggregate_compute_s=elapsed,
+    )
+    _write_trial_records_jsonl(trial_records, output_dir.data / "sbc_trials.jsonl")
+
+    if is_shard_mode(args):
+        write_shard_status(
+            layout,
+            state="completed",
+            unit_indices=selected_trials,
+            elapsed_s=elapsed,
+            estimated_full_s=estimated,
+            estimated_full_unsharded_s=estimated,
+            estimated_full_sharded_wall_s=estimated_sharded,
+            aggregate_compute_s=elapsed,
+            extra={"started_at_s": t0, "finished_at_s": time.time()},
+        )
+        _finalize_sharded(cfg, layout, actual_num_shards)
+        return
 
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, coverage_levels)

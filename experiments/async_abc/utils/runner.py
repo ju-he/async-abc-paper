@@ -10,7 +10,7 @@ import traceback
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from ..benchmarks import make_benchmark
 from ..inference.method_registry import method_execution_mode, run_method
@@ -162,6 +162,9 @@ _TIMING_FIELDNAMES = [
     "experiment_name",
     "elapsed_s",
     "estimated_full_s",
+    "estimated_full_unsharded_s",
+    "estimated_full_sharded_wall_s",
+    "aggregate_compute_s",
     "test_mode",
     "timestamp",
 ]
@@ -246,6 +249,9 @@ def write_timing_csv(
     elapsed_s: float,
     estimated_full_s: Optional[float],
     test_mode: bool,
+    estimated_full_unsharded_s: Optional[float] = None,
+    estimated_full_sharded_wall_s: Optional[float] = None,
+    aggregate_compute_s: Optional[float] = None,
 ) -> None:
     """Append one timing row to a CSV file, writing the header if needed."""
     path = Path(path)
@@ -259,6 +265,24 @@ def write_timing_csv(
             "elapsed_s": round(elapsed_s, 3),
             "estimated_full_s": (
                 round(estimated_full_s, 3) if estimated_full_s is not None else ""
+            ),
+            "estimated_full_unsharded_s": (
+                round(
+                    estimated_full_unsharded_s
+                    if estimated_full_unsharded_s is not None
+                    else estimated_full_s,
+                    3,
+                )
+                if estimated_full_unsharded_s is not None or estimated_full_s is not None
+                else ""
+            ),
+            "estimated_full_sharded_wall_s": (
+                round(estimated_full_sharded_wall_s, 3)
+                if estimated_full_sharded_wall_s is not None
+                else ""
+            ),
+            "aggregate_compute_s": (
+                round(aggregate_compute_s, 3) if aggregate_compute_s is not None else ""
             ),
             "test_mode": test_mode,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
@@ -303,6 +327,12 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
                    help="Test mode: small budget, local max 8 workers, SLURM max 48.")
     p.add_argument("--extend", action="store_true",
                    help="Skip parameter combinations already present in existing CSVs.")
+    p.add_argument("--shard-index", type=int, default=None,
+                   help="Shard index for sharded execution.")
+    p.add_argument("--num-shards", type=int, default=None,
+                   help="Total number of active shards for sharded execution.")
+    p.add_argument("--finalize-only", action="store_true",
+                   help="Skip execution and only attempt sharded finalization.")
     return p
 
 
@@ -353,6 +383,8 @@ def run_experiment(
     methods: Optional[List[str]] = None,
     csv_name: str = "raw_results.csv",
     extend: bool = False,
+    replicate_indices: Optional[List[int]] = None,
+    record_transform: Optional[Callable[[ParticleRecord], ParticleRecord]] = None,
 ) -> List[ParticleRecord]:
     """Run all methods × replicates and write results to CSV.
 
@@ -387,6 +419,9 @@ def run_experiment(
     n_replicates = cfg["execution"]["n_replicates"]
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
+    selected_replicates = (
+        list(range(n_replicates)) if replicate_indices is None else list(replicate_indices)
+    )
 
     csv_path = output_dir.data / csv_name
     done = find_completed_combinations(csv_path, ["method", "replicate"]) if extend else set()
@@ -396,7 +431,8 @@ def run_experiment(
 
     try:
         for method in methods:
-            for replicate, seed in enumerate(seeds):
+            for replicate in selected_replicates:
+                seed = seeds[replicate]
                 if (method, str(replicate)) in done:
                     logger.info(
                         "[runner] --extend: skipping %s replicate=%s (already done)",
@@ -418,6 +454,8 @@ def run_experiment(
                     logger.warning("[runner] skipping '%s': %s", method, exc)
                     break  # skip all replicates for this method
                 if is_root_rank():
+                    if record_transform is not None:
+                        records = [record_transform(record) for record in records]
                     writer.write(records)
                     all_records.extend(records)
     finally:

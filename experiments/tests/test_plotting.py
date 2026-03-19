@@ -17,6 +17,7 @@ from matplotlib.figure import Figure
 from async_abc.analysis import tolerance_over_wall_time, wasserstein_at_checkpoints
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord
+import async_abc.plotting.export as export_mod
 from async_abc.plotting.export import save_figure, get_git_hash
 from async_abc.plotting.common import (
     corner_plot,
@@ -112,6 +113,19 @@ class TestSaveFigure:
         stem = tmp_path / "test_fig"
         save_figure(fig, stem, data=None)
         assert not (tmp_path / "test_fig_data.csv").exists()
+
+    def test_export_warns_and_keeps_pdf_when_png_rasterization_unavailable(self, tmp_path, monkeypatch):
+        fig = _make_fig()
+        stem = tmp_path / "pdf_only_fig"
+        monkeypatch.setattr(export_mod, "_save_png_from_pdf", lambda *args, **kwargs: False)
+
+        with pytest.warns(UserWarning, match="keeping PDF only"):
+            save_figure(fig, stem)
+
+        assert (tmp_path / "pdf_only_fig.pdf").exists()
+        assert not (tmp_path / "pdf_only_fig.png").exists()
+        meta = json.loads((tmp_path / "pdf_only_fig_meta.json").read_text())
+        assert meta["png"] is None
 
 
 class TestGetGitHash:

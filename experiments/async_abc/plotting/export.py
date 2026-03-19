@@ -7,6 +7,7 @@ import csv
 import json
 import shutil
 import subprocess
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Union
@@ -54,6 +55,37 @@ def _save_png_via_pdftoppm(pdf_path: Path, png_path: Path, dpi: int = 150) -> bo
     return png_path.exists()
 
 
+def _save_png_via_convert(pdf_path: Path, png_path: Path, dpi: int = 150) -> bool:
+    """Rasterize *pdf_path* into *png_path* using ImageMagick convert when available."""
+    convert = shutil.which("convert")
+    if not convert:
+        return False
+
+    try:
+        subprocess.run(
+            [
+                convert,
+                "-density",
+                str(int(dpi)),
+                str(pdf_path),
+                str(png_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return False
+    return png_path.exists()
+
+
+def _save_png_from_pdf(pdf_path: Path, png_path: Path, dpi: int = 150) -> bool:
+    """Best-effort PDF-to-PNG rasterization that avoids Matplotlib's Agg path."""
+    return _save_png_via_pdftoppm(pdf_path, png_path, dpi=dpi) or _save_png_via_convert(
+        pdf_path, png_path, dpi=dpi
+    )
+
+
 def save_figure(
     fig: matplotlib.figure.Figure,
     path_stem: Union[str, Path],
@@ -74,8 +106,9 @@ def save_figure(
     Returns
     -------
     dict
-        Mapping of ``{'pdf': Path, 'png': Path, 'meta': Path}`` (plus
-        ``'csv': Path`` when *data* is provided).
+        Mapping containing ``'pdf'`` and ``'meta'`` and, when PNG
+        rasterization succeeds, ``'png'``. Includes ``'csv'`` when *data*
+        is provided.
     """
     stem = Path(path_stem)
     out: Dict[str, Path] = {}
@@ -83,10 +116,15 @@ def save_figure(
     pdf_path = stem.with_suffix(".pdf")
     png_path = stem.with_suffix(".png")
     fig.savefig(pdf_path, bbox_inches="tight")
-    if not _save_png_via_pdftoppm(pdf_path, png_path, dpi=150):
-        fig.savefig(png_path, bbox_inches="tight", dpi=150)
+    png_written = _save_png_from_pdf(pdf_path, png_path, dpi=150)
+    if not png_written:
+        warnings.warn(
+            f"Could not rasterize {pdf_path.name} to PNG; keeping PDF only.",
+            stacklevel=2,
+        )
     out["pdf"] = pdf_path
-    out["png"] = png_path
+    if png_written:
+        out["png"] = png_path
 
     if data is not None:
         csv_path = Path(str(stem) + "_data.csv")
@@ -103,7 +141,7 @@ def save_figure(
         "git_hash": get_git_hash(),
         "timestamp": datetime.now().isoformat(),
         "pdf": str(pdf_path),
-        "png": str(png_path),
+        "png": str(png_path) if png_written else None,
     }
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)

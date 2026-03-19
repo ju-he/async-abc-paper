@@ -1,4 +1,4 @@
-"""Result record schema and CSV writer.
+"""Result record schema and CSV helpers.
 
 ParticleRecord captures a single simulation evaluation.  RecordWriter appends
 records to a CSV file, flattening the ``params`` dict into ``param_<key>``
@@ -174,3 +174,21 @@ class RecordWriter:
                 self._header_written = True
             for rec in records:
                 writer.writerow(_record_to_row(rec, param_keys))
+
+
+def load_records(path: Union[str, Path]) -> List[ParticleRecord]:
+    """Load a CSV of :class:`ParticleRecord` rows."""
+    path = Path(path)
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    with open(path, newline="") as f:
+        return [ParticleRecord.from_csv_row(row) for row in csv.DictReader(f)]
+
+
+def write_records(path: Union[str, Path], records: List[ParticleRecord]) -> None:
+    """Write *records* to *path*, replacing any previous file."""
+    path = Path(path)
+    if path.exists():
+        path.unlink()
+    writer = RecordWriter(path)
+    writer.write(records)
