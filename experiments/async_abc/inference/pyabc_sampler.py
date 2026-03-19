@@ -74,7 +74,12 @@ def resolve_pyabc_worker_count(
     return 1
 
 
-def build_pyabc_sampler(n_procs: int, parallel_backend: str):
+def build_pyabc_sampler(
+    n_procs: int,
+    parallel_backend: str,
+    *,
+    cfuture_executor=None,
+):
     """Construct a pyABC sampler.
 
     Parameters
@@ -84,8 +89,12 @@ def build_pyabc_sampler(n_procs: int, parallel_backend: str):
     parallel_backend:
         ``"multicore"`` — use :class:`pyabc.MulticoreEvalParallelSampler`
         (or :class:`pyabc.SingleCoreSampler` when *n_procs* == 1).
-        ``"mpi"`` — wrap :class:`mpi4py.futures.MPIPoolExecutor` inside
-        :class:`pyabc.ConcurrentFutureSampler` for multi-node execution.
+        ``"mpi"`` — wrap an existing communicator-backed executor inside
+        :class:`pyabc.ConcurrentFutureSampler`.
+    cfuture_executor:
+        Existing ``concurrent.futures``-style executor for the ``"mpi"``
+        backend. Callers are expected to provision it from the already launched
+        MPI communicator via ``MPICommExecutor``.
 
     Returns
     -------
@@ -95,8 +104,6 @@ def build_pyabc_sampler(n_procs: int, parallel_backend: str):
     ------
     ValueError
         If *parallel_backend* is not a recognised value.
-    ImportError
-        If ``mpi4py`` is not installed and backend is ``"mpi"``.
     """
     import pyabc
 
@@ -106,18 +113,13 @@ def build_pyabc_sampler(n_procs: int, parallel_backend: str):
         return pyabc.MulticoreEvalParallelSampler(n_procs)
 
     elif parallel_backend == "mpi":
-        try:
-            from mpi4py.futures import MPIPoolExecutor
-        except ImportError as exc:
-            raise ImportError(
-                "The 'mpi' parallel_backend requires mpi4py. "
-                "Install it with: pip install mpi4py"
-            ) from exc
-        # max_workers is intentionally omitted: in bootstrap mode
-        # (mpirun -n N python -m mpi4py.futures), the worker count is
-        # determined by the MPI world size, not by a Python parameter.
+        if cfuture_executor is None:
+            raise ValueError(
+                "The 'mpi' parallel_backend requires an existing "
+                "communicator-backed executor."
+            )
         return pyabc.ConcurrentFutureSampler(
-            cfuture_executor=MPIPoolExecutor()
+            cfuture_executor=cfuture_executor
         )
 
     else:

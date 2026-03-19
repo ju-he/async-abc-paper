@@ -107,11 +107,17 @@ def _write_batch_timing(cfg: dict, layout: ShardLayout, tmp_output: OutputDir, t
 
 def _metadata_extra(cfg: dict, layout: ShardLayout, statuses: List[Dict[str, Any]], tmp_output: OutputDir) -> Dict[str, Any]:
     plan = read_json(layout.plan_path)
-    completed_replicates = (
-        detect_completed_replicates_in_output(tmp_output, cfg)
-        if plan.get("unit_kind") == "replicate"
-        else []
-    )
+    completed_replicates: List[int] = []
+    if plan.get("unit_kind") == "replicate":
+        if bool(cfg.get("inference", {}).get("test_mode", False)):
+            completed_replicates = sorted({
+                int(unit_idx)
+                for status in statuses
+                if status.get("state") == "completed"
+                for unit_idx in status.get("unit_indices", [])
+            })
+        else:
+            completed_replicates = detect_completed_replicates_in_output(tmp_output, cfg)
     history = existing_extension_history(layout.output_root, cfg["experiment_name"])
     history.append(
         {

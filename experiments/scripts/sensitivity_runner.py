@@ -32,6 +32,7 @@ from async_abc.utils.sharding import (
     read_json,
     split_indices,
     validate_shard_args,
+    write_shard_failure_status,
     write_shard_status,
 )
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
@@ -151,43 +152,53 @@ def main(argv: list[str] | None = None) -> None:
     seeds = make_seeds(seed_count, base_seed)
 
     experiment_start = time.time()
-    for variant in variants:
-        # Build a unique name from the variant parameters
-        variant_name = _variant_name(variant)
-        inference_cfg = {**cfg["inference"], **variant}
-        if "tol_init_multiplier" in variant:
-            inference_cfg["tol_init"] = (
-                float(cfg["inference"]["tol_init"]) * float(variant["tol_init_multiplier"])
-            )
-            del inference_cfg["tol_init_multiplier"]
-        csv_name = f"sensitivity_{variant_name}.csv"
-        csv_path = output_dir.data / csv_name
-        use_extend = args.extend and not is_shard_mode(args)
-        done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
-        writer = RecordWriter(csv_path)
-
-        for method in cfg["methods"]:
-            tagged_method = f"{method}__{variant_name}"
-            for replicate in selected_replicates:
-                seed = seeds[replicate]
-                if (tagged_method, str(replicate)) in done:
-                    logger.info(
-                        "[sensitivity] --extend: skipping %s replicate=%s",
-                        tagged_method,
-                        replicate,
-                    )
-                    continue
-                records = run_method_distributed(
-                    method, bm.simulate, bm.limits,
-                    inference_cfg, output_dir, replicate, seed,
+    try:
+        for variant in variants:
+            # Build a unique name from the variant parameters
+            variant_name = _variant_name(variant)
+            inference_cfg = {**cfg["inference"], **variant}
+            if "tol_init_multiplier" in variant:
+                inference_cfg["tol_init"] = (
+                    float(cfg["inference"]["tol_init"]) * float(variant["tol_init_multiplier"])
                 )
-                # Tag records with variant info
-                for r in records:
-                    r.method = tagged_method
-                if is_root_rank():
-                    writer.write(records)
+                del inference_cfg["tol_init_multiplier"]
+            csv_name = f"sensitivity_{variant_name}.csv"
+            csv_path = output_dir.data / csv_name
+            use_extend = args.extend and not is_shard_mode(args)
+            done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
+            writer = RecordWriter(csv_path)
 
-    experiment_elapsed = time.time() - experiment_start
+            for method in cfg["methods"]:
+                tagged_method = f"{method}__{variant_name}"
+                for replicate in selected_replicates:
+                    seed = seeds[replicate]
+                    if (tagged_method, str(replicate)) in done:
+                        logger.info(
+                            "[sensitivity] --extend: skipping %s replicate=%s",
+                            tagged_method,
+                            replicate,
+                        )
+                        continue
+                    records = run_method_distributed(
+                        method, bm.simulate, bm.limits,
+                        inference_cfg, output_dir, replicate, seed,
+                    )
+                    # Tag records with variant info
+                    for r in records:
+                        r.method = tagged_method
+                    if is_root_rank():
+                        writer.write(records)
+
+        experiment_elapsed = time.time() - experiment_start
+    except Exception as exc:
+        if is_shard_mode(args) and is_root_rank():
+            write_shard_failure_status(
+                layout,
+                unit_indices=selected_replicates,
+                started_at_s=experiment_start,
+                exc=exc,
+            )
+        raise
     name = cfg["experiment_name"]
     estimated = None
     if is_root_rank():

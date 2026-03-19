@@ -5,6 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent))
 import conftest as test_helpers
 
@@ -130,6 +132,66 @@ class TestShardedStragglerRunner:
         assert (data_dir / "throughput_vs_slowdown_summary.csv").exists()
         assert (data_dir / "timing.csv").exists()
         assert (tmp_path / "_shards" / "straggler" / "runs" / "default" / "merge.done.json").exists()
+
+
+class TestShardFailureStatus:
+    def test_runner_exception_marks_shard_failed(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["failing_method"],
+            inference_overrides={"max_simulations": 10, "k": 5, "n_workers": 1},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        config_path = test_helpers.write_config(tmp_path, "gaussian_failure.json", cfg)
+
+        def failing_method(simulate_fn, limits, inference_cfg, output_dir, replicate, seed):
+            raise RuntimeError("boom from fake shard method")
+
+        with test_helpers.patched_method_registry({"failing_method": failing_method}):
+            with pytest.raises(RuntimeError, match="boom from fake shard method"):
+                test_helpers.run_runner_main(
+                    "gaussian_mean_runner.py",
+                    config_path,
+                    tmp_path,
+                    extra_args=("--shard-index", "0", "--num-shards", "1"),
+                )
+
+        status_path = tmp_path / "_shards" / "gaussian_mean" / "runs" / "default" / "shard-000" / "status.json"
+        status = json.loads(status_path.read_text())
+
+        assert status["state"] == "failed"
+        assert status["unit_indices"] == [0]
+        assert status["error_type"] == "RuntimeError"
+        assert "boom from fake shard method" in status["error_message"]
+        assert "Traceback" in status["traceback"]
+        assert "started_at_s" in status
+        assert "finished_at_s" in status
+
+
+class TestShardedTestModeMetadata:
+    def test_sensitivity_test_mode_metadata_uses_completed_shards(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "sensitivity.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 20, "k": 5, "n_workers": 1},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        config_path = test_helpers.write_config(tmp_path, "sensitivity_test.json", cfg)
+
+        test_helpers.run_runner_main(
+            "sensitivity_runner.py",
+            config_path,
+            tmp_path,
+            test_mode=True,
+            extra_args=("--shard-index", "0", "--num-shards", "1"),
+        )
+
+        metadata = json.loads((tmp_path / "sensitivity" / "data" / "metadata.json").read_text())
+
+        assert metadata["completed_replicates"] == [0]
+        assert metadata["completed_replicate_count"] == 1
 
 
 class TestShardSubmitter:

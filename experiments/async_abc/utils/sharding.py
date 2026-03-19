@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import time
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -288,6 +289,31 @@ def write_shard_status(
     if extra:
         payload.update(extra)
     _json_dump_atomic(layout.shard_status_path, payload)
+
+
+def write_shard_failure_status(
+    layout: ShardLayout,
+    *,
+    unit_indices: List[int],
+    started_at_s: Optional[float],
+    exc: BaseException,
+) -> None:
+    """Persist a terminal failure status for one shard."""
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    extra = {
+        "finished_at_s": time.time(),
+        "error_type": type(exc).__name__,
+        "error_message": str(exc),
+        "traceback": tb,
+    }
+    if started_at_s is not None:
+        extra["started_at_s"] = float(started_at_s)
+    write_shard_status(
+        layout,
+        state="failed",
+        unit_indices=unit_indices,
+        extra=extra,
+    )
 
 
 def load_shard_statuses(layout: ShardLayout, num_shards: int) -> List[Dict[str, Any]]:

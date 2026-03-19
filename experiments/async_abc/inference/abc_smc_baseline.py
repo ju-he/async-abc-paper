@@ -23,65 +23,20 @@ from .pyabc_sampler import (
 logger = logging.getLogger(__name__)
 
 
-def run_abc_smc_baseline(
+def _run_abc_smc_baseline_with_sampler(
+    *,
+    sampler,
     simulate_fn: Callable,
     limits: Dict,
-    inference_cfg: Dict,
+    max_sims: int,
+    k: int,
+    n_generations: int,
     output_dir: OutputDir,
     replicate: int,
     seed: int,
 ) -> List[ParticleRecord]:
-    """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
-
-    Parameters
-    ----------
-    simulate_fn:
-        Callable ``(params: dict, seed: int) -> float``.
-    limits:
-        Search-space limits dict ``{name: (lo, hi)}``.
-    inference_cfg:
-        ``config["inference"]`` sub-dict.  Reads ``max_simulations``, ``k``,
-        ``tol_init``, ``n_generations`` (default 5), ``n_workers`` (default 1).
-    output_dir:
-        Output directory (used for pyABC database path).
-    replicate:
-        Replicate index stored in each record.
-    seed:
-        Base RNG seed.
-
-    Returns
-    -------
-    List[ParticleRecord]
-
-    Raises
-    ------
-    ImportError
-        If pyabc is not installed.
-    """
-    try:
-        import pyabc
-    except ImportError as exc:
-        raise ImportError(
-            "The abc_smc_baseline method requires the 'pyabc' package. "
-            "Install it with: pip install pyabc"
-        ) from exc
-
+    import pyabc
     import numpy as np
-
-    max_sims     = inference_cfg["max_simulations"]
-    k            = inference_cfg.get("k", 100)
-    n_generations = inference_cfg.get("n_generations", 5)
-    n_procs          = inference_cfg.get("n_workers", 1)
-    parallel_backend = resolve_pyabc_parallel_backend(
-        inference_cfg,
-        method_name="abc_smc_baseline",
-    )
-    n_procs = resolve_pyabc_worker_count(
-        simulate_fn,
-        int(n_procs),
-        parallel_backend,
-        method_name="abc_smc_baseline",
-    )
 
     # Build pyABC prior from limits
     prior = pyabc.Distribution(
@@ -105,8 +60,6 @@ def run_abc_smc_baseline(
     def pyabc_distance(x, x0):
         return x["distance"]
 
-    sampler = build_pyabc_sampler(n_procs, parallel_backend)
-
     db_path = f"sqlite:///{output_dir.data / f'abc_smc_baseline_rep{replicate}.db'}"
 
     abc = pyabc.ABCSMC(
@@ -123,9 +76,6 @@ def run_abc_smc_baseline(
     # Seed numpy before running so pyABC's internal prior sampling is reproducible
     np.random.seed(seed % (2**31))
     run_start = datetime.now()
-    # Run for exactly n_generations generations (or until budget exhausted).
-    # minimum_epsilon=0.0 so the only stopping criteria are generation count
-    # and simulation budget.
     history = abc.run(
         minimum_epsilon=0.0,
         max_total_nr_simulations=max_sims,
@@ -177,3 +127,105 @@ def run_abc_smc_baseline(
             ))
 
     return records
+
+
+def run_abc_smc_baseline(
+    simulate_fn: Callable,
+    limits: Dict,
+    inference_cfg: Dict,
+    output_dir: OutputDir,
+    replicate: int,
+    seed: int,
+) -> List[ParticleRecord]:
+    """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
+
+    Parameters
+    ----------
+    simulate_fn:
+        Callable ``(params: dict, seed: int) -> float``.
+    limits:
+        Search-space limits dict ``{name: (lo, hi)}``.
+    inference_cfg:
+        ``config["inference"]`` sub-dict.  Reads ``max_simulations``, ``k``,
+        ``tol_init``, ``n_generations`` (default 5), ``n_workers`` (default 1).
+    output_dir:
+        Output directory (used for pyABC database path).
+    replicate:
+        Replicate index stored in each record.
+    seed:
+        Base RNG seed.
+
+    Returns
+    -------
+    List[ParticleRecord]
+
+    Raises
+    ------
+    ImportError
+        If pyabc is not installed.
+    """
+    try:
+        import pyabc
+    except ImportError as exc:
+        raise ImportError(
+            "The abc_smc_baseline method requires the 'pyabc' package. "
+            "Install it with: pip install pyabc"
+        ) from exc
+
+    max_sims     = inference_cfg["max_simulations"]
+    k            = inference_cfg.get("k", 100)
+    n_generations = inference_cfg.get("n_generations", 5)
+    n_procs          = inference_cfg.get("n_workers", 1)
+    parallel_backend = resolve_pyabc_parallel_backend(
+        inference_cfg,
+        method_name="abc_smc_baseline",
+    )
+    n_procs = resolve_pyabc_worker_count(
+        simulate_fn,
+        int(n_procs),
+        parallel_backend,
+        method_name="abc_smc_baseline",
+    )
+
+    if parallel_backend == "mpi":
+        try:
+            from mpi4py import MPI
+            from mpi4py.futures import MPICommExecutor
+        except ImportError as exc:
+            raise ImportError(
+                "The 'mpi' parallel_backend requires mpi4py. "
+                "Install it with: pip install mpi4py"
+            ) from exc
+
+        with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
+            if executor is None:
+                return []
+            sampler = build_pyabc_sampler(
+                n_procs,
+                parallel_backend,
+                cfuture_executor=executor,
+            )
+            return _run_abc_smc_baseline_with_sampler(
+                sampler=sampler,
+                simulate_fn=simulate_fn,
+                limits=limits,
+                max_sims=max_sims,
+                k=k,
+                n_generations=n_generations,
+                output_dir=output_dir,
+                replicate=replicate,
+                seed=seed,
+            )
+
+    sampler = build_pyabc_sampler(n_procs, parallel_backend)
+    return _run_abc_smc_baseline_with_sampler(
+        sampler=sampler,
+        simulate_fn=simulate_fn,
+        limits=limits,
+        max_sims=max_sims,
+        k=k,
+        n_generations=n_generations,
+        output_dir=output_dir,
+        replicate=replicate,
+        seed=seed,
+    )

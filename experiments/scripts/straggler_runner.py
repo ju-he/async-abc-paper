@@ -36,6 +36,7 @@ from async_abc.utils.sharding import (
     read_json,
     split_indices,
     validate_shard_args,
+    write_shard_failure_status,
     write_shard_status,
 )
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
@@ -201,72 +202,83 @@ def main(argv: list[str] | None = None) -> None:
     original_simulate = bm.simulate
 
     experiment_start = time.time()
-    for slowdown_factor in slowdown_factors:
-        bm.simulate = _make_straggler_simulate(
-            original_simulate,
-            straggler_rank=straggler_rank,
-            slowdown_factor=slowdown_factor,
-            base_sleep_s=base_sleep_s,
-            test_mode=test_mode,
-        )
-        factor_records = []
-        use_extend = args.extend and not is_shard_mode(args)
-        done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
-        for method in cfg["methods"]:
-            tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
-            for replicate in selected_replicates:
-                seed = seeds[replicate]
-                if (tagged_method, str(replicate)) in done:
-                    logger.info(
-                        "[straggler] --extend: skipping %s replicate=%s",
-                        tagged_method,
+    try:
+        for slowdown_factor in slowdown_factors:
+            bm.simulate = _make_straggler_simulate(
+                original_simulate,
+                straggler_rank=straggler_rank,
+                slowdown_factor=slowdown_factor,
+                base_sleep_s=base_sleep_s,
+                test_mode=test_mode,
+            )
+            factor_records = []
+            use_extend = args.extend and not is_shard_mode(args)
+            done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
+            for method in cfg["methods"]:
+                tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
+                for replicate in selected_replicates:
+                    seed = seeds[replicate]
+                    if (tagged_method, str(replicate)) in done:
+                        logger.info(
+                            "[straggler] --extend: skipping %s replicate=%s",
+                            tagged_method,
+                            replicate,
+                        )
+                        continue
+                    t0 = time.time()
+                    records = run_method_distributed(
+                        method,
+                        bm.simulate,
+                        bm.limits,
+                        cfg["inference"],
+                        output_dir,
                         replicate,
+                        seed,
                     )
-                    continue
-                t0 = time.time()
-                records = run_method_distributed(
-                    method,
-                    bm.simulate,
-                    bm.limits,
-                    cfg["inference"],
-                    output_dir,
-                    replicate,
-                    seed,
-                )
-                elapsed = time.time() - t0
-                for record in records:
-                    record.method = tagged_method
-                if is_root_rank():
-                    writer.write(records)
-                    all_records.extend(records)
-                    factor_records.extend(records)
-                    throughput_rows.append(
-                        {
-                            "slowdown_factor": slowdown_factor,
-                            "base_method": method,
-                            "method": tagged_method,
-                            "replicate": replicate,
-                            "seed": seed,
-                            "n_simulations": len(records),
-                            "wall_time_s": elapsed,
-                            "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
-                            "test_mode": test_mode,
-                        }
-                    )
+                    elapsed = time.time() - t0
+                    for record in records:
+                        record.method = tagged_method
+                    if is_root_rank():
+                        writer.write(records)
+                        all_records.extend(records)
+                        factor_records.extend(records)
+                        throughput_rows.append(
+                            {
+                                "slowdown_factor": slowdown_factor,
+                                "base_method": method,
+                                "method": tagged_method,
+                                "replicate": replicate,
+                                "seed": seed,
+                                "n_simulations": len(records),
+                                "wall_time_s": elapsed,
+                                "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
+                                "test_mode": test_mode,
+                            }
+                        )
 
-        if slowdown_factor == max(slowdown_factors):
-            worst_records = factor_records
+            if slowdown_factor == max(slowdown_factors):
+                worst_records = factor_records
+
+        throughput_path = output_dir.data / "throughput_vs_slowdown_summary.csv"
+        if throughput_rows:
+            with open(throughput_path, "w", newline="") as f:
+                writer_csv = csv.DictWriter(f, fieldnames=list(throughput_rows[0].keys()))
+                writer_csv.writeheader()
+                writer_csv.writerows(throughput_rows)
+
+        elapsed = time.time() - experiment_start
+    except Exception as exc:
+        bm.simulate = original_simulate
+        if is_shard_mode(args) and is_root_rank():
+            write_shard_failure_status(
+                layout,
+                unit_indices=selected_replicates,
+                started_at_s=experiment_start,
+                exc=exc,
+            )
+        raise
 
     bm.simulate = original_simulate
-
-    throughput_path = output_dir.data / "throughput_vs_slowdown_summary.csv"
-    if throughput_rows:
-        with open(throughput_path, "w", newline="") as f:
-            writer_csv = csv.DictWriter(f, fieldnames=list(throughput_rows[0].keys()))
-            writer_csv.writeheader()
-            writer_csv.writerows(throughput_rows)
-
-    elapsed = time.time() - experiment_start
     name = experiment_name
     estimated = None
     if is_root_rank():

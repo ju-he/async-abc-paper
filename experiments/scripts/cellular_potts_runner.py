@@ -42,6 +42,7 @@ from async_abc.utils.sharding import (
     read_json,
     split_indices,
     validate_shard_args,
+    write_shard_failure_status,
     write_shard_status,
 )
 from async_abc.utils.runner import (
@@ -136,42 +137,52 @@ def main(argv: list[str] | None = None) -> None:
         output_dir = layout.shard_output_dir
         cfg = _prepare_runtime_cfg(cfg, output_dir)
         t0 = time.time()
-        run_experiment(cfg, output_dir, replicate_indices=unit_indices)
-        elapsed = time.time() - t0
-        estimated_unsharded = None
-        estimated_sharded = None
-        if test_mode and is_root_rank():
-            estimated_unsharded = compute_corrected_estimate(
-                elapsed, output_dir.data / "raw_results.csv", args.config
-            )
-            estimated_sharded = estimate_sharded_wall_time(
-                estimated_unsharded,
-                int(plan.get("full_total_units", full_cfg["execution"]["n_replicates"])),
-                int(plan.get("requested_num_shards", actual_num_shards)),
-            )
-        if is_root_rank():
-            write_timing_csv(
-                output_dir.data / "timing.csv",
-                experiment_name,
-                elapsed,
-                estimated_unsharded,
-                test_mode,
-                estimated_full_unsharded_s=estimated_unsharded,
-                estimated_full_sharded_wall_s=estimated_sharded,
-                aggregate_compute_s=elapsed,
-            )
-            write_shard_status(
-                layout,
-                state="completed",
-                unit_indices=unit_indices,
-                elapsed_s=elapsed,
-                estimated_full_s=estimated_unsharded,
-                estimated_full_unsharded_s=estimated_unsharded,
-                estimated_full_sharded_wall_s=estimated_sharded,
-                aggregate_compute_s=elapsed,
-                extra={"started_at_s": t0, "finished_at_s": time.time()},
-            )
-            _finalize_sharded(cfg, layout, actual_num_shards)
+        try:
+            run_experiment(cfg, output_dir, replicate_indices=unit_indices)
+            elapsed = time.time() - t0
+            estimated_unsharded = None
+            estimated_sharded = None
+            if test_mode and is_root_rank():
+                estimated_unsharded = compute_corrected_estimate(
+                    elapsed, output_dir.data / "raw_results.csv", args.config
+                )
+                estimated_sharded = estimate_sharded_wall_time(
+                    estimated_unsharded,
+                    int(plan.get("full_total_units", full_cfg["execution"]["n_replicates"])),
+                    int(plan.get("requested_num_shards", actual_num_shards)),
+                )
+            if is_root_rank():
+                write_timing_csv(
+                    output_dir.data / "timing.csv",
+                    experiment_name,
+                    elapsed,
+                    estimated_unsharded,
+                    test_mode,
+                    estimated_full_unsharded_s=estimated_unsharded,
+                    estimated_full_sharded_wall_s=estimated_sharded,
+                    aggregate_compute_s=elapsed,
+                )
+                write_shard_status(
+                    layout,
+                    state="completed",
+                    unit_indices=unit_indices,
+                    elapsed_s=elapsed,
+                    estimated_full_s=estimated_unsharded,
+                    estimated_full_unsharded_s=estimated_unsharded,
+                    estimated_full_sharded_wall_s=estimated_sharded,
+                    aggregate_compute_s=elapsed,
+                    extra={"started_at_s": t0, "finished_at_s": time.time()},
+                )
+                _finalize_sharded(cfg, layout, actual_num_shards)
+        except Exception as exc:
+            if is_root_rank():
+                write_shard_failure_status(
+                    layout,
+                    unit_indices=unit_indices,
+                    started_at_s=t0,
+                    exc=exc,
+                )
+            raise
         return
 
     output_dir = OutputDir(args.output_dir, experiment_name).ensure()

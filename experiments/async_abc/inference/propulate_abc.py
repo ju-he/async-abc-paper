@@ -13,12 +13,15 @@ the run seed and the individual's generation counter.
 import math
 import random
 import time
+import hashlib
+import json
 from typing import Callable, Dict, List
 
 import numpy as np
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ..utils.mpi import get_rank
 
 Propulator = None
 ABCPMC = None
@@ -95,9 +98,26 @@ def _ensure_propulate_imports() -> None:
         ABCPMC = _ABCPMC
 
 
-def _eval_seed(run_seed: int, generation: int) -> int:
-    """Deterministic per-evaluation seed derived from the run seed and generation."""
-    return abs(hash((run_seed, generation))) % (2**31)
+def _stable_seed(*parts: object) -> int:
+    """Return a stable 31-bit seed derived from structured inputs."""
+    payload = json.dumps(parts, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    digest = hashlib.blake2b(payload.encode("ascii"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % (2**31)
+
+
+def _param_key(params: Dict[str, float]) -> tuple[tuple[str, float], ...]:
+    """Return a stable, rounded parameter key for deterministic seeding."""
+    return tuple(sorted((key, round(float(value), 10)) for key, value in params.items()))
+
+
+def _eval_seed(
+    run_seed: int,
+    mpi_rank: int,
+    generation: int,
+    params: Dict[str, float],
+) -> int:
+    """Deterministic per-evaluation seed derived from run, rank, and params."""
+    return _stable_seed(run_seed, mpi_rank, generation, _param_key(params))
 
 
 def _individual_params(ind, limits: Dict) -> Dict[str, float]:
@@ -165,13 +185,15 @@ def run_propulate_abc(
         if key in inference_cfg:
             scheduler_kwargs[key] = inference_cfg[key]
 
+    mpi_rank = get_rank()
+
     propagator = ABCPMC(
         limits=limits,
         perturbation_scale=perturbation_scale,
         k=k,
         tol=tol_init,
         scheduler_type=scheduler_type,
-        rng=random.Random(seed),
+        rng=random.Random(_stable_seed(seed, "propagator", mpi_rank)),
         **scheduler_kwargs,
     )
 
@@ -181,7 +203,7 @@ def run_propulate_abc(
     # We extract param values and forward to the benchmark simulator.
     def loss_fn(ind) -> float:
         params = _individual_params(ind, limits)
-        sim_seed = _eval_seed(seed, int(ind.generation))
+        sim_seed = _eval_seed(seed, mpi_rank, int(ind.generation), params)
         return float(simulate_fn(params, seed=sim_seed))
 
     # Each (replicate, seed) gets its own checkpoint dir to prevent cross-contamination
@@ -204,7 +226,7 @@ def run_propulate_abc(
     propulator = Propulator(
         loss_fn=loss_fn,
         propagator=propagator,
-        rng=random.Random(seed + 1),  # +1 to keep RNG streams separate
+        rng=random.Random(_stable_seed(seed, "propulator", mpi_rank)),
         generations=generation_budget,
         checkpoint_path=checkpoint_dir,
         **propulator_kwargs,

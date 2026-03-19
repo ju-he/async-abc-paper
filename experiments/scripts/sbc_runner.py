@@ -37,6 +37,7 @@ from async_abc.utils.sharding import (
     read_json,
     split_indices,
     validate_shard_args,
+    write_shard_failure_status,
     write_shard_status,
 )
 from async_abc.utils.runner import (
@@ -200,47 +201,57 @@ def main(argv: list[str] | None = None) -> None:
         output_dir = OutputDir(args.output_dir, experiment_name).ensure()
 
     t0 = time.time()
-    for trial_idx in selected_trials:
-        seed = seeds[trial_idx]
-        rng = np.random.default_rng(seed)
-        true_params = {
-            name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
-            for name in param_names
-        }
-        trial_benchmark = make_benchmark(
-            _true_param_config(
-                benchmark_cfg,
-                true_params=true_params,
-                observed_seed=seed,
-            )
-        )
-
-        for method_idx, method in enumerate(cfg["methods"]):
-            method_seed = int(seed + 1000 * (method_idx + 1))
-            records = run_method_distributed(
-                method,
-                trial_benchmark.simulate,
-                trial_benchmark.limits,
-                cfg["inference"],
-                output_dir,
-                replicate=trial_idx,
-                seed=method_seed,
-            )
-            for param in param_names:
-                samples = _posterior_samples(records, param)
-                if samples.size == 0:
-                    continue
-                trial_records.append(
-                    {
-                        "trial": trial_idx,
-                        "method": method,
-                        "param": param,
-                        "true_value": true_params[param],
-                        "posterior_samples": samples,
-                    }
+    try:
+        for trial_idx in selected_trials:
+            seed = seeds[trial_idx]
+            rng = np.random.default_rng(seed)
+            true_params = {
+                name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
+                for name in param_names
+            }
+            trial_benchmark = make_benchmark(
+                _true_param_config(
+                    benchmark_cfg,
+                    true_params=true_params,
+                    observed_seed=seed,
                 )
+            )
 
-    elapsed = time.time() - t0
+            for method_idx, method in enumerate(cfg["methods"]):
+                method_seed = int(seed + 1000 * (method_idx + 1))
+                records = run_method_distributed(
+                    method,
+                    trial_benchmark.simulate,
+                    trial_benchmark.limits,
+                    cfg["inference"],
+                    output_dir,
+                    replicate=trial_idx,
+                    seed=method_seed,
+                )
+                for param in param_names:
+                    samples = _posterior_samples(records, param)
+                    if samples.size == 0:
+                        continue
+                    trial_records.append(
+                        {
+                            "trial": trial_idx,
+                            "method": method,
+                            "param": param,
+                            "true_value": true_params[param],
+                            "posterior_samples": samples,
+                        }
+                    )
+
+        elapsed = time.time() - t0
+    except Exception as exc:
+        if is_shard_mode(args) and is_root_rank():
+            write_shard_failure_status(
+                layout,
+                unit_indices=selected_trials,
+                started_at_s=t0,
+                exc=exc,
+            )
+        raise
     name = cfg["experiment_name"]
     estimated = None
     if is_root_rank():

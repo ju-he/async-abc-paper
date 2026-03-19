@@ -1,4 +1,6 @@
 """Tests for rank-aware experiment coordination helpers."""
+import pytest
+
 from async_abc.io.records import ParticleRecord
 from async_abc.io.paths import OutputDir
 from async_abc.utils import runner as runner_utils
@@ -100,6 +102,64 @@ class TestRunMethodDistributed:
 
         assert records == []
         assert len(calls) == 1
+
+    @pytest.mark.parametrize("method_name", ["pyabc_smc", "abc_smc_baseline"])
+    def test_pyabc_mpi_backend_overrides_rank_zero_mode(self, monkeypatch, tmp_output_dir, method_name):
+        calls = []
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
+        monkeypatch.setattr(runner_utils, "allgather", lambda value: [value])
+        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(
+            runner_utils,
+            "run_method",
+            lambda *args, **kwargs: calls.append((args, kwargs)) or _sentinel_records(),
+        )
+
+        records = runner_utils.run_method_distributed(
+            method_name,
+            lambda params, seed: 0.0,
+            {"x": (-1.0, 1.0)},
+            {"max_simulations": 1, "n_workers": 4, "parallel_backend": "mpi"},
+            output_dir,
+            replicate=0,
+            seed=1,
+        )
+
+        assert records == []
+        assert len(calls) == 1
+
+    @pytest.mark.parametrize("method_name", ["pyabc_smc", "abc_smc_baseline"])
+    def test_pyabc_multicore_backend_stays_rank_zero(self, monkeypatch, tmp_output_dir, method_name):
+        calls = []
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
+        monkeypatch.setattr(runner_utils, "method_execution_mode", lambda name: "rank_zero")
+        monkeypatch.setattr(
+            runner_utils,
+            "run_method",
+            lambda *args, **kwargs: calls.append((args, kwargs)) or _sentinel_records(),
+        )
+        monkeypatch.setattr(
+            runner_utils,
+            "_wait_for_rank_zero_status",
+            lambda path: {"kind": "ok", "message": ""},
+        )
+
+        records = runner_utils.run_method_distributed(
+            method_name,
+            lambda params, seed: 0.0,
+            {"x": (-1.0, 1.0)},
+            {"max_simulations": 1, "n_workers": 1, "parallel_backend": "multicore"},
+            output_dir,
+            replicate=0,
+            seed=1,
+        )
+
+        assert records == []
+        assert calls == []
 
     def test_distributed_import_error_is_re_raised_as_import_error(self, monkeypatch, tmp_output_dir):
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()

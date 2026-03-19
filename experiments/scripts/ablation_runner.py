@@ -31,6 +31,7 @@ from async_abc.utils.sharding import (
     read_json,
     split_indices,
     validate_shard_args,
+    write_shard_failure_status,
     write_shard_status,
 )
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_csv
@@ -121,38 +122,48 @@ def main(argv: list[str] | None = None) -> None:
     seeds = make_seeds(seed_count, base_seed)
 
     experiment_start = time.time()
-    for variant in variants:
-        name = variant.get("name", "unnamed")
-        # Merge base inference config with variant overrides (exclude "name" key)
-        overrides = {k: v for k, v in variant.items() if k != "name"}
-        inference_cfg = {**cfg["inference"], **overrides}
-        csv_name = f"ablation_{name}.csv"
-        csv_path = output_dir.data / csv_name
-        use_extend = args.extend and not is_shard_mode(args)
-        done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
-        writer = RecordWriter(csv_path)
+    try:
+        for variant in variants:
+            name = variant.get("name", "unnamed")
+            # Merge base inference config with variant overrides (exclude "name" key)
+            overrides = {k: v for k, v in variant.items() if k != "name"}
+            inference_cfg = {**cfg["inference"], **overrides}
+            csv_name = f"ablation_{name}.csv"
+            csv_path = output_dir.data / csv_name
+            use_extend = args.extend and not is_shard_mode(args)
+            done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
+            writer = RecordWriter(csv_path)
 
-        for method in cfg["methods"]:
-            tagged_method = f"{method}__{name}"
-            for replicate in selected_replicates:
-                seed = seeds[replicate]
-                if (tagged_method, str(replicate)) in done:
-                    logger.info(
-                        "[ablation] --extend: skipping %s replicate=%s",
-                        tagged_method,
-                        replicate,
+            for method in cfg["methods"]:
+                tagged_method = f"{method}__{name}"
+                for replicate in selected_replicates:
+                    seed = seeds[replicate]
+                    if (tagged_method, str(replicate)) in done:
+                        logger.info(
+                            "[ablation] --extend: skipping %s replicate=%s",
+                            tagged_method,
+                            replicate,
+                        )
+                        continue
+                    records = run_method_distributed(
+                        method, bm.simulate, bm.limits,
+                        inference_cfg, output_dir, replicate, seed,
                     )
-                    continue
-                records = run_method_distributed(
-                    method, bm.simulate, bm.limits,
-                    inference_cfg, output_dir, replicate, seed,
-                )
-                for r in records:
-                    r.method = tagged_method
-                if is_root_rank():
-                    writer.write(records)
+                    for r in records:
+                        r.method = tagged_method
+                    if is_root_rank():
+                        writer.write(records)
 
-    experiment_elapsed = time.time() - experiment_start
+        experiment_elapsed = time.time() - experiment_start
+    except Exception as exc:
+        if is_shard_mode(args) and is_root_rank():
+            write_shard_failure_status(
+                layout,
+                unit_indices=selected_replicates,
+                started_at_s=experiment_start,
+                exc=exc,
+            )
+        raise
     exp_name = experiment_name
     estimated = None
     if is_root_rank():
