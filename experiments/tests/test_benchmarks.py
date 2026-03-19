@@ -50,12 +50,15 @@ def cpm_config(tmp_path):
 
 
 @pytest.fixture
-def cpm_mocks():
+def cpm_mocks(tmp_path):
     """Pre-built mock SimulationManager and DistanceMetric for injection."""
     mock_sim = MagicMock()
     mock_dist = MagicMock()
-    # Default: build_simulation_config returns a plausible config path
-    mock_sim.build_simulation_config.return_value = "/tmp/cpm_test/eval000001/config.json"
+    # Default: build_simulation_config returns a plausible config path with a real file
+    config_path = tmp_path / "cpm_test" / "eval000001" / "config.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}")
+    mock_sim.build_simulation_config.return_value = str(config_path)
     # Default: calculate_distance returns a positive float
     mock_dist.calculate_distance.return_value = 2.5
     return mock_sim, mock_dist
@@ -534,6 +537,21 @@ class TestCellularPotts:
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
         mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_simulate_restores_default_fp_state(self, cpm_config, cpm_mocks, monkeypatch):
+        import async_abc.benchmarks.cellular_potts as cellular_potts
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        mock_sim, mock_dist = cpm_mocks
+        restore_calls = []
+        monkeypatch.setattr(
+            cellular_potts,
+            "_restore_default_fp_state",
+            lambda: restore_calls.append(True),
+        )
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        assert restore_calls == [True]
 
     def test_simulate_returns_float(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts

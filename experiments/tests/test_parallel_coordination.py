@@ -161,7 +161,7 @@ class TestRunMethodDistributed:
         assert calls == []
 
     @pytest.mark.parametrize("method_name", ["pyabc_smc", "abc_smc_baseline"])
-    def test_unsafe_pyabc_benchmark_stays_rank_zero_even_when_mpi_requested(
+    def test_pyabc_mpi_request_still_runs_on_all_ranks_for_benchmarks_marked_unsafe(
         self, monkeypatch, tmp_output_dir, method_name
     ):
         calls = []
@@ -176,15 +176,11 @@ class TestRunMethodDistributed:
         benchmark = UnsafeBenchmark()
 
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
+        monkeypatch.setattr(runner_utils, "allgather", lambda value: [value])
         monkeypatch.setattr(
             runner_utils,
             "run_method",
             lambda *args, **kwargs: calls.append((args, kwargs)) or _sentinel_records(),
-        )
-        monkeypatch.setattr(
-            runner_utils,
-            "_wait_for_rank_zero_status",
-            lambda path: {"kind": "ok", "message": ""},
         )
 
         records = runner_utils.run_method_distributed(
@@ -198,7 +194,7 @@ class TestRunMethodDistributed:
         )
 
         assert records == []
-        assert calls == []
+        assert len(calls) == 1
 
     def test_distributed_import_error_is_re_raised_as_import_error(self, monkeypatch, tmp_output_dir):
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()

@@ -5,6 +5,7 @@ repo-local ``nastjapy_copy/.venv`` is used only as a fallback.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import logging
 import re
@@ -20,6 +21,33 @@ logger = logging.getLogger(__name__)
 _NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
+_FE_ALL_EXCEPT = 0x3D
+_FE_PYABC_MASK = 0x01 | 0x04 | 0x08
+
+try:
+    _LIBC = ctypes.CDLL(None)
+except OSError:
+    _LIBC = None
+
+
+def _restore_default_fp_state() -> None:
+    """Clear pending FP exceptions and disable traps enabled by native CPM code.
+
+    The NAStJA/nastjapy stack can leave floating-point traps enabled after a
+    simulation. SciPy/OpenBLAS intentionally executes IEEE edge-case checks
+    during pyABC's covariance updates, which then crash with SIGFPE unless the
+    default FP mask is restored before returning to Python code.
+    """
+    if _LIBC is None:
+        return
+
+    try:
+        if hasattr(_LIBC, "feclearexcept"):
+            _LIBC.feclearexcept(_FE_ALL_EXCEPT)
+        if hasattr(_LIBC, "fedisableexcept"):
+            _LIBC.fedisableexcept(_FE_PYABC_MASK)
+    except Exception:
+        logger.debug("Failed to restore default floating-point state", exc_info=True)
 
 
 def _resolve_repo_path(path_like: str | Path) -> Path:
@@ -305,12 +333,12 @@ class CellularPotts:
         computation.
     """
 
-    # pyABC parallel workers are not safe here because they need to serialize
-    # the bound benchmark object, which carries native NAStJA/nastjapy state.
-    PYABC_PARALLEL_SAFE = False
+    # The benchmark is safe for pyABC workers once the floating-point state is
+    # restored after each native simulation call.
+    PYABC_PARALLEL_SAFE = True
 
     # Keep the older flag for callers/tests that still check it directly.
-    MULTIPROCESSING_SAFE = False
+    MULTIPROCESSING_SAFE = True
 
     REQUIRED_KEYS = [
         "nastja_config_template",
@@ -441,33 +469,36 @@ class CellularPotts:
         param_list = ParameterList(parameters=param_entries)
 
         try:
-            config_path = self._sim_manager.build_simulation_config(
-                param_list, out_dir_name=sim_dir_name
-            )
-            _normalize_generated_config_paths(config_path)
-            self._sim_manager.run_simulation(config_path)
-        except Exception as exc:
-            logger.error(
-                "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
-            )
-            return float("nan")
-
-        sim_dir = str(Path(config_path).parent)
-        score = float("nan")
-        try:
-            distance_result = self._distance_metric.calculate_distance(sim_dir)
-            score = float(distance_result)
-        except Exception as exc:
-            logger.error(
-                "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
-            )
-        finally:
             try:
-                self._sim_manager.cleanup_simdir(sim_dir)
+                config_path = self._sim_manager.build_simulation_config(
+                    param_list, out_dir_name=sim_dir_name
+                )
+                _normalize_generated_config_paths(config_path)
+                self._sim_manager.run_simulation(config_path)
             except Exception as exc:
-                logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
+                logger.error(
+                    "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
+                )
+                return float("nan")
 
-        return score
+            sim_dir = str(Path(config_path).parent)
+            score = float("nan")
+            try:
+                distance_result = self._distance_metric.calculate_distance(sim_dir)
+                score = float(distance_result)
+            except Exception as exc:
+                logger.error(
+                    "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
+                )
+            finally:
+                try:
+                    self._sim_manager.cleanup_simdir(sim_dir)
+                except Exception as exc:
+                    logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
+
+            return score
+        finally:
+            _restore_default_fp_state()
 
     def close(self) -> None:
         """Best-effort teardown for CPM helper objects between experiment runs."""

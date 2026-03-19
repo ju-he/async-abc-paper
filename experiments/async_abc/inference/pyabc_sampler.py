@@ -33,8 +33,6 @@ def resolve_pyabc_parallel_backend(
     - parallel runs always use ``mpi`` for consistent comparisons
     - an explicit ``multicore`` request is overridden to ``mpi`` when
       ``n_workers > 1``
-    - benchmarks marked unsafe for parallel pyABC execution fall back to
-      single-process rank-zero execution
     """
     n_workers = max(1, int(inference_cfg.get("n_workers", 1)))
     configured = inference_cfg.get("parallel_backend")
@@ -54,17 +52,7 @@ def resolve_pyabc_parallel_backend(
         )
         return "mpi"
 
-    backend = configured
-    if backend == "mpi" and simulate_fn is not None and not _pyabc_parallel_safe(simulate_fn):
-        logger.warning(
-            "Forcing %s to single-process pyABC execution because %s is marked "
-            "unsafe for parallel pyABC workers.",
-            method_name,
-            simulate_fn.__self__.__class__.__name__,
-        )
-        return "multicore"
-
-    return backend
+    return configured
 
 
 def resolve_pyabc_worker_count(

@@ -809,7 +809,7 @@ class TestPyabcWrapperMpiBackend:
         )
         assert calls == [("mpi", True)]
 
-    def test_multicore_is_forced_to_single_process_for_unsafe_benchmark(
+    def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
     ):
         import pyabc
@@ -840,7 +840,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(1, "multicore", False)]
+        assert calls == [(4, "mpi", True)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
@@ -983,7 +983,7 @@ class TestAbcSmcBaselineMpiBackend:
         )
         assert calls == [("mpi", True)]
 
-    def test_multicore_is_forced_to_single_process_for_unsafe_benchmark(
+    def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
     ):
         import pyabc
@@ -1014,7 +1014,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(1, "multicore", False)]
+        assert calls == [(4, "mpi", True)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
