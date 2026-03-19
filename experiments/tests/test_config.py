@@ -10,7 +10,7 @@ from async_abc.io.schema import (
     TEST_MAX_WORKERS_ENV_VAR,
     get_test_mode_overrides,
 )
-from async_abc.utils.runner import compute_scaling_factor
+from async_abc.utils.runner import compute_corrected_estimate, compute_scaling_factor
 
 
 class TestLoadConfig:
@@ -216,6 +216,19 @@ class TestCPMConfigValidation:
         cfg = load_config(p)
         assert cfg["benchmark"]["name"] == "gaussian_mean"
 
+    def test_cpm_test_mode_uses_smaller_budget(self, tmp_path, minimal_config):
+        minimal_config["benchmark"] = dict(_CPM_BENCHMARK_FULL)
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["k"] = 100
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+
+        cfg = load_config(p, test_mode=True)
+
+        assert cfg["inference"]["test_mode"] is True
+        assert cfg["inference"]["max_simulations"] <= 12
+        assert cfg["inference"]["k"] <= 5
+
 
 class TestSensitivityConfig:
     def test_sensitivity_config_accepts_tol_init_multiplier(self):
@@ -226,6 +239,7 @@ class TestSensitivityConfig:
 class TestScalingFactor:
     def test_sbc_uses_clamped_test_trial_count(self, tmp_path, minimal_config):
         minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
         minimal_config["execution"]["n_replicates"] = 2
         minimal_config["methods"] = ["async_propulate_abc"]
         minimal_config["sbc"] = {"n_trials": 200, "coverage_levels": [0.5, 0.9]}
@@ -234,12 +248,13 @@ class TestScalingFactor:
 
         factor, extra, note = compute_scaling_factor(path)
 
-        assert factor == pytest.approx(600.0)
+        assert factor == pytest.approx(2400.0)
         assert extra == 0.0
         assert "200 SBC trials" in note
 
     def test_straggler_does_not_double_count_slowdown_levels(self, tmp_path, minimal_config):
         minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
         minimal_config["execution"]["n_replicates"] = 2
         minimal_config["straggler"] = {
             "slowdown_factor": [1, 5],
@@ -250,7 +265,7 @@ class TestScalingFactor:
 
         factor, extra, note = compute_scaling_factor(path)
 
-        assert factor == pytest.approx(6.0)
+        assert factor == pytest.approx(24.0)
         assert extra > 0.0
         assert "2 slowdown levels" in note
 
@@ -277,3 +292,27 @@ class TestScalingFactor:
         _, extra_2m, _ = compute_scaling_factor(path2)
 
         assert extra_2m == pytest.approx(2.0 * extra_1m)
+
+    def test_corrected_estimate_uses_method_specific_compute_scale(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
+        minimal_config["execution"]["n_replicates"] = 2
+        minimal_config["methods"] = ["async_propulate_abc", "abc_smc_baseline"]
+        path = tmp_path / "mixed_methods.json"
+        path.write_text(json.dumps(minimal_config))
+
+        raw_results = tmp_path / "raw_results.csv"
+        raw_results.write_text(
+            "\n".join(
+                [
+                    "method,wall_time",
+                    "async_propulate_abc,4.0",
+                    "abc_smc_baseline,6.0",
+                ]
+            )
+            + "\n"
+        )
+
+        estimated = compute_corrected_estimate(15.0, raw_results, path)
+
+        assert estimated == pytest.approx(142.0)

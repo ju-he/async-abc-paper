@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from async_abc.io.config import load_config
+from async_abc.io.config import is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
@@ -29,6 +29,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
+    test_mode = is_test_mode(cfg)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     t0 = time.time()
@@ -39,13 +40,13 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(elapsed))
-    if args.test and is_root_rank():
+    if test_mode and is_root_rank():
         estimated = compute_corrected_estimate(
             elapsed, output_dir.data / "raw_results.csv", args.config
         )
         logger.info("[%s] Estimated full run: ~%s", name, format_duration(estimated))
     if is_root_rank():
-        write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
+        write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode)
 
     if is_root_rank() and any(cfg.get("plots", {}).values()):
         from async_abc.plotting.reporters import plot_benchmark_diagnostics

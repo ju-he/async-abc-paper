@@ -21,6 +21,45 @@ from ..utils.seeding import make_seeds
 logger = logging.getLogger(__name__)
 
 
+def _propulate_test_generation_budget(test_cfg: Dict[str, Any]) -> int:
+    """Return the effective Propulate test-time generation budget.
+
+    In test mode, ``async_propulate_abc`` treats ``max_simulations`` as a total
+    cross-rank budget. The estimator must mirror that behavior instead of
+    assuming the raw config value is the per-rank sequential workload.
+    """
+    inference = test_cfg["inference"]
+    test_sims = int(inference["max_simulations"])
+    test_workers = max(1, int(inference["n_workers"]))
+    if not inference.get("test_mode"):
+        return test_sims
+    return max(1, math.ceil(test_sims / test_workers))
+
+
+def _method_compute_scale(method: str, cfg_full: Dict[str, Any], cfg_test: Dict[str, Any]) -> float:
+    """Return the test→full compute multiplier for one inference method."""
+    full_inf = cfg_full["inference"]
+    test_inf = cfg_test["inference"]
+
+    full_sims = float(full_inf["max_simulations"])
+    full_workers = max(1.0, float(full_inf["n_workers"]))
+    test_sims = float(test_inf["max_simulations"])
+    test_workers = max(1.0, float(test_inf["n_workers"]))
+
+    if method == "async_propulate_abc":
+        return full_sims / float(_propulate_test_generation_budget(cfg_test))
+    if method == "rejection_abc":
+        return full_sims / test_sims
+    return (full_sims / full_workers) / (test_sims / test_workers)
+
+
+def _base_method_scale(cfg_full: Dict[str, Any], cfg_test: Dict[str, Any]) -> float:
+    """Return the average per-method compute scale for a config."""
+    methods = list(cfg_full.get("methods", [])) or list(cfg_test.get("methods", [])) or [""]
+    scales = [_method_compute_scale(method, cfg_full, cfg_test) for method in methods]
+    return sum(scales) / len(scales)
+
+
 def format_duration(seconds: float) -> str:
     """Format a duration in seconds as a human-readable string."""
     s = int(seconds)
@@ -54,13 +93,9 @@ def compute_scaling_factor(
     full_sims = cfg["inference"]["max_simulations"]
     full_workers = cfg["inference"]["n_workers"]
     full_reps = cfg["execution"]["n_replicates"]
-    test_sims = test_cfg["inference"]["max_simulations"]
-    test_workers = test_cfg["inference"]["n_workers"]
     test_reps = test_cfg["execution"]["n_replicates"]
 
-    factor = (full_sims * full_reps / full_workers) / (
-        test_sims * test_reps / test_workers
-    )
+    factor = _base_method_scale(cfg, test_cfg) * (full_reps / test_reps)
     extra_seconds = 0.0
 
     if "sensitivity_grid" in cfg:
@@ -186,17 +221,16 @@ def compute_corrected_estimate(
 
         cfg_full = load_config(config_path, test_mode=False)
         cfg_test = load_config(config_path, test_mode=True)
-        full_sims = cfg_full["inference"]["max_simulations"]
-        full_workers = cfg_full["inference"]["n_workers"]
         full_reps = cfg_full["execution"]["n_replicates"]
-        test_sims = cfg_test["inference"]["max_simulations"]
-        test_workers = cfg_test["inference"]["n_workers"]
         test_reps = cfg_test["execution"]["n_replicates"]
+        replicate_scale = full_reps / test_reps
 
-        compute_scale = (full_sims / full_workers) / (test_sims / test_workers)
-        n_runs_full = n_runs_test * (full_reps / test_reps)
-
-        estimated = n_runs_full * (overhead_per_run + compute_per_run * compute_scale)
+        estimated = 0.0
+        for method, method_compute_test in method_max_wt.items():
+            method_scale = _method_compute_scale(method, cfg_full, cfg_test)
+            estimated += replicate_scale * (
+                overhead_per_run + method_compute_test * method_scale
+            )
         return estimated + (extra_seconds or extra)
     except Exception:
         return fallback

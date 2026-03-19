@@ -81,6 +81,45 @@ class TestRunnerCliSmoke:
         assert result.returncode == 0, result.stderr
         assert list((tmp_path / "sensitivity" / "data").glob("sensitivity_*.csv"))
 
+    def test_cellular_potts_runner_routes_scratch_output_under_run_dir(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("cellular_potts_runner.py")
+        captured = {}
+
+        cfg = test_helpers.make_fast_runner_config(
+            "cellular_potts.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 5, "k": 2},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+
+        monkeypatch.setattr(module, "configure_logging", lambda: None)
+        monkeypatch.setattr(module, "load_config", lambda path, test_mode=False: cfg)
+        monkeypatch.setattr(module, "is_root_rank", lambda: True)
+        monkeypatch.setattr(module, "compute_corrected_estimate", lambda *args, **kwargs: None)
+        monkeypatch.setattr(module, "write_timing_csv", lambda *args, **kwargs: None)
+        monkeypatch.setattr(module, "write_metadata", lambda *args, **kwargs: None)
+
+        def _fake_run_experiment(runtime_cfg, output_dir):
+            captured["cfg"] = runtime_cfg
+            captured["output_dir"] = output_dir
+            return []
+
+        monkeypatch.setattr(module, "run_experiment", _fake_run_experiment)
+
+        module.main(
+            [
+                "--config",
+                str(tmp_path / "cellular_potts.json"),
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+
+        assert captured["cfg"]["benchmark"]["output_dir"] == str(
+            tmp_path / "cellular_potts" / "cpm_sims"
+        )
+
 
 class TestGaussianMeanRunner:
     def test_creates_csv(self, gaussian_runner_artifact):

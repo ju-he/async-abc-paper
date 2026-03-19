@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import load_config
+from async_abc.io.config import is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
@@ -59,13 +59,14 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
+    test_mode = is_test_mode(cfg)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     bm = make_benchmark(cfg["benchmark"])
     scaling_cfg = cfg.get("scaling", {})
     worker_counts = scaling_cfg.get("worker_counts", [1])
 
-    if args.test:
+    if test_mode:
         worker_counts = scaling_cfg.get("test_worker_counts", [1])
     elif args.n_workers is not None:
         worker_counts = [args.n_workers]
@@ -108,7 +109,7 @@ def main(argv: list[str] | None = None) -> None:
                         "n_simulations": n_sims,
                         "wall_time_s": elapsed,
                         "throughput_sims_per_s": throughput,
-                        "test_mode": args.test,
+                        "test_mode": test_mode,
                     })
 
     experiment_elapsed = time.time() - experiment_start
@@ -116,7 +117,7 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
-    if args.test and is_root_rank():
+    if test_mode and is_root_rank():
         cfg_full = load_config(args.config, test_mode=False)
         full_sims = cfg_full["inference"]["max_simulations"]
         full_reps = cfg_full["execution"]["n_replicates"]
@@ -146,7 +147,7 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, args.test)
+    write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode)
 
     # Write throughput summary — append when extending, overwrite otherwise
     if throughput_rows:

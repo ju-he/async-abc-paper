@@ -10,6 +10,7 @@ behaves like a dict (``ind["mu"]`` etc.).  Internally, the benchmark's
 ``simulate(params, seed)`` is called with a per-evaluation seed derived from
 the run seed and the individual's generation counter.
 """
+import math
 import random
 import time
 from typing import Callable, Dict, List
@@ -46,6 +47,31 @@ def _free_propulate_comm(comm) -> None:
         comm.Free()
     except Exception:
         pass
+
+
+def _propulate_world_size() -> int:
+    """Return the active Propulate world size, or 1 when MPI is unavailable."""
+    try:
+        from mpi4py import MPI
+    except Exception:
+        return 1
+
+    try:
+        return max(1, int(MPI.COMM_WORLD.Get_size()))
+    except Exception:
+        return 1
+
+
+def _effective_generation_budget(max_sims: int, inference_cfg: Dict) -> int:
+    """Return the Propulate generation count for this run.
+
+    In normal runs we preserve the historical behavior. In test mode we treat
+    ``max_simulations`` as a total budget across ranks so MPI smoke tests do not
+    multiply the requested budget by the worker count.
+    """
+    if not inference_cfg.get("test_mode"):
+        return int(max_sims)
+    return max(1, math.ceil(int(max_sims) / _propulate_world_size()))
 
 
 def _ensure_propulate_imports() -> None:
@@ -126,6 +152,7 @@ def run_propulate_abc(
     _ensure_propulate_imports()
 
     max_sims = inference_cfg["max_simulations"]
+    generation_budget = _effective_generation_budget(max_sims, inference_cfg)
     k = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
@@ -178,14 +205,14 @@ def run_propulate_abc(
         loss_fn=loss_fn,
         propagator=propagator,
         rng=random.Random(seed + 1),  # +1 to keep RNG streams separate
-        generations=max_sims,
+        generations=generation_budget,
         checkpoint_path=checkpoint_dir,
         **propulator_kwargs,
     )
 
     propulate_completed = False
     try:
-        propulator.propulate(logging_interval=max_sims + 1, debug=0)
+        propulator.propulate(logging_interval=generation_budget + 1, debug=0)
         propulate_completed = True
     finally:
         if propulate_completed:

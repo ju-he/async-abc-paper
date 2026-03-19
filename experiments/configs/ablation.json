@@ -13,7 +13,7 @@
   "inference": {
     "max_simulations": 5000,
     "n_workers": 48,
-    "k": 50,
+    "k": 100,
     "tol_init": 5.0,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8
@@ -25,35 +25,34 @@
   "ablation_variants": [
     {
       "name": "full_model",
-      "k": 50,
+      "k": 100,
       "scheduler_type": "acceptance_rate",
       "perturbation_scale": 0.8
     },
     {
       "name": "small_archive",
-      "k": 5,
+      "k": 10,
       "scheduler_type": "acceptance_rate",
       "perturbation_scale": 0.8
     },
     {
       "name": "slow_decay",
-      "k": 50,
+      "k": 100,
       "scheduler_type": "geometric_decay",
       "decay_factor": 0.9999,
       "perturbation_scale": 0.8
     },
     {
       "name": "large_perturbation",
-      "k": 50,
+      "k": 100,
       "scheduler_type": "acceptance_rate",
       "perturbation_scale": 3.0
     },
     {
-      "name": "no_adaptive_tolerance",
-      "k": 50,
-      "scheduler_type": "geometric_decay",
-      "decay_factor": 0.9999,
-      "perturbation_scale": 0.8
+      "name": "fixed_perturbation",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 5.0
     },
     {
       "name": "no_archive_truncation",

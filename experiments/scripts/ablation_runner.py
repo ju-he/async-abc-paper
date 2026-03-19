@@ -12,7 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import load_config
+from async_abc.io.config import is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord, RecordWriter
 from async_abc.utils.logging_utils import configure_logging
@@ -30,6 +30,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
+    test_mode = is_test_mode(cfg)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     bm = make_benchmark(cfg["benchmark"])
@@ -73,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", exp_name, format_duration(experiment_elapsed))
-    if args.test and is_root_rank():
+    if test_mode and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = experiment_elapsed * factor + extra
         logger.info(
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", exp_name, experiment_elapsed, estimated, args.test)
+    write_timing_csv(output_dir.data / "timing.csv", exp_name, experiment_elapsed, estimated, test_mode)
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("ablation_comparison"):

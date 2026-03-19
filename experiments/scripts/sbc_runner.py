@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import load_config
+from async_abc.io.config import is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.plotting.export import save_figure
 from async_abc.utils.logging_utils import configure_logging
@@ -96,6 +96,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
+    test_mode = is_test_mode(cfg)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     sbc_cfg = cfg["sbc"]
@@ -156,7 +157,7 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(elapsed))
-    if args.test and is_root_rank():
+    if test_mode and is_root_rank():
         estimated = compute_corrected_estimate(
             elapsed, output_dir.data / "raw_results.csv", args.config
         )
@@ -164,7 +165,7 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
+    write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode)
 
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, coverage_levels)

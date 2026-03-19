@@ -16,7 +16,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.benchmarks import make_benchmark
-from async_abc.io.config import load_config
+from async_abc.io.config import is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import RecordWriter
 from async_abc.plotting.export import save_figure
@@ -100,6 +100,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test)
+    test_mode = is_test_mode(cfg)
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
 
     bm = make_benchmark(cfg["benchmark"])
@@ -124,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
             straggler_rank=straggler_rank,
             slowdown_factor=slowdown_factor,
             base_sleep_s=base_sleep_s,
-            test_mode=args.test,
+            test_mode=test_mode,
         )
         factor_records = []
         done = find_completed_combinations(csv_path, ["method", "replicate"]) if args.extend else set()
@@ -165,7 +166,7 @@ def main(argv: list[str] | None = None) -> None:
                             "n_simulations": len(records),
                             "wall_time_s": elapsed,
                             "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
-                            "test_mode": args.test,
+                            "test_mode": test_mode,
                         }
                     )
 
@@ -186,7 +187,7 @@ def main(argv: list[str] | None = None) -> None:
     estimated = None
     if is_root_rank():
         logger.info("[%s] Done in %s", name, format_duration(elapsed))
-    if args.test and is_root_rank():
+    if test_mode and is_root_rank():
         factor, extra, note = compute_scaling_factor(args.config)
         estimated = elapsed * factor + extra
         logger.info(
@@ -198,7 +199,7 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
-    write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, args.test)
+    write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode)
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("throughput_vs_slowdown"):

@@ -71,7 +71,22 @@ def _apply_test_mode(cfg: dict) -> dict:
             continue
         for key, val in overrides.items():
             cfg[section][key] = val
+    # Preserve an explicit test-mode marker for runners/inference wrappers.
+    cfg.setdefault("inference", {})["test_mode"] = True
+
+    # CPM runs are substantially heavier than the toy benchmarks. Shrink the
+    # test budget further so cluster smoke tests stay cheap even under MPI.
+    if cfg.get("benchmark", {}).get("name") == "cellular_potts":
+        inference = cfg.setdefault("inference", {})
+        inference["max_simulations"] = min(int(inference.get("max_simulations", 12)), 12)
+        if inference.get("k") is not None:
+            inference["k"] = min(int(inference["k"]), 5)
     return cfg
+
+
+def is_test_mode(cfg: dict) -> bool:
+    """Return whether a loaded config represents a test-mode run."""
+    return bool(cfg.get("inference", {}).get("test_mode", False))
 
 
 def load_config(path: Union[str, Path], test_mode: bool = False) -> dict:
