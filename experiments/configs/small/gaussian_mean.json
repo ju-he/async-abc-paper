@@ -11,7 +11,7 @@
   },
   "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
   "inference": {
-    "max_simulations": 5000,
+    "max_simulations": 500,
     "n_workers": 48,
     "k": 100,
     "tol_init": 5.0,

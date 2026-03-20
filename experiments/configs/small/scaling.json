@@ -13,7 +13,7 @@
   },
   "methods": ["async_propulate_abc", "abc_smc_baseline"],
   "inference": {
-    "max_simulations": 20000,
+    "max_simulations": 2000,
     "k": 100,
     "tol_init": 500000.0,
     "scheduler_type": "acceptance_rate",
