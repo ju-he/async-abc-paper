@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import matplotlib
@@ -24,7 +25,8 @@ from async_abc.io.paths import OutputDir
 from async_abc.plotting.export import save_figure
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.mpi import is_root_rank
+from async_abc.inference.method_registry import method_execution_mode_for_cfg
+from async_abc.utils.mpi import allgather, get_rank, get_world_size, is_root_rank
 from async_abc.utils.shard_finalizers import finalize_experiment_by_name
 from async_abc.utils.sharding import (
     ShardLayout,
@@ -206,8 +208,18 @@ def main(argv: list[str] | None = None) -> None:
     else:
         output_dir = OutputDir(args.output_dir, experiment_name).ensure()
 
+    # Classify methods into execution phases once (use base_benchmark for classification).
+    all_methods = cfg["methods"]
+    rank_parallel_methods = [
+        m for m in all_methods
+        if method_execution_mode_for_cfg(m, cfg["inference"], base_benchmark.simulate) == "rank_parallel"
+    ]
+    phase1_methods = [m for m in all_methods if m not in set(rank_parallel_methods)]
+    method_idx_map = {m: idx for idx, m in enumerate(all_methods)}
+
     t0 = time.time()
     try:
+        # ── Phase 1: all_ranks (and other) methods ──────────────────────────────
         for trial_idx in selected_trials:
             seed = seeds[trial_idx]
             rng = np.random.default_rng(seed)
@@ -216,15 +228,10 @@ def main(argv: list[str] | None = None) -> None:
                 for name in param_names
             }
             trial_benchmark = make_benchmark(
-                _true_param_config(
-                    benchmark_cfg,
-                    true_params=true_params,
-                    observed_seed=seed,
-                )
+                _true_param_config(benchmark_cfg, true_params=true_params, observed_seed=seed)
             )
-
-            for method_idx, method in enumerate(cfg["methods"]):
-                method_seed = int(seed + 1000 * (method_idx + 1))
+            for method in phase1_methods:
+                method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
                 records = run_method_distributed(
                     method,
                     trial_benchmark.simulate,
@@ -238,15 +245,80 @@ def main(argv: list[str] | None = None) -> None:
                     samples = _posterior_samples(records, param)
                     if samples.size == 0:
                         continue
-                    trial_records.append(
-                        {
-                            "trial": trial_idx,
-                            "method": method,
-                            "param": param,
-                            "true_value": true_params[param],
-                            "posterior_samples": samples,
-                        }
-                    )
+                    trial_records.append({
+                        "trial": trial_idx,
+                        "method": method,
+                        "param": param,
+                        "true_value": true_params[param],
+                        "posterior_samples": samples,
+                    })
+
+        # ── Barrier: drain MPI state before rank_parallel phase ──────────────────
+        if rank_parallel_methods:
+            allgather(None)
+
+        # ── Phase 2: rank_parallel methods (each rank handles its own subset) ────
+        if rank_parallel_methods:
+            my_rank = get_rank()
+            world_size = get_world_size()
+            my_trials = selected_trials[my_rank::world_size]
+
+            phase2_error = None
+            my_trial_records = []
+            for trial_idx in my_trials:
+                if phase2_error:
+                    break
+                seed = seeds[trial_idx]
+                rng = np.random.default_rng(seed)
+                true_params = {
+                    name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
+                    for name in param_names
+                }
+                trial_benchmark = make_benchmark(
+                    _true_param_config(benchmark_cfg, true_params=true_params, observed_seed=seed)
+                )
+                for method in rank_parallel_methods:
+                    method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
+                    try:
+                        records = run_method_distributed(
+                            method,
+                            trial_benchmark.simulate,
+                            trial_benchmark.limits,
+                            cfg["inference"],
+                            output_dir,
+                            replicate=trial_idx,
+                            seed=method_seed,
+                        )
+                        for param in param_names:
+                            samples = _posterior_samples(records, param)
+                            if samples.size == 0:
+                                continue
+                            my_trial_records.append({
+                                "trial": trial_idx,
+                                "method": method,
+                                "param": param,
+                                "true_value": true_params[param],
+                                "posterior_samples": samples,
+                            })
+                    except ImportError as exc:
+                        phase2_error = ("ImportError", str(exc))
+                        break
+                    except Exception:
+                        phase2_error = ("Exception", traceback.format_exc())
+                        break
+
+            all_errors = allgather(phase2_error)
+            first_error = next((e for e in all_errors if e is not None), None)
+            if first_error is not None:
+                kind, message = first_error
+                if kind == "ImportError":
+                    raise ImportError(message)
+                raise RuntimeError(message)
+
+            all_trial_records_by_rank = allgather(my_trial_records)
+            if is_root_rank():
+                for rank_records in all_trial_records_by_rank:
+                    trial_records.extend(rank_records)
 
         elapsed = time.time() - t0
     except Exception as exc:

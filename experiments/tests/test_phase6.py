@@ -235,7 +235,7 @@ class TestRunAll:
             ]
         )
 
-        timing_rows = list(csv.DictReader(open(tmp_path / "timing_summary.csv")))
+        timing_rows = list(csv.DictReader(open(tmp_path / "timing_summary_small_test.csv")))
         assert captured["small_mode"] is True
         assert captured["test_mode"] is True
         assert timing_rows[-1]["run_mode"] == "small_test"

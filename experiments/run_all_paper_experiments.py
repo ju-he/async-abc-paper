@@ -34,7 +34,7 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 from async_abc.io.config import compose_run_mode
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.mpi import allreduce_max, is_root_rank
-from async_abc.utils.runner import compute_scaling_factor, format_duration, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, format_duration, timing_summary_filename, write_timing_csv
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> None:
                     format_duration(est),
                 )
         if is_root_rank():
-            write_timing_csv(output_dir / "timing_summary.csv", name, elapsed, est, args.test, run_mode)
+            write_timing_csv(output_dir / timing_summary_filename(run_mode), name, elapsed, est, args.test, run_mode)
         if rc != 0:
             failures.append(name)
 

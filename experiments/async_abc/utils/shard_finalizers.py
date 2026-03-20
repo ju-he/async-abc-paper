@@ -26,7 +26,7 @@ from ..plotting.reporters import (
 from ..io.config import get_run_mode
 from ..plotting.export import save_figure
 from ..utils.metadata import write_metadata
-from ..utils.runner import write_timing_comparison_csv, write_timing_csv
+from ..utils.runner import timing_summary_filename, write_timing_comparison_csv, write_timing_csv
 from .sharding import (
     ShardLayout,
     detect_completed_replicates_in_output,
@@ -161,7 +161,12 @@ def _publish_temp_output(layout: ShardLayout, tmp_output_dir: OutputDir) -> None
 
 
 def _rewrite_root_timing_summary(output_root: Path) -> None:
-    """Rebuild the run-level timing summary from finalized per-experiment timing CSVs."""
+    """Rebuild the run-level timing summary from finalized per-experiment timing CSVs.
+
+    Rows are grouped by ``run_mode`` and written to separate files:
+    ``timing_summary_full.csv``, ``timing_summary_test.csv``,
+    ``timing_summary_small.csv``, and ``timing_summary_small_test.csv``.
+    """
     timing_rows: List[Dict[str, str]] = []
 
     for experiment_dir in sorted(output_root.iterdir()):
@@ -173,22 +178,26 @@ def _rewrite_root_timing_summary(output_root: Path) -> None:
         with open(timing_path, newline="") as f:
             timing_rows.extend(csv.DictReader(f))
 
-    summary_path = output_root / "timing_summary.csv"
     if not timing_rows:
-        if summary_path.exists():
-            summary_path.unlink()
         write_timing_comparison_csv(output_root)
         return
 
-    with open(summary_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=list(timing_rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(
-            sorted(
-                timing_rows,
-                key=lambda row: (row.get("timestamp", ""), row.get("experiment_name", "")),
+    rows_by_mode: Dict[str, List[Dict[str, str]]] = {}
+    for row in timing_rows:
+        mode = row.get("run_mode") or "full"
+        rows_by_mode.setdefault(mode, []).append(row)
+
+    for run_mode, rows in rows_by_mode.items():
+        summary_path = output_root / timing_summary_filename(run_mode)
+        with open(summary_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(
+                sorted(
+                    rows,
+                    key=lambda row: (row.get("timestamp", ""), row.get("experiment_name", "")),
+                )
             )
-        )
     write_timing_comparison_csv(output_root)
 
 

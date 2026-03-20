@@ -37,6 +37,7 @@ def _make_propulate_comm():
     try:
         if MPI.COMM_WORLD.Get_size() <= 1:
             return None
+        MPI.COMM_WORLD.Barrier()  # sync all ranks + drain stale messages before Dup
         return MPI.COMM_WORLD.Dup()
     except Exception:
         return None

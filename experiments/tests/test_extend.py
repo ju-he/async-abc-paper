@@ -253,4 +253,4 @@ class TestExtendOrchestrator:
             ]
         )
 
-        assert (tmp_path / "results" / "timing_summary.csv").exists()
+        assert (tmp_path / "results" / "timing_summary_test.csv").exists()

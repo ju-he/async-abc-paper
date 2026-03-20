@@ -29,9 +29,9 @@ METHOD_REGISTRY: Dict[str, Callable] = {
 
 METHOD_EXECUTION_MODE: Dict[str, str] = {
     "async_propulate_abc": "all_ranks",
-    "pyabc_smc": "rank_zero",
-    "rejection_abc": "rank_zero",
-    "abc_smc_baseline": "rank_zero",
+    "pyabc_smc": "rank_parallel",
+    "rejection_abc": "rank_parallel",
+    "abc_smc_baseline": "rank_parallel",
 }
 
 
@@ -112,7 +112,7 @@ def method_execution_mode_for_cfg(
     participate in the run.
     """
     mode = method_execution_mode(name)
-    if mode == "rank_zero" and name in _PYABC_METHODS:
+    if mode in ("rank_zero", "rank_parallel") and name in _PYABC_METHODS:
         if resolve_pyabc_parallel_backend(
             inference_cfg,
             method_name=name,

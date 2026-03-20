@@ -17,7 +17,7 @@ from ..inference.method_registry import method_execution_mode_for_cfg, run_metho
 from ..io.config import load_config
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, RecordWriter
-from .mpi import allgather, is_root_rank
+from .mpi import allgather, get_rank, get_world_size, is_root_rank
 from ..utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,19 @@ _COMPARISON_FIELDNAMES = [
     "test_timestamp",
     "full_timestamp",
 ]
+
+
+def timing_summary_filename(run_mode: str = "full") -> str:
+    """Return the root-level timing summary filename for *run_mode*.
+
+    The four possible run modes and their filenames are:
+
+    * ``full``       → ``timing_summary_full.csv``
+    * ``test``       → ``timing_summary_test.csv``
+    * ``small``      → ``timing_summary_small.csv``
+    * ``small_test`` → ``timing_summary_small_test.csv``
+    """
+    return f"timing_summary_{run_mode}.csv"
 
 
 def _parse_float(val: Optional[str]) -> Optional[float]:
@@ -551,8 +564,21 @@ def run_experiment(
     writer = RecordWriter(csv_path)
     all_records: List[ParticleRecord] = []
 
+    # Classify methods into execution phases.
+    phase1_methods = [
+        m for m in methods
+        if method_execution_mode_for_cfg(m, inference_cfg, benchmark.simulate) == "all_ranks"
+    ]
+    phase2_methods = [
+        m for m in methods
+        if method_execution_mode_for_cfg(m, inference_cfg, benchmark.simulate) == "rank_parallel"
+    ]
+    # Any remaining methods (rank_zero or unknown) fall back to phase 1 behavior.
+    other_methods = [m for m in methods if m not in phase1_methods and m not in phase2_methods]
+
     try:
-        for method in methods:
+        # ── Phase 1: all_ranks methods (all ranks cooperate per replicate) ──────
+        for method in phase1_methods + other_methods:
             for replicate in selected_replicates:
                 seed = seeds[replicate]
                 if (method, str(replicate)) in done:
@@ -599,6 +625,56 @@ def run_experiment(
                         records = [record_transform(record) for record in records]
                     writer.write(records)
                     all_records.extend(records)
+
+        # ── Barrier: drain MPI state before rank_parallel phase ──────────────
+        if phase2_methods:
+            allgather(None)
+
+        # ── Phase 2: rank_parallel methods (each rank handles its own subset) ──
+        if phase2_methods:
+            my_rank = get_rank()
+            world_size = get_world_size()
+            my_replicates = selected_replicates[my_rank::world_size]
+
+            phase2_error: Optional[Tuple[str, str]] = None
+            my_records: List[ParticleRecord] = []
+
+            for method in phase2_methods:
+                if phase2_error:
+                    break
+                for replicate in my_replicates:
+                    seed = seeds[replicate]
+                    if (method, str(replicate)) in done:
+                        continue
+                    try:
+                        records = run_method_distributed(
+                            method, benchmark.simulate, benchmark.limits,
+                            inference_cfg, output_dir, replicate, seed,
+                        )
+                        if record_transform is not None:
+                            records = [record_transform(r) for r in records]
+                        my_records.extend(records)
+                    except ImportError as exc:
+                        phase2_error = ("ImportError", str(exc))
+                        break
+                    except Exception:
+                        phase2_error = ("Exception", traceback.format_exc())
+                        break
+
+            all_errors = allgather(phase2_error)
+            first_error = next((e for e in all_errors if e is not None), None)
+            if first_error is not None:
+                kind, message = first_error
+                if kind == "ImportError":
+                    raise ImportError(message)
+                raise RuntimeError(message)
+
+            all_phase2_records = allgather(my_records)
+            if is_root_rank():
+                flat = [r for records in all_phase2_records for r in records]
+                writer.write(flat)
+                all_records.extend(flat)
+
     finally:
         if created_benchmark:
             closer = getattr(benchmark, "close", None)
@@ -623,6 +699,13 @@ def run_method_distributed(
     """Execute one inference method with rank-aware coordination."""
     execution_mode = method_execution_mode_for_cfg(name, inference_cfg, simulate_fn)
     root_rank = is_root_rank()
+
+    if execution_mode == "rank_parallel":
+        # No MPI coordination: each rank runs the method independently on its
+        # assigned replicate.  The caller (Phase 2 of run_experiment /
+        # sbc_runner) is responsible for distributing replicates across ranks
+        # and gathering results afterwards.
+        return run_method(name, simulate_fn, limits, inference_cfg, output_dir, replicate, seed)
 
     if execution_mode == "rank_zero":
         status_path = _rank_zero_status_path(output_dir, name, replicate, seed)
