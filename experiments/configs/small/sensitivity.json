@@ -20,7 +20,7 @@
     "perturbation_scale": 0.8
   },
   "execution": {
-    "n_replicates": 2,
+    "n_replicates": 1,
     "base_seed": 0
   },
   "sensitivity_grid": {

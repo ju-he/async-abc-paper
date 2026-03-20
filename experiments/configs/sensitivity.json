@@ -20,14 +20,14 @@
     "perturbation_scale": 0.8
   },
   "execution": {
-    "n_replicates": 5,
+    "n_replicates": 3,
     "base_seed": 0
   },
   "sensitivity_grid": {
     "k": [50, 100, 200],
     "perturbation_scale": [0.4, 0.8, 1.5],
     "scheduler_type": ["acceptance_rate", "quantile", "geometric_decay"],
-    "tol_init_multiplier": [0.5, 1.0, 2.0, 5.0]
+    "tol_init_multiplier": [0.5, 1.0, 5.0]
   },
   "plots": {
     "sensitivity_heatmap": true
