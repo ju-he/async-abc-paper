@@ -268,8 +268,16 @@ def run_propulate_abc(
         if propulate_completed:
             _free_propulate_comm(propulate_comm)
 
-    # Convert population to ParticleRecord list, sorted by generation
-    population = sorted(propulator.population, key=lambda ind: ind.generation)
+    # Sort by completion time so the record order reflects the observable
+    # event stream rather than generation assignment alone.
+    population = sorted(
+        propulator.population,
+        key=lambda ind: (
+            float(ind.evaltime) if hasattr(ind, "evaltime") and ind.evaltime is not None else float("inf"),
+            int(ind.generation) if getattr(ind, "generation", None) is not None else 0,
+            int(getattr(ind, "rank", 0) or 0),
+        ),
+    )
     records: List[ParticleRecord] = []
     for step, ind in enumerate(population, start=1):
         params = _individual_params(ind, limits)
@@ -300,6 +308,9 @@ def run_propulate_abc(
             sim_start_time=sim_start_time,
             sim_end_time=sim_end_time,
             generation=generation,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=step,
         ))
 
     if progress is not None:

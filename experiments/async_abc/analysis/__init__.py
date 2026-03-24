@@ -5,6 +5,7 @@ from importlib import import_module
 _EXPORTS = {
     "barrier_overhead_fraction": (".barrier", "barrier_overhead_fraction"),
     "generation_spans": (".barrier", "generation_spans"),
+    "posterior_quality_curve": (".convergence", "posterior_quality_curve"),
     "time_to_threshold": (".convergence", "time_to_threshold"),
     "wasserstein_at_checkpoints": (".convergence", "wasserstein_at_checkpoints"),
     "compute_ess": (".ess", "compute_ess"),
@@ -24,6 +25,7 @@ __all__ = [
     "ess_over_time",
     "generation_spans",
     "loss_over_steps",
+    "posterior_quality_curve",
     "sbc_ranks",
     "time_to_threshold",
     "tolerance_over_wall_time",

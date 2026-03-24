@@ -14,7 +14,7 @@ import matplotlib
 matplotlib.use("Agg")  # non-interactive backend
 from matplotlib.figure import Figure
 
-from async_abc.analysis import tolerance_over_wall_time, wasserstein_at_checkpoints
+from async_abc.analysis import posterior_quality_curve, tolerance_over_wall_time
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord
 import async_abc.plotting.export as export_mod
@@ -22,19 +22,26 @@ from async_abc.plotting.export import save_figure, get_git_hash
 from async_abc.plotting.common import (
     corner_plot,
     gantt_plot,
+    posterior_quality_plot,
     posterior_plot,
     quality_vs_time_plot,
     sensitivity_heatmap,
     scaling_plot,
+    threshold_summary_plot,
     tolerance_trajectory_plot,
     archive_evolution_plot,
     compute_wasserstein,
 )
 from async_abc.plotting.reporters import (
     _parse_variant_stem,
+    plot_attempts_to_target_summary,
     plot_corner,
+    plot_quality_vs_attempt_budget,
+    plot_quality_vs_posterior_samples,
     plot_quality_vs_time,
+    plot_quality_vs_wall_time_diagnostic,
     plot_sensitivity_summary,
+    plot_time_to_target_summary,
     plot_tolerance_trajectory,
     plot_worker_gantt,
 )
@@ -223,8 +230,27 @@ class TestPhase3PlotFunctions:
         assert isinstance(fig, Figure)
 
     def test_quality_vs_time_plot_returns_figure(self, sample_records):
-        df = wasserstein_at_checkpoints(sample_records, {"mu": 0.0}, [10, 50])
+        df = posterior_quality_curve(sample_records, {"mu": 0.0}, axis_kind="wall_time", archive_size=20)
         fig = quality_vs_time_plot(df)
+        assert isinstance(fig, Figure)
+
+    def test_posterior_quality_plot_supports_attempt_budget(self, sample_records):
+        df = posterior_quality_curve(sample_records, {"mu": 0.0}, axis_kind="attempt_budget", archive_size=20)
+        fig = posterior_quality_plot(df, axis_kind="attempt_budget")
+        assert isinstance(fig, Figure)
+
+    def test_posterior_quality_plot_handles_generation_snapshot_duplicates(self, abc_smc_records):
+        df = posterior_quality_curve(abc_smc_records, {"mu": 0.0}, axis_kind="wall_time")
+        fig = posterior_quality_plot(df, axis_kind="wall_time")
+        assert isinstance(fig, Figure)
+
+    def test_threshold_summary_plot_returns_figure(self, sample_records):
+        summary_df = (
+            posterior_quality_curve(sample_records, {"mu": 0.0}, axis_kind="wall_time", archive_size=20)
+            .head(2)
+            .rename(columns={"axis_value": "axis_value_to_threshold"})
+        )
+        fig = threshold_summary_plot(summary_df, axis_kind="wall_time")
         assert isinstance(fig, Figure)
 
     def test_corner_plot_returns_figure(self):
@@ -248,11 +274,42 @@ class TestPhase3Reporters:
 
     def test_plot_quality_vs_time_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
-        plot_quality_vs_time(sample_records, {"mu": 0.0}, [10, 50], output_dir)
+        plot_quality_vs_time(sample_records, {"mu": 0.0}, [10, 50], output_dir, archive_size=20)
         assert (output_dir.plots / "quality_vs_time.pdf").exists()
         assert (output_dir.plots / "quality_vs_time.png").exists()
         assert (output_dir.plots / "quality_vs_time_data.csv").exists()
         assert (output_dir.plots / "quality_vs_time_meta.json").exists()
+        assert (output_dir.plots / "quality_vs_wall_time_diagnostic.pdf").exists()
+        meta = json.loads((output_dir.plots / "quality_vs_time_meta.json").read_text())
+        assert meta["deprecated_alias_for"] == "quality_vs_wall_time_diagnostic"
+
+    def test_plot_quality_vs_wall_time_diagnostic_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_quality_vs_wall_time_diagnostic(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
+        assert (output_dir.plots / "quality_vs_wall_time_diagnostic.pdf").exists()
+        meta = json.loads((output_dir.plots / "quality_vs_wall_time_diagnostic_meta.json").read_text())
+        assert meta["plot_name"] == "quality_vs_wall_time_diagnostic"
+        assert meta["axis_kind"] == "wall_time"
+
+    def test_plot_quality_vs_posterior_samples_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_quality_vs_posterior_samples(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
+        assert (output_dir.plots / "quality_vs_posterior_samples.pdf").exists()
+
+    def test_plot_quality_vs_attempt_budget_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_quality_vs_attempt_budget(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
+        assert (output_dir.plots / "quality_vs_attempt_budget.pdf").exists()
+
+    def test_plot_time_to_target_summary_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_time_to_target_summary(sample_records, {"mu": 0.0}, 10.0, output_dir, archive_size=20)
+        assert (output_dir.plots / "time_to_target_summary.pdf").exists()
+
+    def test_plot_attempts_to_target_summary_exports_files(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_attempts_to_target_summary(sample_records, {"mu": 0.0}, 10.0, output_dir, archive_size=20)
+        assert (output_dir.plots / "attempts_to_target_summary.pdf").exists()
 
     def test_plot_corner_exports_files(self, tmp_path):
         output_dir = OutputDir(tmp_path, "plots").ensure()

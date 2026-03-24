@@ -27,6 +27,9 @@ def records_to_frame(records: Iterable[ParticleRecord] | pd.DataFrame) -> pd.Dat
             "sim_start_time": record.sim_start_time,
             "sim_end_time": record.sim_end_time,
             "generation": record.generation,
+            "record_kind": record.record_kind,
+            "time_semantics": record.time_semantics,
+            "attempt_count": record.attempt_count,
         }
         row.update(record.params)
         rows.append(row)

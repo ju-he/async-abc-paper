@@ -34,6 +34,14 @@ class ParticleRecord:
         Effective tolerance at the time of proposal (None during prior phase).
     wall_time:
         Wall-clock seconds elapsed since the start of the run.
+    record_kind:
+        Semantic type of this row, e.g. ``"simulation_attempt"`` or
+        ``"population_particle"``.
+    time_semantics:
+        Interpretation of ``wall_time``, e.g. ``"event_end"`` or
+        ``"generation_end"``.
+    attempt_count:
+        Cumulative simulator-attempt budget observed at this record.
     """
 
     method: str
@@ -49,6 +57,9 @@ class ParticleRecord:
     sim_start_time: Optional[float] = None
     sim_end_time: Optional[float] = None
     generation: Optional[int] = None
+    record_kind: Optional[str] = None
+    time_semantics: Optional[str] = None
+    attempt_count: Optional[int] = None
 
     def to_csv_row(self, param_keys: List[str]) -> Dict[str, Any]:
         row: Dict[str, Any] = {
@@ -67,6 +78,9 @@ class ParticleRecord:
         row["sim_start_time"] = "" if self.sim_start_time is None else self.sim_start_time
         row["sim_end_time"] = "" if self.sim_end_time is None else self.sim_end_time
         row["generation"] = "" if self.generation is None else self.generation
+        row["record_kind"] = "" if self.record_kind is None else self.record_kind
+        row["time_semantics"] = "" if self.time_semantics is None else self.time_semantics
+        row["attempt_count"] = "" if self.attempt_count is None else self.attempt_count
         return row
 
     @classmethod
@@ -90,6 +104,9 @@ class ParticleRecord:
             sim_start_time=_parse_optional_float(row.get("sim_start_time")),
             sim_end_time=_parse_optional_float(row.get("sim_end_time")),
             generation=_parse_optional_int(row.get("generation")),
+            record_kind=_parse_optional_str(row.get("record_kind")),
+            time_semantics=_parse_optional_str(row.get("time_semantics")),
+            attempt_count=_parse_optional_int(row.get("attempt_count")),
         )
 
 
@@ -104,6 +121,9 @@ _SUFFIX_COLS = [
     "sim_start_time",
     "sim_end_time",
     "generation",
+    "record_kind",
+    "time_semantics",
+    "attempt_count",
 ]
 
 

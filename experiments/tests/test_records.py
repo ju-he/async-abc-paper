@@ -55,6 +55,9 @@ class TestParticleRecord:
         assert r.sim_start_time is None
         assert r.sim_end_time is None
         assert r.generation is None
+        assert r.record_kind is None
+        assert r.time_semantics is None
+        assert r.attempt_count is None
 
 
 class TestRecordWriter:
@@ -145,6 +148,9 @@ class TestRecordWriter:
             sim_start_time=1.2,
             sim_end_time=2.5,
             generation=2,
+            record_kind="population_particle",
+            time_semantics="generation_end",
+            attempt_count=99,
         )
         writer = RecordWriter(path)
         writer.write([rec])
@@ -156,6 +162,9 @@ class TestRecordWriter:
         assert loaded.sim_end_time == pytest.approx(2.5)
         assert loaded.generation == 2
         assert loaded.wall_time == pytest.approx(rec.wall_time)
+        assert loaded.record_kind == "population_particle"
+        assert loaded.time_semantics == "generation_end"
+        assert loaded.attempt_count == 99
 
     def test_csv_roundtrip_with_none_worker_events(self, tmp_output_dir):
         tmp_output_dir.mkdir(parents=True)
@@ -175,3 +184,6 @@ class TestRecordWriter:
         assert loaded.sim_start_time is None
         assert loaded.sim_end_time is None
         assert loaded.generation is None
+        assert loaded.record_kind is None
+        assert loaded.time_semantics is None
+        assert loaded.attempt_count is None

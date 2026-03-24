@@ -521,10 +521,14 @@ class TestRunPropulateAbc:
         assert "mu" in record.params
         assert math.isfinite(record.loss) and record.loss >= 0.0
         assert record.wall_time >= 0.0
+        assert record.record_kind == "simulation_attempt"
+        assert record.time_semantics == "event_end"
+        assert record.attempt_count is not None and record.attempt_count >= 1
 
     def test_records_have_sim_end_time(self, propulate_records_default):
         assert all(record.sim_end_time is not None for record in propulate_records_default)
         assert all(record.wall_time == pytest.approx(record.sim_end_time) for record in propulate_records_default)
+        assert [record.attempt_count for record in propulate_records_default] == [record.step for record in propulate_records_default]
 
     def test_sim_end_time_is_none_when_evaltime_absent(self, propulate_records_no_evaltime):
         assert all(record.sim_end_time is None for record in propulate_records_no_evaltime)
@@ -712,6 +716,9 @@ class TestPyabcWrapperFixes:
     def test_epsilon_extraction_robust(self, pyabc_records_default):
         assert all(record.tolerance is not None for record in pyabc_records_default)
 
+    def test_wall_time_uses_observable_generation_snapshots(self, pyabc_records_default):
+        assert len({round(record.wall_time, 8) for record in pyabc_records_default}) > 1
+
     def test_all_records_complete_schema(self, pyabc_records_default):
         for record in pyabc_records_default:
             assert record.method == "pyabc_smc"
@@ -720,6 +727,10 @@ class TestPyabcWrapperFixes:
             assert record.tolerance is not None and record.tolerance >= 0.0
             assert record.wall_time >= 0.0
             assert "mu" in record.params
+            assert record.record_kind == "population_particle"
+            assert record.time_semantics == "generation_end"
+            assert record.generation is not None
+            assert record.attempt_count is not None and record.attempt_count >= 0
 
 
 class TestRejectionAbc:
@@ -743,11 +754,16 @@ class TestRejectionAbc:
 
     def test_tolerance_field_equals_tol_init(self, rejection_records_tol3):
         assert all(record.tolerance == pytest.approx(3.0) for record in rejection_records_tol3)
+        assert all(record.record_kind == "accepted_particle" for record in rejection_records_tol3)
+        assert all(record.time_semantics == "event_end" for record in rejection_records_tol3)
 
     def test_steps_monotone(self, rejection_records_default):
         steps = [record.step for record in rejection_records_default]
         assert steps == sorted(steps)
         assert steps[0] >= 1
+        attempts = [record.attempt_count for record in rejection_records_default]
+        assert attempts == sorted(attempts)
+        assert all(attempt >= step for attempt, step in zip(attempts, steps))
 
     def test_returns_at_most_k_particles(self, rejection_records_small_k):
         assert len(rejection_records_small_k) <= 3

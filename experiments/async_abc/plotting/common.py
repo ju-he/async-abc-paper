@@ -331,28 +331,100 @@ def gantt_plot(records, ax=None):
 
 
 def quality_vs_time_plot(quality_df: pd.DataFrame, ax=None):
-    """Line plot of Wasserstein quality versus wall-clock time."""
+    """Deprecated wrapper for the wall-time posterior quality diagnostic."""
+    return posterior_quality_plot(quality_df, axis_kind="wall_time", ax=ax)
+
+
+def posterior_quality_plot(quality_df: pd.DataFrame, axis_kind: str, ax=None):
+    """Posterior quality curve for a configurable x-axis."""
     created_fig = ax is None
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 4))
     else:
         fig = ax.figure
 
+    title = {
+        "wall_time": "Posterior quality vs. wall-clock time",
+        "posterior_samples": "Posterior quality vs. posterior samples",
+        "attempt_budget": "Posterior quality vs. simulation attempts",
+    }[axis_kind]
+    xlabel = {
+        "wall_time": "wall-clock time",
+        "posterior_samples": "posterior samples",
+        "attempt_budget": "simulation attempts",
+    }[axis_kind]
+
     if quality_df.empty:
-        ax.set_title("Posterior quality vs. wall-clock time")
-        ax.set_xlabel("wall-clock time")
+        ax.set_title(title)
+        ax.set_xlabel(xlabel)
         ax.set_ylabel("wasserstein")
         return fig
 
     for (method, replicate), group in quality_df.groupby(["method", "replicate"], sort=True):
-        group = group.sort_values("wall_time")
+        group = group.sort_values("axis_value")
         label = method if quality_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
-        ax.plot(group["wall_time"], group["wasserstein"], marker="o", label=label)
+        x = group["axis_value"].to_numpy(dtype=float)
+        y = group["wasserstein"].to_numpy(dtype=float)
+        semantics = group["time_semantics"].dropna().unique().tolist()
+        is_generation_snapshot = semantics and all(value == "generation_end" for value in semantics)
+        if not is_generation_snapshot and len(group) > 1:
+            ax.step(x, y, where="post", linewidth=1.2, alpha=0.7, label=label)
+            ax.scatter(x, y, s=18, marker="o")
+        else:
+            ax.scatter(x, y, s=24, marker="s", label=label)
 
-    ax.set_xlabel("wall-clock time")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("wasserstein")
-    ax.set_title("Posterior quality vs. wall-clock time")
+    ax.set_title(title)
     ax.legend(frameon=False, fontsize=8)
+    if created_fig:
+        fig.tight_layout()
+    return fig
+
+
+def threshold_summary_plot(summary_df: pd.DataFrame, axis_kind: str, ax=None):
+    """Point summary of time/budget required to reach a target posterior quality."""
+    created_fig = ax is None
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.figure
+
+    xlabel = {
+        "wall_time": "wall-clock time to target",
+        "posterior_samples": "posterior samples to target",
+        "attempt_budget": "simulation attempts to target",
+    }[axis_kind]
+    title = {
+        "wall_time": "Wall-clock time to target posterior quality",
+        "posterior_samples": "Posterior samples to target quality",
+        "attempt_budget": "Simulation attempts to target posterior quality",
+    }[axis_kind]
+
+    if summary_df.empty:
+        ax.set_title(title)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("method")
+        return fig
+
+    methods = list(dict.fromkeys(summary_df["method"].tolist()))
+    y_positions = {method: idx for idx, method in enumerate(methods)}
+    for method, group in summary_df.groupby("method", sort=False):
+        valid = group.loc[group["axis_value_to_threshold"].notna()].copy()
+        if valid.empty:
+            continue
+        x = valid["axis_value_to_threshold"].to_numpy(dtype=float)
+        y = np.full(len(valid), y_positions[method], dtype=float)
+        ax.scatter(x, y, s=28, alpha=0.85, label=method)
+        ax.scatter([float(np.mean(x))], [y_positions[method]], s=72, marker="D", edgecolor="black", linewidth=0.7)
+
+    ax.set_yticks(list(y_positions.values()))
+    ax.set_yticklabels(list(y_positions.keys()))
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("method")
+    ax.set_title(title)
+    if len(methods) <= 8:
+        ax.legend(frameon=False, fontsize=8)
     if created_fig:
         fig.tight_layout()
     return fig

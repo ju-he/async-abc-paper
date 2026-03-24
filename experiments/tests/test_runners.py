@@ -147,6 +147,8 @@ class TestGaussianMeanRunner:
     def test_creates_phase3_plots(self, gaussian_runner_artifact):
         plots_dir = gaussian_runner_artifact["root"] / "gaussian_mean" / "plots"
         assert (plots_dir / "quality_vs_time.pdf").exists()
+        assert (plots_dir / "quality_vs_wall_time_diagnostic.pdf").exists()
+        assert (plots_dir / "time_to_target_summary.pdf").exists()
         assert (plots_dir / "tolerance_trajectory.pdf").exists()
         assert (plots_dir / "corner.pdf").exists()
 

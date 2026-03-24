@@ -14,6 +14,7 @@ from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
     build_pyabc_sampler,
     resolve_pyabc_parallel_backend,
@@ -88,29 +89,30 @@ def _run_abc_smc_baseline_with_sampler(
         max_nr_populations=n_generations,
     )
 
-    # Robust epsilon extraction: key by generation index
-    all_pops = history.get_all_populations()
-    all_pops = all_pops[all_pops["t"] >= 0].copy()
-    eps_series = all_pops.set_index("t")["epsilon"]
-    end_time_series = all_pops.set_index("t")["population_end_time"]
+    observable = history_observable_frame(history, run_start)
 
     records: List[ParticleRecord] = []
     step = 0
+    fallback_attempt_count = 0
     for t in range(history.max_t + 1):
         df, w = history.get_distribution(m=0, t=t)
-        eps_t = float(eps_series.loc[t]) if t in eps_series.index else float("inf")
-        generation_end_dt = end_time_series.loc[t] if t in end_time_series.index else None
-        previous_end_dt = run_start if t == 0 else end_time_series.loc[t - 1]
-        generation_start = (
-            (previous_end_dt - run_start).total_seconds()
-            if previous_end_dt is not None
-            else None
+        row = observable.loc[t] if t in observable.index else None
+        eps_t = float(row["epsilon"]) if row is not None else float("inf")
+        generation_end = None if row is None else row["generation_end"]
+        generation_start = 0.0 if generation_end is not None and t == 0 else None
+        if t > 0:
+            generation_start = observable.loc[t - 1, "generation_end"]
+        raw_attempt_count = None if row is None else row["attempt_count"]
+        try:
+            candidate_attempt_count = int(raw_attempt_count)
+        except (TypeError, ValueError):
+            candidate_attempt_count = None
+        attempt_count = (
+            candidate_attempt_count
+            if candidate_attempt_count is not None and candidate_attempt_count > 0
+            else fallback_attempt_count + len(df)
         )
-        generation_end = (
-            (generation_end_dt - run_start).total_seconds()
-            if generation_end_dt is not None
-            else None
-        )
+        fallback_attempt_count = max(fallback_attempt_count + len(df), attempt_count)
         for pos, (idx, row) in enumerate(df.iterrows()):
             step += 1
             params = {col: float(row[col]) for col in limits}
@@ -130,6 +132,9 @@ def _run_abc_smc_baseline_with_sampler(
                 sim_start_time=generation_start,
                 sim_end_time=generation_end,
                 generation=t,
+                record_kind="population_particle",
+                time_semantics="generation_end",
+                attempt_count=attempt_count,
             ))
 
     if progress is not None:

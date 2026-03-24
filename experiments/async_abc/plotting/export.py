@@ -90,6 +90,7 @@ def save_figure(
     fig: matplotlib.figure.Figure,
     path_stem: Union[str, Path],
     data: Optional[Dict[str, List]] = None,
+    metadata: Optional[Dict[str, object]] = None,
 ) -> Dict[str, Path]:
     """Save *fig* to ``<path_stem>.pdf``, ``<path_stem>.png``, and metadata.
 
@@ -102,6 +103,8 @@ def save_figure(
     data:
         Optional dict mapping column names to lists of values, written as
         ``<path_stem>_data.csv``.  Pass ``None`` to skip.
+    metadata:
+        Optional extra metadata to merge into ``<path_stem>_meta.json``.
 
     Returns
     -------
@@ -143,6 +146,8 @@ def save_figure(
         "pdf": str(pdf_path),
         "png": str(png_path) if png_written else None,
     }
+    if metadata:
+        meta.update(metadata)
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=2)
     out["meta"] = meta_path

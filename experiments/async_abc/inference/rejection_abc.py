@@ -53,7 +53,7 @@ def run_rejection_abc(
     lows  = np.array([limits[p][0] for p in param_names])
     highs = np.array([limits[p][1] for p in param_names])
 
-    accepted = []  # list of (params, loss, wall_time)
+    accepted = []  # list of (params, loss, wall_time, attempt_count)
     sim_count = 0
     run_start = time.time()
 
@@ -64,7 +64,7 @@ def run_rejection_abc(
         sim_seed = int(rng.integers(0, 2**31))
         loss     = float(simulate_fn(params, seed=sim_seed))
         if loss <= tol_init:
-            accepted.append((params, loss, time.time() - run_start))
+            accepted.append((params, loss, time.time() - run_start, sim_count))
         if progress is not None:
             progress.update(
                 simulations=sim_count,
@@ -94,6 +94,9 @@ def run_rejection_abc(
             weight=w,
             tolerance=float(tol_init),
             wall_time=t,
+            record_kind="accepted_particle",
+            time_semantics="event_end",
+            attempt_count=attempt_count,
         )
-        for i, (p, d, t) in enumerate(accepted)
+        for i, (p, d, t, attempt_count) in enumerate(accepted)
     ]

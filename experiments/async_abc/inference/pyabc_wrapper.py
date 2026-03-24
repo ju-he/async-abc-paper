@@ -9,6 +9,7 @@ from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
     build_pyabc_sampler,
     resolve_pyabc_parallel_backend,
@@ -87,16 +88,31 @@ def _run_pyabc_smc_with_sampler(
         max_total_nr_simulations=max_sims,
     )
 
-    # Robust epsilon extraction: key by generation index, not row position
-    all_pops = history.get_all_populations()
-    eps_series = all_pops.set_index("t")["epsilon"]
+    observable = history_observable_frame(history, run_start)
 
     # Collect records from the pyABC history
     records: List[ParticleRecord] = []
     step = 0
+    fallback_attempt_count = 0
     for t in range(history.max_t + 1):
         df, w = history.get_distribution(m=0, t=t)
-        eps_t = float(eps_series.loc[t]) if t in eps_series.index else float("inf")
+        row = observable.loc[t] if t in observable.index else None
+        eps_t = float(row["epsilon"]) if row is not None else float("inf")
+        generation_end = None if row is None else row["generation_end"]
+        previous_end = 0.0 if generation_end is not None and t == 0 else None
+        if t > 0 and (t - 1) in observable.index:
+            previous_end = observable.loc[t - 1, "generation_end"]
+        raw_attempt_count = None if row is None else row["attempt_count"]
+        try:
+            candidate_attempt_count = int(raw_attempt_count)
+        except (TypeError, ValueError):
+            candidate_attempt_count = None
+        attempt_count = (
+            candidate_attempt_count
+            if candidate_attempt_count is not None and candidate_attempt_count > 0
+            else fallback_attempt_count + len(df)
+        )
+        fallback_attempt_count = max(fallback_attempt_count + len(df), attempt_count)
         # Use enumerate so we index w by position, not DataFrame label
         for pos, (idx, row) in enumerate(df.iterrows()):
             step += 1
@@ -113,7 +129,13 @@ def _run_pyabc_smc_with_sampler(
                 loss=actual_loss,
                 weight=weight_val,
                 tolerance=eps_t,
-                wall_time=time.time() - run_start,
+                wall_time=generation_end if generation_end is not None else time.time() - run_start,
+                sim_start_time=previous_end,
+                sim_end_time=generation_end,
+                generation=t,
+                record_kind="population_particle",
+                time_semantics="generation_end",
+                attempt_count=attempt_count,
             ))
 
     if progress is not None:

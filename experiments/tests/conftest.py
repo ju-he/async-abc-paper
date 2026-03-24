@@ -513,6 +513,9 @@ def sample_records():
             weight=1.0,
             tolerance=5.0,
             wall_time=0.2,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=1,
         ),
         ParticleRecord(
             method="async_propulate_abc",
@@ -524,6 +527,9 @@ def sample_records():
             weight=1.0,
             tolerance=2.5,
             wall_time=1.0,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=10,
         ),
         ParticleRecord(
             method="async_propulate_abc",
@@ -535,6 +541,9 @@ def sample_records():
             weight=0.5,
             tolerance=1.0,
             wall_time=2.0,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=25,
         ),
         ParticleRecord(
             method="async_propulate_abc",
@@ -546,6 +555,9 @@ def sample_records():
             weight=0.5,
             tolerance=0.5,
             wall_time=3.0,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=50,
         ),
     ]
 
@@ -567,6 +579,9 @@ def abc_smc_records():
             sim_start_time=0.0,
             sim_end_time=1.0,
             generation=0,
+            record_kind="population_particle",
+            time_semantics="generation_end",
+            attempt_count=2,
         ),
         ParticleRecord(
             method="abc_smc_baseline",
@@ -582,6 +597,9 @@ def abc_smc_records():
             sim_start_time=0.0,
             sim_end_time=1.2,
             generation=0,
+            record_kind="population_particle",
+            time_semantics="generation_end",
+            attempt_count=2,
         ),
         ParticleRecord(
             method="abc_smc_baseline",
@@ -597,6 +615,9 @@ def abc_smc_records():
             sim_start_time=1.2,
             sim_end_time=2.2,
             generation=1,
+            record_kind="population_particle",
+            time_semantics="generation_end",
+            attempt_count=4,
         ),
         ParticleRecord(
             method="abc_smc_baseline",
@@ -612,5 +633,8 @@ def abc_smc_records():
             sim_start_time=1.2,
             sim_end_time=2.6,
             generation=1,
+            record_kind="population_particle",
+            time_semantics="generation_end",
+            attempt_count=4,
         ),
     ]

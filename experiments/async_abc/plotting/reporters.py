@@ -15,12 +15,12 @@ from ..io.records import ParticleRecord
 from .common import (
     archive_evolution_plot,
     corner_plot,
-    compute_wasserstein,
     gantt_plot,
+    posterior_quality_plot,
     posterior_plot,
-    quality_vs_time_plot,
     scaling_plot,
     sensitivity_heatmap,
+    threshold_summary_plot,
     tolerance_trajectory_plot,
 )
 from .export import save_figure
@@ -96,27 +96,207 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
     save_figure(fig, output_dir.plots / "worker_gantt", data=data)
 
 
+def plot_quality_vs_wall_time_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Appendix-style posterior quality diagnostic over wall-clock time."""
+    from ..analysis import posterior_quality_curve
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        return
+
+    metadata = {
+        "plot_name": "quality_vs_wall_time_diagnostic",
+        "axis_kind": "wall_time",
+        "state_kind": "observable_posterior_state",
+        "checkpoint_strategy": "quantile",
+        "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+    }
+    _save_quality_curve_artifact(
+        output_dir.plots / "quality_vs_wall_time_diagnostic",
+        quality_df,
+        axis_kind="wall_time",
+        metadata=metadata,
+    )
+    _save_quality_curve_artifact(
+        output_dir.plots / "quality_vs_time",
+        quality_df,
+        axis_kind="wall_time",
+        metadata={**metadata, "plot_name": "quality_vs_time", "deprecated_alias_for": "quality_vs_wall_time_diagnostic"},
+    )
+
+
+def plot_quality_vs_posterior_samples(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Alternative convergence plot over posterior sample count."""
+    from ..analysis import posterior_quality_curve
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="posterior_samples",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        return
+
+    _save_quality_curve_artifact(
+        output_dir.plots / "quality_vs_posterior_samples",
+        quality_df,
+        axis_kind="posterior_samples",
+        metadata={
+            "plot_name": "quality_vs_posterior_samples",
+            "axis_kind": "posterior_samples",
+            "state_kind": "observable_posterior_state",
+            "checkpoint_strategy": "quantile",
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_quality_vs_attempt_budget(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Alternative convergence plot over cumulative attempt budget."""
+    from ..analysis import posterior_quality_curve
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="attempt_budget",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        return
+
+    _save_quality_curve_artifact(
+        output_dir.plots / "quality_vs_attempt_budget",
+        quality_df,
+        axis_kind="attempt_budget",
+        metadata={
+            "plot_name": "quality_vs_attempt_budget",
+            "axis_kind": "attempt_budget",
+            "state_kind": "observable_posterior_state",
+            "checkpoint_strategy": "quantile",
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_time_to_target_summary(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    target_wasserstein: float,
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+) -> None:
+    """Main paper summary: wall-clock time required to reach a target quality."""
+    from ..analysis import time_to_threshold
+
+    summary_df = time_to_threshold(
+        records,
+        true_params=true_params,
+        target_wasserstein=target_wasserstein,
+        axis_kind="wall_time",
+        archive_size=archive_size,
+    )
+    if summary_df.empty:
+        return
+
+    _save_threshold_summary_artifact(
+        output_dir.plots / "time_to_target_summary",
+        summary_df,
+        axis_kind="wall_time",
+        metadata={
+            "plot_name": "time_to_target_summary",
+            "axis_kind": "wall_time",
+            "target_wasserstein": float(target_wasserstein),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_attempts_to_target_summary(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    target_wasserstein: float,
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+) -> None:
+    """Alternative summary: simulation attempts required to reach target quality."""
+    from ..analysis import time_to_threshold
+
+    summary_df = time_to_threshold(
+        records,
+        true_params=true_params,
+        target_wasserstein=target_wasserstein,
+        axis_kind="attempt_budget",
+        archive_size=archive_size,
+    )
+    if summary_df.empty:
+        return
+
+    _save_threshold_summary_artifact(
+        output_dir.plots / "attempts_to_target_summary",
+        summary_df,
+        axis_kind="attempt_budget",
+        metadata={
+            "plot_name": "attempts_to_target_summary",
+            "axis_kind": "attempt_budget",
+            "target_wasserstein": float(target_wasserstein),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
 def plot_quality_vs_time(
     records: List[ParticleRecord],
     true_params: Dict[str, float],
     checkpoint_steps: List[int],
     output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
 ) -> None:
-    """Wasserstein-vs-time diagnostic from existing ParticleRecords."""
-    if not true_params or not checkpoint_steps:
+    """Deprecated wrapper that now emits the appendix wall-time diagnostic alias."""
+    if not true_params:
         return
-
-    from ..analysis import wasserstein_at_checkpoints
-
-    quality_df = wasserstein_at_checkpoints(records, true_params, checkpoint_steps)
-    if quality_df.empty:
-        return
-
-    fig = quality_vs_time_plot(quality_df)
-    save_figure(
-        fig,
-        output_dir.plots / "quality_vs_time",
-        data={col: quality_df[col].tolist() for col in quality_df.columns},
+    checkpoint_count = len(checkpoint_steps) if checkpoint_steps else 8
+    plot_quality_vs_wall_time_diagnostic(
+        records,
+        true_params=true_params,
+        output_dir=output_dir,
+        archive_size=archive_size,
+        checkpoint_count=checkpoint_count,
     )
 
 
@@ -304,6 +484,10 @@ def plot_benchmark_diagnostics(
     """Emit the configured benchmark plots for a standard benchmark runner."""
     plots_cfg = cfg.get("plots", {})
     benchmark_cfg = cfg.get("benchmark", {})
+    inference_cfg = cfg.get("inference", {})
+    analysis_cfg = cfg.get("analysis", {})
+    true_params = _true_params_from_cfg(records, benchmark_cfg)
+    archive_size = inference_cfg.get("k")
 
     if plots_cfg.get("posterior"):
         plot_posterior(records, output_dir)
@@ -314,16 +498,44 @@ def plot_benchmark_diagnostics(
             records,
             param_names=_param_names(records),
             output_dir=output_dir,
-            true_params=_true_params_from_cfg(records, benchmark_cfg),
+            true_params=true_params,
         )
     if plots_cfg.get("tolerance_trajectory"):
         plot_tolerance_trajectory(records, output_dir)
     if plots_cfg.get("quality_vs_time"):
         plot_quality_vs_time(
             records,
-            true_params=_true_params_from_cfg(records, benchmark_cfg),
+            true_params=true_params,
             checkpoint_steps=_default_checkpoint_steps(records),
             output_dir=output_dir,
+            archive_size=archive_size,
+        )
+        plot_quality_vs_posterior_samples(
+            records,
+            true_params=true_params,
+            output_dir=output_dir,
+            archive_size=archive_size,
+        )
+        plot_quality_vs_attempt_budget(
+            records,
+            true_params=true_params,
+            output_dir=output_dir,
+            archive_size=archive_size,
+        )
+        target = float(analysis_cfg.get("target_wasserstein", 1.0))
+        plot_time_to_target_summary(
+            records,
+            true_params=true_params,
+            target_wasserstein=target,
+            output_dir=output_dir,
+            archive_size=archive_size,
+        )
+        plot_attempts_to_target_summary(
+            records,
+            true_params=true_params,
+            target_wasserstein=target,
+            output_dir=output_dir,
+            archive_size=archive_size,
         )
 
 
@@ -334,6 +546,38 @@ def plot_benchmark_diagnostics(
 def _read_csv(path: Path) -> List[Dict[str, str]]:
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _save_quality_curve_artifact(
+    stem: Path,
+    quality_df,
+    *,
+    axis_kind: str,
+    metadata: Dict[str, Any],
+) -> None:
+    fig = posterior_quality_plot(quality_df, axis_kind=axis_kind)
+    save_figure(
+        fig,
+        stem,
+        data={col: quality_df[col].tolist() for col in quality_df.columns},
+        metadata=metadata,
+    )
+
+
+def _save_threshold_summary_artifact(
+    stem: Path,
+    summary_df,
+    *,
+    axis_kind: str,
+    metadata: Dict[str, Any],
+) -> None:
+    fig = threshold_summary_plot(summary_df, axis_kind=axis_kind)
+    save_figure(
+        fig,
+        stem,
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata=metadata,
+    )
 
 
 def _parse_scalar(raw: str):
