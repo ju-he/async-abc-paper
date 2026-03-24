@@ -84,6 +84,55 @@ def _true_param_config(base_cfg: dict, true_params: dict[str, float], observed_s
     return cfg
 
 
+def _build_trial_context(
+    *,
+    base_benchmark,
+    benchmark_cfg: dict,
+    param_names: list[str],
+    seed: int,
+) -> tuple[dict[str, float], object]:
+    rng = np.random.default_rng(seed)
+    true_params = {
+        name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
+        for name in param_names
+    }
+    trial_benchmark = make_benchmark(
+        _true_param_config(benchmark_cfg, true_params=true_params, observed_seed=seed)
+    )
+    return true_params, trial_benchmark
+
+
+def _extend_trial_records(
+    *,
+    target: list[dict],
+    trial_idx: int,
+    method: str,
+    true_params: dict[str, float],
+    param_names: list[str],
+    records,
+) -> None:
+    for param in param_names:
+        samples = _posterior_samples(records, param)
+        if samples.size == 0:
+            continue
+        target.append({
+            "trial": trial_idx,
+            "method": method,
+            "param": param,
+            "true_value": true_params[param],
+            "posterior_samples": samples,
+        })
+
+
+def _log_method_phase(method: str) -> None:
+    if not is_root_rank():
+        return
+    if method == "abc_smc_baseline":
+        logger.info("[sbc] entering abc_smc_baseline phase")
+    else:
+        logger.info("[sbc] entering %s phase", method)
+
+
 def _plot_rank_histogram(ranks_df: pd.DataFrame, output_dir: OutputDir) -> None:
     if ranks_df.empty:
         return
@@ -210,28 +259,34 @@ def main(argv: list[str] | None = None) -> None:
 
     # Classify methods into execution phases once (use base_benchmark for classification).
     all_methods = cfg["methods"]
+    all_ranks_methods = [
+        m for m in all_methods
+        if method_execution_mode_for_cfg(m, cfg["inference"], base_benchmark.simulate) == "all_ranks"
+    ]
     rank_parallel_methods = [
         m for m in all_methods
         if method_execution_mode_for_cfg(m, cfg["inference"], base_benchmark.simulate) == "rank_parallel"
     ]
-    phase1_methods = [m for m in all_methods if m not in set(rank_parallel_methods)]
+    other_methods = [m for m in all_methods if m not in set(all_ranks_methods) and m not in set(rank_parallel_methods)]
+    phase1_methods = all_ranks_methods + other_methods
     method_idx_map = {m: idx for idx, m in enumerate(all_methods)}
 
     t0 = time.time()
     try:
-        # ── Phase 1: all_ranks (and other) methods ──────────────────────────────
-        for trial_idx in selected_trials:
-            seed = seeds[trial_idx]
-            rng = np.random.default_rng(seed)
-            true_params = {
-                name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
-                for name in param_names
-            }
-            trial_benchmark = make_benchmark(
-                _true_param_config(benchmark_cfg, true_params=true_params, observed_seed=seed)
-            )
-            for method in phase1_methods:
+        # ── Phase 1: all_ranks (and other) methods, method-major ────────────────
+        for method in phase1_methods:
+            _log_method_phase(method)
+            for trial_idx in selected_trials:
+                seed = seeds[trial_idx]
+                true_params, trial_benchmark = _build_trial_context(
+                    base_benchmark=base_benchmark,
+                    benchmark_cfg=benchmark_cfg,
+                    param_names=param_names,
+                    seed=seed,
+                )
                 method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
+                if is_root_rank():
+                    logger.info("[runner] starting method %s trial=%s", method, trial_idx)
                 records = run_method_distributed(
                     method,
                     trial_benchmark.simulate,
@@ -241,23 +296,22 @@ def main(argv: list[str] | None = None) -> None:
                     replicate=trial_idx,
                     seed=method_seed,
                 )
-                for param in param_names:
-                    samples = _posterior_samples(records, param)
-                    if samples.size == 0:
-                        continue
-                    trial_records.append({
-                        "trial": trial_idx,
-                        "method": method,
-                        "param": param,
-                        "true_value": true_params[param],
-                        "posterior_samples": samples,
-                    })
+                if is_root_rank():
+                    logger.info("[runner] finished method %s trial=%s", method, trial_idx)
+                _extend_trial_records(
+                    target=trial_records,
+                    trial_idx=trial_idx,
+                    method=method,
+                    true_params=true_params,
+                    param_names=param_names,
+                    records=records,
+                )
 
         # ── Barrier: drain MPI state before rank_parallel phase ──────────────────
         if rank_parallel_methods:
             allgather(None)
 
-        # ── Phase 2: rank_parallel methods (each rank handles its own subset) ────
+        # ── Phase 2: rank_parallel methods, method-major on each rank ────────────
         if rank_parallel_methods:
             my_rank = get_rank()
             world_size = get_world_size()
@@ -265,21 +319,24 @@ def main(argv: list[str] | None = None) -> None:
 
             phase2_error = None
             my_trial_records = []
-            for trial_idx in my_trials:
+            for method in rank_parallel_methods:
+                _log_method_phase(method)
                 if phase2_error:
                     break
-                seed = seeds[trial_idx]
-                rng = np.random.default_rng(seed)
-                true_params = {
-                    name: float(rng.uniform(base_benchmark.limits[name][0], base_benchmark.limits[name][1]))
-                    for name in param_names
-                }
-                trial_benchmark = make_benchmark(
-                    _true_param_config(benchmark_cfg, true_params=true_params, observed_seed=seed)
-                )
-                for method in rank_parallel_methods:
+                for trial_idx in my_trials:
+                    if phase2_error:
+                        break
+                    seed = seeds[trial_idx]
+                    true_params, trial_benchmark = _build_trial_context(
+                        base_benchmark=base_benchmark,
+                        benchmark_cfg=benchmark_cfg,
+                        param_names=param_names,
+                        seed=seed,
+                    )
                     method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
                     try:
+                        if is_root_rank():
+                            logger.info("[runner] starting method %s trial=%s", method, trial_idx)
                         records = run_method_distributed(
                             method,
                             trial_benchmark.simulate,
@@ -289,17 +346,16 @@ def main(argv: list[str] | None = None) -> None:
                             replicate=trial_idx,
                             seed=method_seed,
                         )
-                        for param in param_names:
-                            samples = _posterior_samples(records, param)
-                            if samples.size == 0:
-                                continue
-                            my_trial_records.append({
-                                "trial": trial_idx,
-                                "method": method,
-                                "param": param,
-                                "true_value": true_params[param],
-                                "posterior_samples": samples,
-                            })
+                        if is_root_rank():
+                            logger.info("[runner] finished method %s trial=%s", method, trial_idx)
+                        _extend_trial_records(
+                            target=my_trial_records,
+                            trial_idx=trial_idx,
+                            method=method,
+                            true_params=true_params,
+                            param_names=param_names,
+                            records=records,
+                        )
                     except ImportError as exc:
                         phase2_error = ("ImportError", str(exc))
                         break

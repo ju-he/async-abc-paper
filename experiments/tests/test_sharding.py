@@ -429,7 +429,7 @@ class TestShardSubmitter:
         else:
             raise AssertionError("expected SystemExit")
 
-    def test_submit_replicate_shards_small_keeps_normal_shard_count(self, tmp_path, monkeypatch):
+    def test_submit_replicate_shards_small_uses_reduced_small_tier_shard_count(self, tmp_path, monkeypatch):
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
         monkeypatch.setattr(
             submitter.run_all,
@@ -454,8 +454,8 @@ class TestShardSubmitter:
         submitter.main()
 
         plan = json.loads(_plan_paths(tmp_path, "gaussian_mean")[0].read_text())
-        assert plan["requested_num_shards"] == 4
-        assert plan["actual_num_shards"] == 4
+        assert plan["requested_num_shards"] == 1
+        assert plan["actual_num_shards"] == 1
         assert plan["small_mode"] is True
         assert plan["run_mode"] == "small"
 

@@ -7,6 +7,7 @@ On HPC, call this script via ``mpirun -n N`` for each N in worker_counts.
 import csv
 import logging
 import math
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -81,10 +82,20 @@ def main(argv: list[str] | None = None) -> None:
     throughput_path = output_dir.data / "throughput_summary.csv"
     done = find_completed_combinations(throughput_path, ["n_workers", "method", "replicate"]) if args.extend else set()
 
+    # Clean up stale checkpoint dirs so we start fresh (skip when extending).
+    if not args.extend and is_root_rank():
+        for n_workers in worker_counts:
+            tag = f"w{n_workers}"
+            for replicate, seed in enumerate(seeds):
+                ckpt_dir = output_dir.logs / f"propulate_rep{replicate}_seed{seed}__{tag}"
+                if ckpt_dir.exists():
+                    logger.info("[scaling] Removing stale checkpoint dir: %s", ckpt_dir)
+                    shutil.rmtree(ckpt_dir)
+
     throughput_rows = []
     experiment_start = time.time()
     for n_workers in worker_counts:
-        inference_cfg = {**cfg["inference"], "n_workers": n_workers}
+        inference_cfg = {**cfg["inference"], "n_workers": n_workers, "_checkpoint_tag": f"w{n_workers}"}
         for method in cfg["methods"]:
             for replicate, seed in enumerate(seeds):
                 if (str(n_workers), method, str(replicate)) in done:
