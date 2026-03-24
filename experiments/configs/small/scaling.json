@@ -22,11 +22,11 @@
     "propulate_budget_mode": "total_simulations"
   },
   "execution": {
-    "n_replicates": 1,
+    "n_replicates": 2,
     "base_seed": 0
   },
   "scaling": {
-    "worker_counts": [1, 16, 48, 96, 256],
+    "worker_counts": [1, 16, 48, 96],
     "test_worker_counts": [1, 4, 48]
   },
   "plots": {

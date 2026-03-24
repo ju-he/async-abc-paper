@@ -13,7 +13,7 @@
   },
   "methods": ["async_propulate_abc", "pyabc_smc", "abc_smc_baseline"],
   "inference": {
-    "max_simulations": 300,
+    "max_simulations": 2000,
     "n_workers": 48,
     "k": 100,
     "tol_init": 500000.0,
@@ -22,7 +22,7 @@
     "propulate_budget_mode": "total_simulations"
   },
   "execution": {
-    "n_replicates": 1,
+    "n_replicates": 2,
     "base_seed": 0
   },
   "plots": {

@@ -11,7 +11,7 @@
   },
   "methods": ["async_propulate_abc"],
   "inference": {
-    "max_simulations": 50,
+    "max_simulations": 1500,
     "n_workers": 48,
     "k": 100,
     "tol_init": 5.0,
@@ -20,7 +20,7 @@
     "propulate_budget_mode": "total_simulations"
   },
   "execution": {
-    "n_replicates": 1,
+    "n_replicates": 2,
     "base_seed": 0
   },
   "ablation_variants": [
@@ -54,12 +54,6 @@
       "k": 100,
       "scheduler_type": "acceptance_rate",
       "perturbation_scale": 5.0
-    },
-    {
-      "name": "no_archive_truncation",
-      "k": 5000,
-      "scheduler_type": "acceptance_rate",
-      "perturbation_scale": 0.8
     }
   ],
   "plots": {

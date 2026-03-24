@@ -11,7 +11,7 @@
   },
   "methods": ["async_propulate_abc", "abc_smc_baseline"],
   "inference": {
-    "max_simulations": 1000,
+    "max_simulations": 2000,
     "n_workers": 16,
     "k": 100,
     "tol_init": 5.0,
@@ -21,13 +21,13 @@
     "propulate_budget_mode": "total_simulations"
   },
   "execution": {
-    "n_replicates": 1,
+    "n_replicates": 2,
     "base_seed": 0
   },
   "straggler": {
     "straggler_rank": 0,
     "base_sleep_s": 0.1,
-    "slowdown_factor": [1, 10]
+    "slowdown_factor": [1, 5, 10]
   },
   "plots": {
     "throughput_vs_slowdown": true,

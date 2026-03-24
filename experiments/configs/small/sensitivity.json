@@ -11,7 +11,7 @@
   },
   "methods": ["async_propulate_abc"],
   "inference": {
-    "max_simulations": 500,
+    "max_simulations": 1000,
     "n_workers": 48,
     "k": 50,
     "tol_init": 5.0,
@@ -21,11 +21,11 @@
     "propulate_budget_mode": "total_simulations"
   },
   "execution": {
-    "n_replicates": 1,
+    "n_replicates": 2,
     "base_seed": 0
   },
   "sensitivity_grid": {
-    "k": [50, 100, 200],
+    "k": [50, 100],
     "perturbation_scale": [0.4, 0.8],
     "scheduler_type": ["acceptance_rate", "quantile"],
     "tol_init_multiplier": [0.5, 1.0]
