@@ -155,9 +155,10 @@ def main(argv: list[str] | None = None) -> None:
                     original_simulate, mu, sigma, seed=42, test_mode=test_mode
                 )
                 bm.simulate = wrapped_simulate
+                sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
                 all_records.extend(
                     run_experiment(
-                        cfg,
+                        sigma_cfg,
                         output_dir,
                         benchmark=bm,
                         extend=False,
@@ -240,8 +241,9 @@ def main(argv: list[str] | None = None) -> None:
             original_simulate, mu, sigma, seed=42, test_mode=test_mode
         )
         bm.simulate = wrapped_simulate
+        sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
         records = run_experiment(
-            cfg,
+            sigma_cfg,
             output_dir,
             benchmark=bm,
             extend=args.extend,
@@ -291,6 +293,19 @@ def main(argv: list[str] | None = None) -> None:
         from async_abc.plotting.reporters import plot_worker_gantt
 
         plot_worker_gantt(all_records, output_dir)
+    plots_cfg = cfg.get("plots", {})
+    if is_root_rank() and plots_cfg.get("idle_fraction"):
+        from async_abc.plotting.reporters import plot_idle_fraction
+
+        plot_idle_fraction(all_records, output_dir)
+    if is_root_rank() and plots_cfg.get("throughput_over_time"):
+        from async_abc.plotting.reporters import plot_throughput_over_time
+
+        plot_throughput_over_time(all_records, output_dir)
+    if is_root_rank() and plots_cfg.get("idle_fraction_comparison"):
+        from async_abc.plotting.reporters import plot_idle_fraction_comparison
+
+        plot_idle_fraction_comparison(all_records, output_dir)
     if is_root_rank():
         write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 

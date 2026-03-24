@@ -20,7 +20,10 @@ from ..io.records import ParticleRecord, load_records
 from ..plotting.reporters import (
     plot_ablation_summary,
     plot_benchmark_diagnostics,
+    plot_idle_fraction,
+    plot_idle_fraction_comparison,
     plot_sensitivity_summary,
+    plot_throughput_over_time,
     plot_worker_gantt,
 )
 from ..io.config import get_run_mode
@@ -396,8 +399,15 @@ def finalize_runtime_heterogeneity_experiment(
     _write_batch_timing(cfg, layout, tmp_output, timing)
     if any(cfg.get("plots", {}).values()):
         plot_benchmark_diagnostics(records, cfg, tmp_output)
-    if cfg.get("plots", {}).get("gantt"):
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("gantt"):
         plot_worker_gantt(records, tmp_output)
+    if plots_cfg.get("idle_fraction"):
+        plot_idle_fraction(records, tmp_output)
+    if plots_cfg.get("throughput_over_time"):
+        plot_throughput_over_time(records, tmp_output)
+    if plots_cfg.get("idle_fraction_comparison"):
+        plot_idle_fraction_comparison(records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     _rewrite_root_timing_summary(layout.output_root)

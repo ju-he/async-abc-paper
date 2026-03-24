@@ -26,19 +26,16 @@ logger = logging.getLogger(__name__)
 _RANK_ZERO_STATUS_POLL_S = 0.2
 
 
-def _propulate_test_generation_budget(test_cfg: Dict[str, Any]) -> int:
-    """Return the effective Propulate test-time generation budget.
-
-    In test mode, ``async_propulate_abc`` treats ``max_simulations`` as a total
-    cross-rank budget. The estimator must mirror that behavior instead of
-    assuming the raw config value is the per-rank sequential workload.
-    """
-    inference = test_cfg["inference"]
-    test_sims = int(inference["max_simulations"])
-    test_workers = max(1, int(inference["n_workers"]))
+def _configured_propulate_generation_budget(cfg: Dict[str, Any]) -> int:
+    """Return the effective Propulate generation budget for a resolved config."""
+    inference = cfg["inference"]
+    sims = int(inference["max_simulations"])
+    workers = max(1, int(inference["n_workers"]))
+    if inference.get("propulate_budget_mode") == "total_simulations":
+        return max(1, math.ceil(sims / workers))
     if not inference.get("test_mode"):
-        return test_sims
-    return max(1, math.ceil(test_sims / test_workers))
+        return sims
+    return max(1, math.ceil(sims / workers))
 
 
 def _method_compute_scale(method: str, cfg_full: Dict[str, Any], cfg_test: Dict[str, Any]) -> float:
@@ -52,7 +49,9 @@ def _method_compute_scale(method: str, cfg_full: Dict[str, Any], cfg_test: Dict[
     test_workers = max(1.0, float(test_inf["n_workers"]))
 
     if method == "async_propulate_abc":
-        return full_sims / float(_propulate_test_generation_budget(cfg_test))
+        return float(_configured_propulate_generation_budget(cfg_full)) / float(
+            _configured_propulate_generation_budget(cfg_test)
+        )
     if method == "rejection_abc":
         return full_sims / test_sims
     return (full_sims / full_workers) / (test_sims / test_workers)

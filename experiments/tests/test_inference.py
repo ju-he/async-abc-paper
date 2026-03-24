@@ -545,6 +545,15 @@ class TestRunPropulateAbc:
         assert mod._effective_generation_budget(100, {"test_mode": True}) == 3
         assert mod._effective_generation_budget(100, {"test_mode": False}) == 100
 
+    def test_total_simulation_budget_scales_generation_budget_by_world_size(self, monkeypatch):
+        import async_abc.inference.propulate_abc as mod
+
+        monkeypatch.setattr(mod, "_propulate_world_size", lambda: 48)
+
+        assert mod._effective_generation_budget(
+            100, {"propulate_budget_mode": "total_simulations", "test_mode": False}
+        ) == 3
+
     def test_steps_are_monotone(self, propulate_records_default):
         steps = [record.step for record in propulate_records_default]
         assert steps == sorted(steps)

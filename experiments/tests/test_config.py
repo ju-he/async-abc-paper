@@ -287,6 +287,19 @@ class TestSensitivityConfig:
 
 
 class TestScalingFactor:
+    def test_propulate_total_budget_mode_scales_with_worker_count(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
+        minimal_config["inference"]["propulate_budget_mode"] = "total_simulations"
+        path = tmp_path / "propulate_total_budget.json"
+        path.write_text(json.dumps(minimal_config))
+
+        factor, extra, note = compute_scaling_factor(path)
+
+        assert factor == pytest.approx(9.0)
+        assert extra == 0.0
+        assert "300 sims × 3 reps" in note
+
     def test_sbc_uses_clamped_test_trial_count(self, tmp_path, minimal_config):
         minimal_config["inference"]["max_simulations"] = 300
         minimal_config["inference"]["n_workers"] = 4

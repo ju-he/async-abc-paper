@@ -30,7 +30,14 @@ _EXPORTS = {
     "plot_time_to_target_summary": (".reporters", "plot_time_to_target_summary"),
     "plot_tolerance_trajectory": (".reporters", "plot_tolerance_trajectory"),
     "plot_worker_gantt": (".reporters", "plot_worker_gantt"),
+    "plot_idle_fraction": (".reporters", "plot_idle_fraction"),
+    "plot_throughput_over_time": (".reporters", "plot_throughput_over_time"),
+    "plot_idle_fraction_comparison": (".reporters", "plot_idle_fraction_comparison"),
     "plot_ablation_summary": (".reporters", "plot_ablation_summary"),
+    "posterior_comparison_plot": (".common", "posterior_comparison_plot"),
+    "idle_fraction_plot": (".common", "idle_fraction_plot"),
+    "throughput_over_time_plot": (".common", "throughput_over_time_plot"),
+    "idle_fraction_comparison_plot": (".common", "idle_fraction_comparison_plot"),
 }
 
 __all__ = [
@@ -61,7 +68,14 @@ __all__ = [
     "plot_time_to_target_summary",
     "plot_tolerance_trajectory",
     "plot_worker_gantt",
+    "plot_idle_fraction",
+    "plot_throughput_over_time",
+    "plot_idle_fraction_comparison",
     "plot_ablation_summary",
+    "posterior_comparison_plot",
+    "idle_fraction_plot",
+    "throughput_over_time_plot",
+    "idle_fraction_comparison_plot",
 ]
 
 

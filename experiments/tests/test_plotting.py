@@ -33,17 +33,28 @@ from async_abc.plotting.common import (
     compute_wasserstein,
 )
 from async_abc.plotting.reporters import (
+    _compute_idle_fraction,
+    _final_population,
     _parse_variant_stem,
     plot_attempts_to_target_summary,
     plot_corner,
+    plot_idle_fraction,
+    plot_idle_fraction_comparison,
     plot_quality_vs_attempt_budget,
     plot_quality_vs_posterior_samples,
     plot_quality_vs_time,
     plot_quality_vs_wall_time_diagnostic,
     plot_sensitivity_summary,
+    plot_throughput_over_time,
     plot_time_to_target_summary,
     plot_tolerance_trajectory,
     plot_worker_gantt,
+)
+from async_abc.plotting.common import (
+    idle_fraction_plot,
+    idle_fraction_comparison_plot,
+    posterior_comparison_plot,
+    throughput_over_time_plot,
 )
 
 
@@ -121,18 +132,18 @@ class TestSaveFigure:
         save_figure(fig, stem, data=None)
         assert not (tmp_path / "test_fig_data.csv").exists()
 
-    def test_export_warns_and_keeps_pdf_when_png_rasterization_unavailable(self, tmp_path, monkeypatch):
+    def test_export_uses_agg_fallback_when_external_tools_unavailable(self, tmp_path, monkeypatch):
+        """When pdftoppm/convert are unavailable, the Agg fallback should create the PNG."""
         fig = _make_fig()
-        stem = tmp_path / "pdf_only_fig"
+        stem = tmp_path / "fallback_fig"
         monkeypatch.setattr(export_mod, "_save_png_from_pdf", lambda *args, **kwargs: False)
 
-        with pytest.warns(UserWarning, match="keeping PDF only"):
-            save_figure(fig, stem)
+        save_figure(fig, stem)
 
-        assert (tmp_path / "pdf_only_fig.pdf").exists()
-        assert not (tmp_path / "pdf_only_fig.png").exists()
-        meta = json.loads((tmp_path / "pdf_only_fig_meta.json").read_text())
-        assert meta["png"] is None
+        assert (tmp_path / "fallback_fig.pdf").exists()
+        assert (tmp_path / "fallback_fig.png").exists()
+        meta = json.loads((tmp_path / "fallback_fig_meta.json").read_text())
+        assert meta["png"] is not None
 
 
 class TestGetGitHash:
@@ -401,3 +412,158 @@ class TestWassersteinMetric:
         b = rng.normal(5, 1, 500)
         d = compute_wasserstein(a, b)
         assert d > 0
+
+
+# ---------------------------------------------------------------------------
+# _final_population per-method fix
+# ---------------------------------------------------------------------------
+
+class TestFinalPopulationPerMethod:
+    def test_returns_particles_from_all_methods(self):
+        """Each method's lowest-tolerance particles should be included."""
+        records = [
+            ParticleRecord(method="method_a", replicate=0, seed=1, step=1,
+                           params={"x": 1.0}, loss=0.5, tolerance=2.0, wall_time=1.0),
+            ParticleRecord(method="method_a", replicate=0, seed=1, step=2,
+                           params={"x": 1.1}, loss=0.3, tolerance=1.0, wall_time=2.0),
+            ParticleRecord(method="method_b", replicate=0, seed=1, step=1,
+                           params={"x": 2.0}, loss=0.8, tolerance=5.0, wall_time=1.0),
+            ParticleRecord(method="method_b", replicate=0, seed=1, step=2,
+                           params={"x": 2.1}, loss=0.6, tolerance=3.0, wall_time=2.0),
+        ]
+        final = _final_population(records)
+        methods = {r.method for r in final}
+        assert methods == {"method_a", "method_b"}
+
+    def test_selects_per_method_minimum_tolerance(self):
+        records = [
+            ParticleRecord(method="A", replicate=0, seed=1, step=1,
+                           params={"x": 1.0}, loss=0.5, tolerance=1.0, wall_time=1.0),
+            ParticleRecord(method="A", replicate=0, seed=1, step=2,
+                           params={"x": 1.1}, loss=0.3, tolerance=2.0, wall_time=2.0),
+            ParticleRecord(method="B", replicate=0, seed=1, step=1,
+                           params={"x": 2.0}, loss=0.8, tolerance=10.0, wall_time=1.0),
+        ]
+        final = _final_population(records)
+        assert len(final) == 2  # method A tol=1.0 + method B tol=10.0
+        assert {r.method for r in final} == {"A", "B"}
+        assert {r.tolerance for r in final} == {1.0, 10.0}
+
+
+# ---------------------------------------------------------------------------
+# Posterior comparison plot
+# ---------------------------------------------------------------------------
+
+class TestPosteriorComparisonPlot:
+    def test_saves_files(self, tmp_path):
+        rng = np.random.default_rng(42)
+        method_samples = {
+            "method_a": rng.normal(0, 1, 100),
+            "method_b": rng.normal(1, 1, 100),
+        }
+        posterior_comparison_plot(method_samples, param_name="mu", path_stem=tmp_path / "post_cmp")
+        assert (tmp_path / "post_cmp.pdf").exists()
+        assert (tmp_path / "post_cmp.png").exists()
+
+
+# ---------------------------------------------------------------------------
+# Corner plot with method labels
+# ---------------------------------------------------------------------------
+
+class TestCornerPlotMethodLabels:
+    def test_corner_plot_with_methods(self):
+        records = [
+            ParticleRecord(method="A", replicate=0, seed=1, step=i,
+                           params={"x": float(i), "y": float(i) * 2}, loss=0.1, wall_time=0.1)
+            for i in range(10)
+        ] + [
+            ParticleRecord(method="B", replicate=0, seed=1, step=i,
+                           params={"x": float(i) + 5, "y": float(i) * 3}, loss=0.1, wall_time=0.1)
+            for i in range(10)
+        ]
+        fig = corner_plot(records, param_names=["x", "y"], method_labels=["A", "B"])
+        assert fig is not None
+
+
+# ---------------------------------------------------------------------------
+# Idle fraction / throughput / comparison plots
+# ---------------------------------------------------------------------------
+
+def _heterogeneity_records():
+    """Synthetic records mimicking runtime_heterogeneity output."""
+    records = []
+    for sigma in [0.0, 0.5, 1.0]:
+        for rep in range(2):
+            for step in range(5):
+                records.append(ParticleRecord(
+                    method=f"async_propulate_abc__sigma{sigma}",
+                    replicate=rep, seed=42, step=step,
+                    params={"x": float(step)}, loss=float(step) * 0.1,
+                    tolerance=1.0,
+                    wall_time=0.1 * step,
+                    worker_id=str(step % 2),
+                    sim_start_time=0.1 * step,
+                    sim_end_time=0.1 * step + 0.08,
+                ))
+    return records
+
+
+class TestIdleFractionPlot:
+    def test_idle_fraction_plot_saves_files(self, tmp_path):
+        idle_fraction_plot([0.0, 0.5, 1.0], [0.1, 0.3, 0.5], tmp_path / "idle")
+        assert (tmp_path / "idle.pdf").exists()
+
+    def test_plot_idle_fraction_reporter(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_idle_fraction(_heterogeneity_records(), output_dir)
+        assert (output_dir.plots / "idle_fraction.pdf").exists()
+
+
+class TestThroughputOverTimePlot:
+    def test_throughput_over_time_plot_saves_files(self, tmp_path):
+        time_bins = {"σ=0.0": np.array([0.5, 1.5, 2.5])}
+        throughput_bins = {"σ=0.0": np.array([5.0, 3.0, 2.0])}
+        throughput_over_time_plot(time_bins, throughput_bins, tmp_path / "throughput")
+        assert (tmp_path / "throughput.pdf").exists()
+
+    def test_plot_throughput_over_time_reporter(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_throughput_over_time(_heterogeneity_records(), output_dir)
+        assert (output_dir.plots / "throughput_over_time.pdf").exists()
+
+
+class TestIdleFractionComparisonPlot:
+    def test_idle_fraction_comparison_plot_saves_files(self, tmp_path):
+        idle_by_sigma = {0.0: [0.1, 0.15], 0.5: [0.3, 0.35], 1.0: [0.5, 0.55]}
+        idle_fraction_comparison_plot([0.0, 0.5, 1.0], idle_by_sigma, tmp_path / "idle_cmp")
+        assert (tmp_path / "idle_cmp.pdf").exists()
+
+    def test_plot_idle_fraction_comparison_reporter(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_idle_fraction_comparison(_heterogeneity_records(), output_dir)
+        assert (output_dir.plots / "idle_fraction_comparison.pdf").exists()
+
+
+class TestComputeIdleFraction:
+    def test_returns_per_method_per_replicate(self):
+        records = _heterogeneity_records()
+        idle = _compute_idle_fraction(records)
+        assert "async_propulate_abc__sigma0.0" in idle
+        assert 0 in idle["async_propulate_abc__sigma0.0"]
+        assert 0 <= idle["async_propulate_abc__sigma0.0"][0] <= 1
+
+
+# ---------------------------------------------------------------------------
+# PNG Agg fallback
+# ---------------------------------------------------------------------------
+
+class TestPngAggFallback:
+    def test_png_created_when_external_tools_unavailable(self, tmp_path, monkeypatch):
+        """Even without pdftoppm/convert, PNG should be created via Agg fallback."""
+        fig = _make_fig()
+        monkeypatch.setattr(export_mod, "_save_png_from_pdf", lambda *a, **kw: False)
+        stem = tmp_path / "fallback_fig"
+        result = save_figure(fig, stem)
+        assert (tmp_path / "fallback_fig.png").exists()
+        meta = json.loads((tmp_path / "fallback_fig_meta.json").read_text())
+        assert meta["png"] is not None

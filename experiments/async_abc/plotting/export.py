@@ -121,6 +121,12 @@ def save_figure(
     fig.savefig(pdf_path, bbox_inches="tight")
     png_written = _save_png_from_pdf(pdf_path, png_path, dpi=150)
     if not png_written:
+        try:
+            fig.savefig(png_path, dpi=150, bbox_inches="tight")
+            png_written = png_path.exists()
+        except Exception:
+            pass
+    if not png_written:
         warnings.warn(
             f"Could not rasterize {pdf_path.name} to PNG; keeping PDF only.",
             stacklevel=2,

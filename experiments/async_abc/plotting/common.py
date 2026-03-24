@@ -63,6 +63,35 @@ def posterior_plot(
     return save_figure(fig, path_stem, data=data)
 
 
+def posterior_comparison_plot(
+    method_samples: Dict[str, np.ndarray],
+    param_name: str,
+    path_stem: Union[str, Path],
+    true_value: Optional[float] = None,
+    bins: int = 30,
+) -> Dict[str, Path]:
+    """Overlaid posterior histograms comparing multiple methods."""
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    cmap = plt.get_cmap("tab10")
+    for idx, (method, samples) in enumerate(sorted(method_samples.items())):
+        samples = np.asarray(samples, dtype=float)
+        if samples.size == 0:
+            continue
+        ax.hist(samples, bins=bins, density=True, alpha=0.45, color=cmap(idx % 10), label=method)
+    if true_value is not None:
+        ax.axvline(true_value, color="crimson", linewidth=1.5, linestyle="--", label="true")
+    ax.legend(frameon=False, fontsize="small")
+    ax.set_xlabel(param_name)
+    ax.set_ylabel("density")
+    ax.set_title(f"Posterior: {param_name}")
+    fig.tight_layout()
+
+    data: Dict[str, list] = {}
+    for method, samples in sorted(method_samples.items()):
+        data[method] = np.asarray(samples, dtype=float).tolist()
+    return save_figure(fig, path_stem, data=data)
+
+
 # ---------------------------------------------------------------------------
 # Scaling / efficiency plot
 # ---------------------------------------------------------------------------
@@ -330,6 +359,71 @@ def gantt_plot(records, ax=None):
     return fig
 
 
+def idle_fraction_plot(
+    sigma_levels: List[float],
+    idle_fractions: List[float],
+    path_stem: Union[str, Path],
+) -> Dict[str, Path]:
+    """Bar chart of worker idle fraction per sigma level."""
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    labels = [f"σ={s}" for s in sigma_levels]
+    ax.bar(labels, idle_fractions, color="steelblue", alpha=0.75)
+    ax.set_xlabel("heterogeneity (σ)")
+    ax.set_ylabel("idle fraction")
+    ax.set_ylim(0, 1)
+    ax.set_title("Worker idle fraction")
+    fig.tight_layout()
+    data = {"sigma": [float(s) for s in sigma_levels], "idle_fraction": idle_fractions}
+    return save_figure(fig, path_stem, data=data)
+
+
+def throughput_over_time_plot(
+    time_bins: Dict[str, np.ndarray],
+    throughput_bins: Dict[str, np.ndarray],
+    path_stem: Union[str, Path],
+) -> Dict[str, Path]:
+    """Line plot of simulation throughput over time, one line per condition."""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    cmap = plt.get_cmap("tab10")
+    for idx, label in enumerate(sorted(time_bins)):
+        ax.plot(time_bins[label], throughput_bins[label], "o-",
+                color=cmap(idx % 10), label=label, markersize=3)
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("completions / bin")
+    ax.set_title("Throughput over time")
+    ax.legend(frameon=False, fontsize="small")
+    fig.tight_layout()
+    data: Dict[str, list] = {}
+    for label in sorted(time_bins):
+        data[f"{label}_time"] = time_bins[label].tolist()
+        data[f"{label}_throughput"] = throughput_bins[label].tolist()
+    return save_figure(fig, path_stem, data=data)
+
+
+def idle_fraction_comparison_plot(
+    sigma_levels: List[float],
+    idle_by_sigma_replicate: Dict[float, List[float]],
+    path_stem: Union[str, Path],
+) -> Dict[str, Path]:
+    """Idle fraction vs. sigma with per-replicate points and mean line."""
+    fig, ax = plt.subplots(figsize=(5, 3.5))
+    sigmas = sorted(sigma_levels)
+    means = []
+    for s in sigmas:
+        vals = idle_by_sigma_replicate[s]
+        ax.scatter([s] * len(vals), vals, s=25, alpha=0.5, color="steelblue")
+        means.append(float(np.mean(vals)) if vals else float("nan"))
+    ax.plot(sigmas, means, "o-", color="darkorange", label="mean", linewidth=2)
+    ax.set_xlabel("heterogeneity (σ)")
+    ax.set_ylabel("idle fraction")
+    ax.set_ylim(0, max(1, max(means) * 1.1) if means else 1)
+    ax.set_title("Idle fraction vs. heterogeneity")
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    data = {"sigma": sigmas, "mean_idle_fraction": means}
+    return save_figure(fig, path_stem, data=data)
+
+
 def quality_vs_time_plot(quality_df: pd.DataFrame, ax=None):
     """Deprecated wrapper for the wall-time posterior quality diagnostic."""
     return posterior_quality_plot(quality_df, axis_kind="wall_time", ax=ax)
@@ -430,8 +524,9 @@ def threshold_summary_plot(summary_df: pd.DataFrame, axis_kind: str, ax=None):
     return fig
 
 
-def corner_plot(records, param_names: List[str], true_params: Optional[Dict] = None, ax=None):
-    """Pairwise posterior scatter/hist grid."""
+def corner_plot(records, param_names: List[str], true_params: Optional[Dict] = None,
+                method_labels: Optional[List[str]] = None, ax=None):
+    """Pairwise posterior scatter/hist grid, optionally color-coded by method."""
     if not param_names:
         fig, axis = plt.subplots(figsize=(4, 3))
         axis.set_title("Posterior corner")
@@ -448,31 +543,41 @@ def corner_plot(records, param_names: List[str], true_params: Optional[Dict] = N
     elif not isinstance(axes, np.ndarray):
         axes = np.asarray(axes)
 
-    data = {
-        name: np.asarray([record.params[name] for record in records if name in record.params], dtype=float)
-        for name in param_names
-    }
+    if method_labels:
+        cmap = plt.get_cmap("tab10")
+        method_colors = {m: cmap(i % 10) for i, m in enumerate(method_labels)}
+        groups = {m: [r for r in records if r.method == m] for m in method_labels}
+    else:
+        groups = {"_all": records}
+        method_colors = {"_all": "steelblue"}
 
     for row_idx, y_name in enumerate(param_names):
         for col_idx, x_name in enumerate(param_names):
             axis = axes[row_idx, col_idx]
-            if row_idx == col_idx:
-                axis.hist(data[x_name], bins=20, density=False, color="steelblue", alpha=0.75)
-                if true_params and x_name in true_params:
-                    axis.axvline(float(true_params[x_name]), color="crimson", linestyle="--", linewidth=1.2)
-            else:
-                axis.scatter(data[x_name], data[y_name], s=12, alpha=0.7, color="steelblue")
-                if true_params:
-                    if x_name in true_params:
-                        axis.axvline(float(true_params[x_name]), color="crimson", linestyle="--", linewidth=0.9)
-                    if y_name in true_params:
-                        axis.axhline(float(true_params[y_name]), color="crimson", linestyle="--", linewidth=0.9)
+            for method, group_records in groups.items():
+                color = method_colors[method]
+                x = np.asarray([r.params[x_name] for r in group_records if x_name in r.params], dtype=float)
+                if row_idx == col_idx:
+                    axis.hist(x, bins=20, density=True, color=color, alpha=0.45,
+                              label=method if method != "_all" else None)
+                else:
+                    y = np.asarray([r.params[y_name] for r in group_records if y_name in r.params], dtype=float)
+                    axis.scatter(x, y, s=12, alpha=0.5, color=color,
+                                 label=method if method != "_all" else None)
+            if true_params:
+                if x_name in true_params:
+                    axis.axvline(float(true_params[x_name]), color="crimson", linestyle="--", linewidth=0.9)
+                if row_idx != col_idx and y_name in true_params:
+                    axis.axhline(float(true_params[y_name]), color="crimson", linestyle="--", linewidth=0.9)
 
             if row_idx == len(param_names) - 1:
                 axis.set_xlabel(x_name)
             if col_idx == 0:
                 axis.set_ylabel(y_name)
 
+    if method_labels:
+        handles = [plt.Rectangle((0, 0), 1, 1, color=method_colors[m], alpha=0.45) for m in method_labels]
+        fig.legend(handles, method_labels, loc="upper right", frameon=False, fontsize="small")
     fig.suptitle("Posterior corner", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.96])
     return fig

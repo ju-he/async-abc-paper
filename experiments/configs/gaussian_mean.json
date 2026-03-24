@@ -17,7 +17,8 @@
     "tol_init": 5.0,
     "n_generations": 5,
     "scheduler_type": "acceptance_rate",
-    "perturbation_scale": 0.8
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations"
   },
   "execution": {
     "n_replicates": 5,

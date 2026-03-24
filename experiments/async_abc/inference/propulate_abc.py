@@ -75,6 +75,8 @@ def _effective_generation_budget(max_sims: int, inference_cfg: Dict) -> int:
     ``max_simulations`` as a total budget across ranks so MPI smoke tests do not
     multiply the requested budget by the worker count.
     """
+    if inference_cfg.get("propulate_budget_mode") == "total_simulations":
+        return max(1, math.ceil(int(max_sims) / _propulate_world_size()))
     if not inference_cfg.get("test_mode"):
         return int(max_sims)
     return max(1, math.ceil(int(max_sims) / _propulate_world_size()))

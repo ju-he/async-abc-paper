@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import subprocess
 import sys
@@ -234,6 +235,15 @@ def main() -> None:
         if extend_mode:
             validate_extension_compatibility(output_dir, full_cfg)
         completed_units = detect_completed_replicates(output_dir, full_cfg) if unit_kind == "replicate" else []
+        # If existing output came from a test run, ignore it for full/small submissions.
+        if completed_units and not args.test:
+            meta_path = output_dir / experiment_name / "data" / "metadata.json"
+            if meta_path.exists():
+                with open(meta_path) as _mf:
+                    _meta = json.load(_mf)
+                if _meta.get("run_mode") == "test" or _meta.get("test_mode") is True:
+                    print(f"{experiment_name}: ignoring test-mode replicate(s) from prior run")
+                    completed_units = []
         if args.add_replicates:
             target_total_units = len(completed_units) + full_units
         else:

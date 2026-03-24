@@ -16,11 +16,15 @@ from .common import (
     archive_evolution_plot,
     corner_plot,
     gantt_plot,
+    idle_fraction_comparison_plot,
+    idle_fraction_plot,
+    posterior_comparison_plot,
     posterior_quality_plot,
     posterior_plot,
     scaling_plot,
     sensitivity_heatmap,
     threshold_summary_plot,
+    throughput_over_time_plot,
     tolerance_trajectory_plot,
 )
 from .export import save_figure
@@ -34,12 +38,18 @@ def _param_names(records: List[ParticleRecord]) -> List[str]:
 
 
 def _final_population(records: List[ParticleRecord]) -> List[ParticleRecord]:
-    """Return particles from the lowest recorded tolerance (final population)."""
+    """Return particles from each method's lowest recorded tolerance."""
     accepted = [r for r in records if r.tolerance is not None]
     if not accepted:
         return records  # fall back to all records
-    min_tol = min(r.tolerance for r in accepted)
-    return [r for r in accepted if r.tolerance == min_tol]
+    by_method: Dict[str, List[ParticleRecord]] = {}
+    for r in accepted:
+        by_method.setdefault(r.method, []).append(r)
+    result: List[ParticleRecord] = []
+    for method_records in by_method.values():
+        min_tol = min(r.tolerance for r in method_records)
+        result.extend(r for r in method_records if r.tolerance == min_tol)
+    return result
 
 
 def plot_posterior(records: List[ParticleRecord], output_dir: OutputDir) -> None:
@@ -47,10 +57,19 @@ def plot_posterior(records: List[ParticleRecord], output_dir: OutputDir) -> None
     final = _final_population(records)
     if not final:
         return
+    methods = sorted({r.method for r in final})
     for param in _param_names(final):
-        samples = np.array([r.params[param] for r in final], dtype=float)
-        stem = output_dir.plots / f"posterior_{param}"
-        posterior_plot(samples, param_name=param, path_stem=stem)
+        if len(methods) <= 1:
+            samples = np.array([r.params[param] for r in final], dtype=float)
+            posterior_plot(samples, param_name=param, path_stem=output_dir.plots / f"posterior_{param}")
+        else:
+            method_samples = {
+                m: np.array([r.params[param] for r in final if r.method == m], dtype=float)
+                for m in methods
+            }
+            posterior_comparison_plot(
+                method_samples, param_name=param, path_stem=output_dir.plots / f"posterior_{param}",
+            )
 
 
 def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir) -> None:
@@ -94,6 +113,123 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         "generation": [r.generation for r in timed],
     }
     save_figure(fig, output_dir.plots / "worker_gantt", data=data)
+
+
+def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
+    """Compute per-method, per-replicate idle fractions from timing data.
+
+    Returns ``{method: {replicate: idle_fraction}}``."""
+    timed = [
+        r for r in records
+        if r.worker_id is not None and r.sim_start_time is not None and r.sim_end_time is not None
+    ]
+    if not timed:
+        return {}
+
+    by_method_rep: Dict[str, Dict[int, List[ParticleRecord]]] = {}
+    for r in timed:
+        by_method_rep.setdefault(r.method, {}).setdefault(r.replicate, []).append(r)
+
+    result: Dict[str, Dict] = {}
+    for method, by_rep in by_method_rep.items():
+        result[method] = {}
+        for rep, recs in by_rep.items():
+            workers = {r.worker_id for r in recs}
+            n_workers = len(workers)
+            span = max(r.sim_end_time for r in recs) - min(r.sim_start_time for r in recs)
+            if span <= 0 or n_workers == 0:
+                result[method][rep] = float("nan")
+                continue
+            total_busy = sum(
+                float(r.sim_end_time) - float(r.sim_start_time) for r in recs
+            )
+            result[method][rep] = 1.0 - total_busy / (n_workers * span)
+    return result
+
+
+def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Bar chart of mean worker idle fraction per method/sigma level."""
+    idle_data = _compute_idle_fraction(records)
+    if not idle_data:
+        return
+    methods = sorted(idle_data)
+    mean_idles = [
+        float(np.mean(list(idle_data[m].values()))) if idle_data[m] else float("nan")
+        for m in methods
+    ]
+    # Extract sigma values from method names like "async_propulate_abc__sigma0.5"
+    sigma_levels = []
+    for m in methods:
+        if "__sigma" in m:
+            try:
+                sigma_levels.append(float(m.split("__sigma")[1]))
+            except ValueError:
+                sigma_levels.append(float("nan"))
+        else:
+            sigma_levels.append(float("nan"))
+
+    idle_fraction_plot(sigma_levels, mean_idles, output_dir.plots / "idle_fraction")
+
+
+def plot_throughput_over_time(
+    records: List[ParticleRecord], output_dir: OutputDir, n_bins: int = 20,
+) -> None:
+    """Throughput (completions per time bin) over wall-clock time, per method."""
+    timed = [
+        r for r in records
+        if r.sim_end_time is not None
+    ]
+    if not timed:
+        return
+
+    methods = sorted({r.method for r in timed})
+    time_bins: Dict[str, np.ndarray] = {}
+    throughput_bins: Dict[str, np.ndarray] = {}
+
+    for method in methods:
+        ends = np.array([r.sim_end_time for r in timed if r.method == method], dtype=float)
+        if ends.size == 0:
+            continue
+        t_min, t_max = float(ends.min()), float(ends.max())
+        if t_max <= t_min:
+            continue
+        edges = np.linspace(t_min, t_max, n_bins + 1)
+        counts, _ = np.histogram(ends, bins=edges)
+        mids = 0.5 * (edges[:-1] + edges[1:])
+        label = method.split("__sigma")[1] if "__sigma" in method else method
+        label = f"σ={label}" if "__sigma" in method else label
+        time_bins[label] = mids
+        throughput_bins[label] = counts.astype(float)
+
+    if not time_bins:
+        return
+
+    throughput_over_time_plot(time_bins, throughput_bins, output_dir.plots / "throughput_over_time")
+
+
+def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Idle fraction vs. sigma with per-replicate scatter and mean line."""
+    idle_data = _compute_idle_fraction(records)
+    if not idle_data:
+        return
+
+    sigma_levels: List[float] = []
+    idle_by_sigma: Dict[float, List[float]] = {}
+    for method in sorted(idle_data):
+        if "__sigma" not in method:
+            continue
+        try:
+            sigma = float(method.split("__sigma")[1])
+        except ValueError:
+            continue
+        sigma_levels.append(sigma)
+        idle_by_sigma[sigma] = list(idle_data[method].values())
+
+    if not sigma_levels:
+        return
+
+    sigma_levels = sorted(set(sigma_levels))
+    idle_fraction_comparison_plot(sigma_levels, idle_by_sigma, output_dir.plots / "idle_fraction_comparison")
 
 
 def plot_quality_vs_wall_time_diagnostic(
@@ -311,11 +447,14 @@ def plot_corner(
     if not final or not param_names:
         return
 
-    fig = corner_plot(final, param_names=param_names, true_params=true_params)
-    data = {
-        name: [r.params.get(name) for r in final]
-        for name in param_names
-    }
+    methods = sorted({r.method for r in final})
+    fig = corner_plot(
+        final, param_names=param_names, true_params=true_params,
+        method_labels=methods if len(methods) > 1 else None,
+    )
+    data: Dict[str, list] = {"method": [r.method for r in final]}
+    for name in param_names:
+        data[name] = [r.params.get(name) for r in final]
     save_figure(fig, output_dir.plots / "corner", data=data)
 
 
