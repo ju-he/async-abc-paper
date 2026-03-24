@@ -107,7 +107,9 @@ def compose_run_mode(config_tier: str, test_mode: bool) -> str:
 def _annotate_mode(cfg: dict, *, config_tier: str, test_mode: bool) -> dict:
     """Persist run-tier metadata on the resolved config."""
     cfg = copy.deepcopy(cfg)
-    cfg.setdefault("inference", {})["test_mode"] = bool(test_mode)
+    inference = cfg.setdefault("inference", {})
+    inference["test_mode"] = bool(test_mode)
+    inference.setdefault("progress_log_interval_s", 10.0)
     cfg.setdefault("execution", {})["config_tier"] = config_tier
     cfg["execution"]["run_mode"] = compose_run_mode(config_tier, bool(test_mode))
     return cfg

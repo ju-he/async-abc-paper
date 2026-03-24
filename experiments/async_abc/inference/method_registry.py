@@ -3,15 +3,17 @@
 ``METHOD_REGISTRY`` maps method name strings to their runner callables.
 All runners share the same signature::
 
-    runner(simulate_fn, limits, inference_cfg, output_dir, replicate, seed)
+    runner(simulate_fn, limits, inference_cfg, output_dir, replicate, seed, progress=None)
         -> List[ParticleRecord]
 
 Use :func:`run_method` as the single dispatch point in experiment scripts.
 """
+import inspect
 from typing import Any, Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ..utils.progress import MethodProgressReporter
 from .propulate_abc import run_propulate_abc
 from .pyabc_sampler import resolve_pyabc_parallel_backend
 from .pyabc_wrapper import run_pyabc_smc
@@ -43,6 +45,7 @@ def run_method(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    progress: MethodProgressReporter | None = None,
 ) -> List[ParticleRecord]:
     """Dispatch to the named inference method.
 
@@ -79,9 +82,31 @@ def run_method(
             f"'{name}' is not a registered method. "
             f"Available methods: {valid}"
         )
-    return METHOD_REGISTRY[name](
-        simulate_fn, limits, inference_cfg, output_dir, replicate, seed
-    )
+    runner = METHOD_REGISTRY[name]
+    try:
+        signature = inspect.signature(runner)
+    except (TypeError, ValueError):
+        signature = None
+
+    if signature is None:
+        accepts_progress = True
+    else:
+        accepts_progress = any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "progress"
+            for parameter in signature.parameters.values()
+        )
+
+    if accepts_progress:
+        return runner(
+            simulate_fn,
+            limits,
+            inference_cfg,
+            output_dir,
+            replicate,
+            seed,
+            progress=progress,
+        )
+    return runner(simulate_fn, limits, inference_cfg, output_dir, replicate, seed)
 
 
 def method_execution_mode(name: str) -> str:

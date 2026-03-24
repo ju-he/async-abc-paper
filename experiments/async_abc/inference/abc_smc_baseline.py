@@ -34,6 +34,7 @@ def _run_abc_smc_baseline_with_sampler(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
     import numpy as np
@@ -49,12 +50,17 @@ def _run_abc_smc_baseline_with_sampler(
     # Per-call distance cache; local to avoid cross-replicate contamination.
     # Note: not populated for MPI backend (workers run in separate processes).
     _distance_cache: Dict = {}
+    eval_count = 0
 
     def pyabc_model(params):
+        nonlocal eval_count
         param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
         sim_seed = abs(hash((seed, param_key))) % (2**31)
         loss = float(simulate_fn(dict(params), seed=sim_seed))
         _distance_cache[param_key] = loss
+        eval_count += 1
+        if progress is not None:
+            progress.update(simulations=eval_count)
         return {"distance": loss}
 
     def pyabc_distance(x, x0):
@@ -126,6 +132,12 @@ def _run_abc_smc_baseline_with_sampler(
                 generation=t,
             ))
 
+    if progress is not None:
+        progress.finish(
+            simulations=eval_count,
+            generations=history.max_t + 1,
+            records=len(records),
+        )
     return records
 
 
@@ -136,6 +148,7 @@ def run_abc_smc_baseline(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    progress=None,
 ) -> List[ParticleRecord]:
     """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
 
@@ -216,6 +229,7 @@ def run_abc_smc_baseline(
                 output_dir=output_dir,
                 replicate=replicate,
                 seed=seed,
+                progress=progress,
             )
 
     sampler = build_pyabc_sampler(n_procs, parallel_backend)
@@ -229,4 +243,5 @@ def run_abc_smc_baseline(
         output_dir=output_dir,
         replicate=replicate,
         seed=seed,
+        progress=progress,
     )

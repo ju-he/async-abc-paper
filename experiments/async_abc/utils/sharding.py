@@ -585,7 +585,9 @@ def _normalized_extension_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     execution.pop("n_replicates", None)
     execution.setdefault("config_tier", "full")
     execution.pop("run_mode", None)
-    normalized.setdefault("inference", {}).pop("test_mode", None)
+    inference = normalized.setdefault("inference", {})
+    inference.pop("test_mode", None)
+    inference.setdefault("progress_log_interval_s", 10.0)
     if normalized.get("benchmark", {}).get("name") == "cellular_potts":
         normalized["benchmark"].pop("output_dir", None)
     return normalized

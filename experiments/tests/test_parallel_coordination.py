@@ -1,4 +1,6 @@
 """Tests for rank-aware experiment coordination helpers."""
+import logging
+
 import pytest
 
 from async_abc.io.records import ParticleRecord
@@ -20,6 +22,56 @@ def _sentinel_records() -> list[ParticleRecord]:
 
 
 class TestRunMethodDistributed:
+    def test_rank_parallel_logs_start_and_finish(self, monkeypatch, tmp_output_dir, caplog):
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: True)
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_parallel")
+        monkeypatch.setattr(runner_utils, "run_method", lambda *args, **kwargs: _sentinel_records())
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            records = runner_utils.run_method_distributed(
+                "rejection_abc",
+                lambda params, seed: 0.0,
+                {"x": (-1.0, 1.0)},
+                {"max_simulations": 1, "progress_log_interval_s": 1.0},
+                output_dir,
+                replicate=0,
+                seed=1,
+            )
+
+        assert records == _sentinel_records()
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=start" in message for message in messages)
+        assert any("status=finish" in message for message in messages)
+
+    def test_rank_zero_logs_failure_on_root(self, monkeypatch, tmp_output_dir, caplog):
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: True)
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "rank_zero")
+        monkeypatch.setattr(
+            runner_utils,
+            "run_method",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            with pytest.raises(RuntimeError, match="boom"):
+                runner_utils.run_method_distributed(
+                    "pyabc_smc",
+                    lambda params, seed: 0.0,
+                    {"x": (-1.0, 1.0)},
+                    {"max_simulations": 1, "progress_log_interval_s": 1.0},
+                    output_dir,
+                    replicate=0,
+                    seed=1,
+                )
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=start" in message for message in messages)
+        assert any("status=fail" in message and "error=RuntimeError" in message for message in messages)
+
     def test_rank_zero_method_skips_non_root(self, monkeypatch, tmp_output_dir):
         calls = []
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
@@ -128,6 +180,30 @@ class TestRunMethodDistributed:
 
         assert records == []
         assert len(calls) == 1
+
+    def test_all_ranks_logs_progress_from_participating_rank(self, monkeypatch, tmp_output_dir, caplog):
+        output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
+
+        monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
+        monkeypatch.setattr(runner_utils, "allgather", lambda value: [value])
+        monkeypatch.setattr(runner_utils, "method_execution_mode_for_cfg", lambda name, cfg, simulate_fn=None: "all_ranks")
+        monkeypatch.setattr(runner_utils, "run_method", lambda *args, **kwargs: _sentinel_records())
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            records = runner_utils.run_method_distributed(
+                "async_propulate_abc",
+                lambda params, seed: 0.0,
+                {"x": (-1.0, 1.0)},
+                {"max_simulations": 1, "progress_log_interval_s": 1.0},
+                output_dir,
+                replicate=0,
+                seed=1,
+            )
+
+        assert records == []
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=start" in message for message in messages)
+        assert any("status=finish" in message for message in messages)
 
     @pytest.mark.parametrize("method_name", ["pyabc_smc", "abc_smc_baseline"])
     def test_pyabc_multicore_backend_stays_rank_zero(self, monkeypatch, tmp_output_dir, method_name):

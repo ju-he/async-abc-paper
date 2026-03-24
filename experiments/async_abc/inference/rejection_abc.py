@@ -17,6 +17,7 @@ def run_rejection_abc(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    progress=None,
 ) -> List[ParticleRecord]:
     """Run rejection ABC.
 
@@ -64,9 +65,23 @@ def run_rejection_abc(
         loss     = float(simulate_fn(params, seed=sim_seed))
         if loss <= tol_init:
             accepted.append((params, loss, time.time() - run_start))
+        if progress is not None:
+            progress.update(
+                simulations=sim_count,
+                accepted=len(accepted),
+                acceptance_rate=(len(accepted) / sim_count) if sim_count else 0.0,
+            )
 
     n = len(accepted)
     w = 1.0 / n if n > 0 else None
+    if progress is not None:
+        progress.finish(
+            simulations=sim_count,
+            accepted=n,
+            acceptance_rate=(n / sim_count) if sim_count else 0.0,
+            budget=max_sims,
+            records=n,
+        )
 
     return [
         ParticleRecord(

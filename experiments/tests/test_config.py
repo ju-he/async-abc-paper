@@ -18,6 +18,7 @@ class TestLoadConfig:
         cfg = load_config(config_file)
         assert cfg["experiment_name"] == minimal_config["experiment_name"]
         assert cfg["benchmark"]["name"] == "gaussian_mean"
+        assert cfg["inference"]["progress_log_interval_s"] == 10.0
 
     def test_returns_dict(self, config_file):
         cfg = load_config(config_file)
@@ -158,6 +159,15 @@ class TestLoadConfig:
 
         with pytest.raises(FileNotFoundError, match="Small config not found"):
             load_config(base_path, small_mode=True)
+
+    def test_preserves_custom_progress_interval(self, tmp_path, minimal_config):
+        minimal_config["inference"]["progress_log_interval_s"] = 2.5
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+
+        cfg = load_config(p)
+
+        assert cfg["inference"]["progress_log_interval_s"] == 2.5
 
 
 class TestNewMethodsInConfig:

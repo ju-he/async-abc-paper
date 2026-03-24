@@ -1,5 +1,6 @@
 """Tests for async_abc.inference.*"""
 import json
+import logging
 import math
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ from async_abc.benchmarks.gaussian_mean import GaussianMean
 from async_abc.inference.method_registry import METHOD_REGISTRY, run_method
 from async_abc.inference.propulate_abc import run_propulate_abc
 from async_abc.io.records import ParticleRecord
+from async_abc.utils.progress import MethodProgressReporter
 
 
 def _test_inference_cfg():
@@ -156,6 +158,14 @@ class _FakeNoEvaltimePropulator(_FakePropulator):
             del ind.evalperiod
             ind.loss = self.loss_fn(ind)
             self.population.append(ind)
+
+
+class _Clock:
+    def __init__(self, start: float = 0.0):
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
 
 
 @pytest.fixture(scope="module")
@@ -336,6 +346,160 @@ class TestRunMethod:
         od = OutputDir(tmp_output_dir, "test").ensure()
         with pytest.raises(KeyError, match="not_a_method"):
             run_method("not_a_method", bm.simulate, bm.limits, _test_inference_cfg(), od, 0, 1)
+
+
+class TestMethodProgress:
+    def test_rejection_abc_emits_periodic_progress(self, tmp_output_dir, caplog, monkeypatch):
+        import async_abc.utils.progress as progress_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        clock = _Clock()
+        monkeypatch.setattr(progress_mod.time, "monotonic", clock)
+
+        def simulate(_params, seed):
+            clock.now += 1.0
+            return 0.0 if seed % 2 == 0 else 100.0
+
+        reporter = MethodProgressReporter("rejection_abc", replicate=0, interval_s=0.5, rank=0)
+        od = OutputDir(tmp_output_dir, "rejection_progress").ensure()
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            reporter.start(total_hint=5, detail="mode=test")
+            run_rejection_abc(
+                simulate,
+                {"x": (-1.0, 1.0)},
+                {**_test_inference_cfg(), "max_simulations": 5, "k": 2},
+                od,
+                replicate=0,
+                seed=1,
+                progress=reporter,
+            )
+
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=update" in message and "accepted=" in message for message in messages)
+        assert any("status=finish" in message and "budget=5" in message for message in messages)
+
+    def test_propulate_abc_uses_wrapper_progress_and_suppresses_native_logs(
+        self, tmp_output_dir, caplog, monkeypatch
+    ):
+        import async_abc.inference.propulate_abc as mod
+        import async_abc.utils.progress as progress_mod
+        from async_abc.io.paths import OutputDir
+
+        clock = _Clock()
+        monkeypatch.setattr(progress_mod.time, "monotonic", clock)
+
+        class LoggingFakePropulator(_FakePropulator):
+            def propulate(self, **kwargs):
+                logging.getLogger("propulate.propulator").info("native propulate info")
+                super().propulate(**kwargs)
+
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs)
+                original_loss_fn = self.loss_fn
+
+                def wrapped_loss_fn(ind):
+                    clock.now += 1.0
+                    return original_loss_fn(ind)
+
+                self.loss_fn = wrapped_loss_fn
+
+        original = (mod.Propulator, mod.ABCPMC)
+        mod.Propulator = LoggingFakePropulator
+        mod.ABCPMC = _FakeABCPMC
+        try:
+            bm = _gaussian_bm()
+            od = OutputDir(tmp_output_dir, "propulate_progress").ensure()
+            reporter = MethodProgressReporter("async_propulate_abc", replicate=0, interval_s=0.5, rank=0)
+
+            with caplog.at_level(logging.INFO):
+                reporter.start(total_hint=4, detail="mode=test")
+                records = mod.run_propulate_abc(
+                    bm.simulate,
+                    bm.limits,
+                    {**_test_inference_cfg(), "max_simulations": 4},
+                    od,
+                    replicate=0,
+                    seed=7,
+                    progress=reporter,
+                )
+        finally:
+            mod.Propulator, mod.ABCPMC = original
+
+        assert records
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=update" in message and "evaluations=" in message for message in messages)
+        assert any("status=finish" in message and "records=" in message for message in messages)
+        assert all("native propulate info" not in message for message in messages)
+
+    def test_pyabc_wrapper_emits_progress(self, tmp_output_dir, caplog, monkeypatch):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+        import async_abc.utils.progress as progress_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        clock = _Clock()
+        monkeypatch.setattr(progress_mod.time, "monotonic", clock)
+
+        def simulate(params, seed):
+            del params, seed
+            clock.now += 1.0
+            return 0.0
+
+        od = OutputDir(tmp_output_dir, "pyabc_progress").ensure()
+        reporter = MethodProgressReporter("pyabc_smc", replicate=0, interval_s=0.5, rank=0)
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            reporter.start(total_hint=8, detail="mode=test")
+            records = run_pyabc_smc(
+                simulate,
+                {"mu": (-1.0, 1.0)},
+                {**_test_inference_cfg(), "max_simulations": 8, "n_workers": 1},
+                od,
+                replicate=0,
+                seed=1,
+                progress=reporter,
+            )
+
+        assert records
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=update" in message and "simulations=" in message for message in messages)
+        assert any("status=finish" in message and "records=" in message for message in messages)
+
+    def test_abc_smc_baseline_emits_progress(self, tmp_output_dir, caplog, monkeypatch):
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+        import async_abc.utils.progress as progress_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        clock = _Clock()
+        monkeypatch.setattr(progress_mod.time, "monotonic", clock)
+
+        def simulate(params, seed):
+            del params, seed
+            clock.now += 1.0
+            return 0.0
+
+        od = OutputDir(tmp_output_dir, "baseline_progress").ensure()
+        reporter = MethodProgressReporter("abc_smc_baseline", replicate=0, interval_s=0.5, rank=0)
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            reporter.start(total_hint=8, detail="mode=test")
+            records = run_abc_smc_baseline(
+                simulate,
+                {"mu": (-1.0, 1.0)},
+                {**_test_inference_cfg(), "max_simulations": 8, "n_generations": 2, "n_workers": 1},
+                od,
+                replicate=0,
+                seed=1,
+                progress=reporter,
+            )
+
+        assert records
+        messages = [record.getMessage() for record in caplog.records]
+        assert any("status=update" in message and "simulations=" in message for message in messages)
+        assert any("status=finish" in message and "generations=" in message for message in messages)
 
 
 class TestRunPropulateAbc:

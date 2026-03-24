@@ -18,6 +18,7 @@ from ..io.config import load_config
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, RecordWriter
 from .mpi import allgather, get_rank, get_world_size, is_root_rank
+from .progress import MethodProgressReporter
 from ..utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
@@ -588,8 +589,6 @@ def run_experiment(
                         replicate,
                     )
                     continue
-                if is_root_rank():
-                    logger.info("[runner] starting method %s replicate=%s", method, replicate)
                 try:
                     records = run_method_distributed(
                         method, benchmark.simulate, benchmark.limits,
@@ -618,8 +617,6 @@ def run_experiment(
                             replicate,
                         )
                     raise
-                if is_root_rank():
-                    logger.info("[runner] finished method %s replicate=%s", method, replicate)
                 if is_root_rank():
                     if record_transform is not None:
                         records = [record_transform(record) for record in records]
@@ -699,13 +696,39 @@ def run_method_distributed(
     """Execute one inference method with rank-aware coordination."""
     execution_mode = method_execution_mode_for_cfg(name, inference_cfg, simulate_fn)
     root_rank = is_root_rank()
+    progress = MethodProgressReporter(
+        method_name=name,
+        replicate=replicate,
+        interval_s=float(inference_cfg.get("progress_log_interval_s", 10.0)),
+    )
+    total_hint = inference_cfg.get("max_simulations")
+    detail = f"mode={execution_mode}"
 
     if execution_mode == "rank_parallel":
         # No MPI coordination: each rank runs the method independently on its
         # assigned replicate.  The caller (Phase 2 of run_experiment /
         # sbc_runner) is responsible for distributing replicates across ranks
         # and gathering results afterwards.
-        return run_method(name, simulate_fn, limits, inference_cfg, output_dir, replicate, seed)
+        progress.start(total_hint=total_hint, detail=detail)
+        try:
+            records = run_method(
+                name,
+                simulate_fn,
+                limits,
+                inference_cfg,
+                output_dir,
+                replicate,
+                seed,
+                progress=progress,
+            )
+        except ImportError as exc:
+            progress.fail(exc)
+            raise
+        except Exception as exc:
+            progress.fail(exc)
+            raise
+        progress.finish(records=len(records))
+        return records
 
     if execution_mode == "rank_zero":
         status_path = _rank_zero_status_path(output_dir, name, replicate, seed)
@@ -717,6 +740,7 @@ def run_method_distributed(
                     status_path.unlink()
 
             try:
+                progress.start(total_hint=total_hint, detail=detail)
                 records = run_method(
                     name,
                     simulate_fn,
@@ -725,14 +749,17 @@ def run_method_distributed(
                     output_dir,
                     replicate,
                     seed,
+                    progress=progress,
                 )
             except ImportError as exc:
+                progress.fail(exc)
                 _write_rank_zero_status(
                     status_path,
                     {"kind": "ImportError", "message": str(exc)},
                 )
                 raise
-            except Exception:
+            except Exception as exc:
+                progress.fail(exc)
                 message = traceback.format_exc()
                 _write_rank_zero_status(
                     status_path,
@@ -740,6 +767,7 @@ def run_method_distributed(
                 )
                 raise RuntimeError(message)
 
+            progress.finish(records=len(records))
             _write_rank_zero_status(status_path, {"kind": "ok", "message": ""})
             return records
 
@@ -759,6 +787,7 @@ def run_method_distributed(
 
     if should_run_here:
         try:
+            progress.start(total_hint=total_hint, detail=detail)
             records = run_method(
                 name,
                 simulate_fn,
@@ -767,10 +796,14 @@ def run_method_distributed(
                 output_dir,
                 replicate,
                 seed,
+                progress=progress,
             )
+            progress.finish(records=len(records))
         except ImportError as exc:
+            progress.fail(exc)
             error_payload = ("ImportError", str(exc))
-        except Exception:
+        except Exception as exc:
+            progress.fail(exc)
             error_payload = ("Exception", traceback.format_exc())
 
     all_errors = allgather(error_payload)

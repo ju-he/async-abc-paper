@@ -10,11 +10,13 @@ behaves like a dict (``ind["mu"]`` etc.).  Internally, the benchmark's
 ``simulate(params, seed)`` is called with a per-evaluation seed derived from
 the run seed and the individual's generation counter.
 """
+import hashlib
+import json
+import logging
 import math
 import random
 import time
-import hashlib
-import json
+from contextlib import contextmanager
 from typing import Callable, Dict, List
 
 import numpy as np
@@ -138,6 +140,18 @@ def _individual_params(ind, limits: Dict) -> Dict[str, float]:
     return params
 
 
+@contextmanager
+def _suppress_propulate_info_logs():
+    """Temporarily silence Propulate INFO logs so wrapper progress stays primary."""
+    propulate_logger = logging.getLogger("propulate")
+    original_level = propulate_logger.level
+    propulate_logger.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        propulate_logger.setLevel(original_level)
+
+
 def run_propulate_abc(
     simulate_fn: Callable,
     limits: Dict,
@@ -145,6 +159,7 @@ def run_propulate_abc(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    progress=None,
 ) -> List[ParticleRecord]:
     """Run the asynchronous ABC-PMC propagator via Propulate.
 
@@ -199,13 +214,19 @@ def run_propulate_abc(
     )
 
     run_start = time.time()
+    eval_count = 0
 
     # Propulate's loss_fn receives an Individual (dict-like).
     # We extract param values and forward to the benchmark simulator.
     def loss_fn(ind) -> float:
+        nonlocal eval_count
         params = _individual_params(ind, limits)
         sim_seed = _eval_seed(seed, mpi_rank, int(ind.generation), params)
-        return float(simulate_fn(params, seed=sim_seed))
+        loss = float(simulate_fn(params, seed=sim_seed))
+        eval_count += 1
+        if progress is not None:
+            progress.update(evaluations=eval_count)
+        return loss
 
     # Each (replicate, seed) gets its own checkpoint dir to prevent cross-contamination.
     # An optional _checkpoint_tag in inference_cfg further qualifies the path so that
@@ -240,7 +261,8 @@ def run_propulate_abc(
 
     propulate_completed = False
     try:
-        propulator.propulate(logging_interval=generation_budget + 1, debug=0)
+        with _suppress_propulate_info_logs():
+            propulator.propulate(logging_interval=generation_budget + 1, debug=0)
         propulate_completed = True
     finally:
         if propulate_completed:
@@ -280,4 +302,6 @@ def run_propulate_abc(
             generation=generation,
         ))
 
+    if progress is not None:
+        progress.finish(evaluations=eval_count, records=len(records))
     return records
