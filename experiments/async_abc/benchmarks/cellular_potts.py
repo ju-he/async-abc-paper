@@ -299,6 +299,16 @@ def _ensure_reference_alias(output_dir: Path, actual_reference_dir: Path) -> Pat
     return alias_path
 
 
+def _remove_eval_path(path_like: str | Path) -> None:
+    """Remove a generated CPM evaluation path without archiving it."""
+    path = Path(path_like)
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    if path.exists():
+        shutil.rmtree(path)
+
+
 class CellularPotts:
     """Cellular Potts model benchmark using nastjapy's SimulationManager + DistanceMetric.
 
@@ -425,6 +435,21 @@ class CellularPotts:
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 
+    def _cleanup_eval_dir(self, sim_dir: str) -> None:
+        """Archive simulation output and optionally remove the directory."""
+        path = Path(sim_dir)
+        if not path.exists():
+            return
+        try:
+            self._sim_manager.cleanup_simdir(sim_dir)
+        except Exception as exc:
+            logger.warning("Archive/cleanup failed for %s: %s", sim_dir, exc)
+        if not self._keep_eval_dirs:
+            try:
+                _remove_eval_path(sim_dir)
+            except Exception as exc:
+                logger.warning("Removal failed for %s: %s", sim_dir, exc)
+
     def simulate(self, params: dict, seed: int) -> float:
         """Run a CPM simulation and return the distance to reference data.
 
@@ -469,49 +494,39 @@ class CellularPotts:
         )
         param_list = ParameterList(parameters=param_entries)
 
+        # --- run simulation ---
+        sim_dir: str | None = None
         try:
-            try:
-                config_path = self._sim_manager.build_simulation_config(
-                    param_list, out_dir_name=sim_dir_name
-                )
-                _normalize_generated_config_paths(config_path)
-                self._sim_manager.run_simulation(config_path)
-            except Exception as exc:
-                logger.error(
-                    "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
-                )
-                if not self._keep_eval_dirs:
-                    leaked_dir = Path(self._output_dir) / sim_dir_name
-                    if leaked_dir.exists():
-                        try:
-                            shutil.rmtree(leaked_dir)
-                        except Exception as cleanup_exc:
-                            logger.warning(
-                                "Cleanup of failed sim dir %s failed: %s",
-                                leaked_dir,
-                                cleanup_exc,
-                            )
-                return float("nan")
-
+            config_path = self._sim_manager.build_simulation_config(
+                param_list, out_dir_name=sim_dir_name
+            )
+            _normalize_generated_config_paths(config_path)
             sim_dir = str(Path(config_path).parent)
-            score = float("nan")
-            try:
-                distance_result = self._distance_metric.calculate_distance(sim_dir)
-                score = float(distance_result)
-            except Exception as exc:
-                logger.error(
-                    "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
-                )
-            finally:
-                if not self._keep_eval_dirs:
-                    try:
-                        self._sim_manager.cleanup_simdir(sim_dir)
-                    except Exception as exc:
-                        logger.warning("Cleanup failed for %s: %s", sim_dir, exc)
-
-            return score
-        finally:
+            self._sim_manager.run_simulation(config_path)
+        except Exception as exc:
+            logger.error(
+                "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
+            )
+            if sim_dir is None:
+                sim_dir = str(Path(self._output_dir) / sim_dir_name)
+            self._cleanup_eval_dir(sim_dir)
             _restore_default_fp_state()
+            return float("nan")
+
+        # --- compute distance ---
+        score = float("nan")
+        try:
+            distance_result = self._distance_metric.calculate_distance(sim_dir)
+            score = float(distance_result)
+        except Exception as exc:
+            logger.error(
+                "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
+            )
+        finally:
+            self._cleanup_eval_dir(sim_dir)
+            _restore_default_fp_state()
+
+        return score
 
     def close(self) -> None:
         """Best-effort teardown for CPM helper objects between experiment runs."""

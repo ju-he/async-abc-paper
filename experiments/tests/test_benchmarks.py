@@ -534,8 +534,11 @@ class TestCellularPotts:
     def test_simulate_calls_cleanup(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
+        sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
+        assert sim_dir.exists()
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
 
     def test_simulate_restores_default_fp_state(self, cpm_config, cpm_mocks, monkeypatch):
@@ -587,22 +590,51 @@ class TestCellularPotts:
         assert math.isnan(result)
 
     def test_simulate_returns_nan_on_distance_failure(self, cpm_config, cpm_mocks):
-        """Distance computation failure → float('nan'), cleanup still called."""
+        """Distance computation failure → float('nan'), eval dir still removed."""
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
+        sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         mock_dist.calculate_distance.side_effect = ValueError("feature extraction failed")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
         assert math.isnan(result)
+        assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
 
     def test_simulate_cleanup_called_even_on_distance_failure(self, cpm_config, cpm_mocks):
-        """cleanup_simdir is always called (finally block), even when distance fails."""
+        """The eval directory is always deleted, even when distance fails."""
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
+        sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         mock_dist.calculate_distance.side_effect = RuntimeError("boom")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=7)
+        assert not sim_dir.exists()
+        mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_simulate_removes_eval_dir_on_simulation_failure(self, cpm_config, cpm_mocks):
+        """Simulation failure still removes the generated eval directory."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        mock_sim, mock_dist = cpm_mocks
+        created_paths = []
+
+        def build_config(_param_list, out_dir_name=None):
+            config_path = Path(cpm_config["output_dir"]) / out_dir_name / "config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text("{}")
+            created_paths.append(config_path.parent)
+            return str(config_path)
+
+        mock_sim.build_simulation_config.side_effect = build_config
+        mock_sim.run_simulation.side_effect = RuntimeError("NAStJA crashed")
+
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+
+        assert math.isnan(result)
+        assert len(created_paths) == 1
+        assert not created_paths[0].exists()
         mock_sim.cleanup_simdir.assert_called_once()
 
     def test_eval_counter_increments(self, cpm_config, cpm_mocks):
