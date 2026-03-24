@@ -18,6 +18,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from async_abc.analysis import final_state_results
 from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
@@ -68,11 +69,10 @@ def _write_trial_records_jsonl(trial_records: list[dict], path: Path) -> None:
             f.write(json.dumps(payload) + "\n")
 
 
-def _posterior_samples(records, param_name: str) -> np.ndarray:
-    accepted = [r for r in records if r.tolerance is not None]
-    final = accepted if not accepted else [
-        r for r in accepted if r.tolerance == min(x.tolerance for x in accepted)
-    ]
+def _posterior_samples(records, param_name: str, *, archive_size: int | None = None) -> np.ndarray:
+    final = []
+    for result in final_state_results(records, archive_size=archive_size):
+        final.extend(result.records)
     return np.asarray([r.params[param_name] for r in final if param_name in r.params], dtype=float)
 
 
@@ -110,9 +110,10 @@ def _extend_trial_records(
     true_params: dict[str, float],
     param_names: list[str],
     records,
+    archive_size: int | None,
 ) -> None:
     for param in param_names:
-        samples = _posterior_samples(records, param)
+        samples = _posterior_samples(records, param, archive_size=archive_size)
         if samples.size == 0:
             continue
         target.append({
@@ -142,7 +143,7 @@ def _plot_rank_histogram(ranks_df: pd.DataFrame, output_dir: OutputDir) -> None:
     for idx, method in enumerate(methods):
         ax = axes[idx, 0]
         group = ranks_df[ranks_df["method"] == method]
-        bins = int(group["n_samples"].iloc[0]) + 1 if not group.empty else 10
+        bins = int(group["n_samples"].max()) + 1 if not group.empty else 10
         ax.hist(group["rank"], bins=min(max(bins, 5), 30), color="steelblue", alpha=0.8)
         ax.set_title(f"Rank histogram: {method}")
         ax.set_xlabel("rank")
@@ -195,6 +196,7 @@ def main(argv: list[str] | None = None) -> None:
     benchmark_cfg = cfg["benchmark"]
     n_trials = int(sbc_cfg["n_trials"])
     coverage_levels = [float(x) for x in sbc_cfg["coverage_levels"]]
+    archive_size = cfg.get("inference", {}).get("k")
 
     base_benchmark = make_benchmark(benchmark_cfg)
     param_names = list(base_benchmark.limits.keys())
@@ -305,6 +307,7 @@ def main(argv: list[str] | None = None) -> None:
                     true_params=true_params,
                     param_names=param_names,
                     records=records,
+                    archive_size=archive_size,
                 )
 
         # ── Barrier: drain MPI state before rank_parallel phase ──────────────────
@@ -355,6 +358,7 @@ def main(argv: list[str] | None = None) -> None:
                             true_params=true_params,
                             param_names=param_names,
                             records=records,
+                            archive_size=archive_size,
                         )
                     except ImportError as exc:
                         phase2_error = ("ImportError", str(exc))

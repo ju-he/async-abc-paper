@@ -14,7 +14,9 @@ import matplotlib
 matplotlib.use("Agg")  # non-interactive backend
 from matplotlib.figure import Figure
 
-from async_abc.analysis import posterior_quality_curve, tolerance_over_wall_time
+from async_abc.analysis import final_state_results, posterior_quality_curve, tolerance_over_wall_time
+from async_abc.inference.abc_smc_baseline import _prepare_db_path as prepare_abc_db_path
+from async_abc.inference.pyabc_wrapper import _prepare_db_path as prepare_pyabc_db_path
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord
 import async_abc.plotting.export as export_mod
@@ -37,9 +39,11 @@ from async_abc.plotting.reporters import (
     _final_population,
     _parse_variant_stem,
     plot_attempts_to_target_summary,
+    plot_benchmark_diagnostics,
     plot_corner,
     plot_idle_fraction,
     plot_idle_fraction_comparison,
+    plot_generation_timeline,
     plot_quality_vs_attempt_budget,
     plot_quality_vs_posterior_samples,
     plot_quality_vs_time,
@@ -56,6 +60,7 @@ from async_abc.plotting.common import (
     posterior_comparison_plot,
     throughput_over_time_plot,
 )
+from async_abc.utils.git import find_repo_root
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +158,13 @@ class TestGetGitHash:
         assert len(h) > 0
 
 
+class TestGitHelpers:
+    def test_find_repo_root_from_test_file(self):
+        repo_root = find_repo_root(Path(__file__).resolve())
+        assert repo_root is not None
+        assert (repo_root / ".git").exists()
+
+
 # ---------------------------------------------------------------------------
 # common.py tests
 # ---------------------------------------------------------------------------
@@ -211,17 +223,33 @@ class TestArchiveEvolutionPlot:
 class TestSensitivityHeatmap:
     def test_sensitivity_heatmap_supports_facets(self, tmp_path):
         data = np.array([
-            [[1.0, 2.0], [3.0, 4.0]],
-            [[2.0, 3.0], [4.0, 5.0]],
+            [
+                [[1.0, 2.0], [3.0, 4.0]],
+                [[2.0, 3.0], [4.0, 5.0]],
+            ],
+            [
+                [[1.5, 2.5], [3.5, 4.5]],
+                [[2.5, 3.5], [4.5, 5.5]],
+            ],
         ])
         paths = sensitivity_heatmap(
             data,
             row_labels=["50", "100"],
             col_labels=["0.4", "0.8"],
             path_stem=tmp_path / "sensitivity_facet",
-            facet_labels=["0.5x", "2.0x"],
+            facet_row_labels=["0.5x", "2.0x"],
+            facet_col_labels=["acceptance_rate", "median"],
         )
         assert "pdf" in paths and "png" in paths and "csv" in paths
+        rows = _read_csv(paths["csv"])
+        assert set(rows[0].keys()) == {
+            "tol_init_multiplier",
+            "scheduler_type",
+            "k",
+            "perturbation_scale",
+            "value",
+        }
+        assert len(rows) == 16
 
     def test_sensitivity_heatmap_handles_all_nan_data(self, tmp_path):
         data = np.full((2, 2, 2), np.nan)
@@ -301,6 +329,21 @@ class TestPhase3Reporters:
         meta = json.loads((output_dir.plots / "quality_vs_wall_time_diagnostic_meta.json").read_text())
         assert meta["plot_name"] == "quality_vs_wall_time_diagnostic"
         assert meta["axis_kind"] == "wall_time"
+        assert not (output_dir.plots / "quality_vs_time.pdf").exists()
+
+    def test_plot_benchmark_diagnostics_omits_legacy_quality_alias(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        cfg = {
+            "benchmark": {"true_mu": 0.0},
+            "inference": {"k": 20},
+            "analysis": {"target_wasserstein": 1.0},
+            "plots": {"quality_vs_time": True},
+        }
+        plot_benchmark_diagnostics(sample_records, cfg, output_dir)
+        assert (output_dir.plots / "quality_vs_wall_time_diagnostic.pdf").exists()
+        assert (output_dir.plots / "quality_vs_posterior_samples.pdf").exists()
+        assert (output_dir.plots / "quality_vs_attempt_budget.pdf").exists()
+        assert not (output_dir.plots / "quality_vs_time.pdf").exists()
 
     def test_plot_quality_vs_posterior_samples_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
@@ -337,6 +380,21 @@ class TestPhase3Reporters:
         assert (output_dir.plots / "tolerance_trajectory.png").exists()
         assert (output_dir.plots / "tolerance_trajectory_data.csv").exists()
         assert (output_dir.plots / "tolerance_trajectory_meta.json").exists()
+
+    def test_plot_generation_timeline_exports_files(self, tmp_path, abc_smc_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_generation_timeline(abc_smc_records, output_dir)
+        assert (output_dir.plots / "generation_timeline.pdf").exists()
+        rows = _read_csv(output_dir.plots / "generation_timeline_data.csv")
+        assert set(rows[0].keys()) >= {
+            "method",
+            "replicate",
+            "generation",
+            "gen_start",
+            "gen_end",
+            "gen_duration",
+            "n_particles",
+        }
 
     def test_plot_sensitivity_summary_exports_files(self, tmp_path):
         output_dir = OutputDir(tmp_path, "plots").ensure()
@@ -419,35 +477,42 @@ class TestWassersteinMetric:
 # ---------------------------------------------------------------------------
 
 class TestFinalPopulationPerMethod:
-    def test_returns_particles_from_all_methods(self):
-        """Each method's lowest-tolerance particles should be included."""
+    def test_async_archive_reconstruction_uses_final_epsilon_and_archive_cap(self):
         records = [
-            ParticleRecord(method="method_a", replicate=0, seed=1, step=1,
-                           params={"x": 1.0}, loss=0.5, tolerance=2.0, wall_time=1.0),
-            ParticleRecord(method="method_a", replicate=0, seed=1, step=2,
-                           params={"x": 1.1}, loss=0.3, tolerance=1.0, wall_time=2.0),
-            ParticleRecord(method="method_b", replicate=0, seed=1, step=1,
-                           params={"x": 2.0}, loss=0.8, tolerance=5.0, wall_time=1.0),
-            ParticleRecord(method="method_b", replicate=0, seed=1, step=2,
-                           params={"x": 2.1}, loss=0.6, tolerance=3.0, wall_time=2.0),
+            ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=1,
+                           params={"x": 1.0}, loss=0.45, tolerance=4.0, wall_time=1.0),
+            ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=2,
+                           params={"x": 1.1}, loss=0.30, tolerance=2.0, wall_time=2.0),
+            ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=3,
+                           params={"x": 1.2}, loss=0.20, tolerance=1.0, wall_time=3.0),
+            ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=4,
+                           params={"x": 1.3}, loss=0.10, tolerance=0.5, wall_time=4.0),
+            ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=5,
+                           params={"x": 9.9}, loss=0.80, tolerance=0.5, wall_time=5.0),
         ]
-        final = _final_population(records)
-        methods = {r.method for r in final}
-        assert methods == {"method_a", "method_b"}
+        results = final_state_results(records, archive_size=3)
+        assert len(results) == 1
+        result = results[0]
+        assert result.state_kind == "archive_reconstruction"
+        assert result.n_particles_used == 3
+        assert [r.params["x"] for r in result.records] == [1.3, 1.2, 1.1]
 
-    def test_selects_per_method_minimum_tolerance(self):
+    def test_sync_final_population_pools_final_generation_per_replicate(self):
         records = [
-            ParticleRecord(method="A", replicate=0, seed=1, step=1,
-                           params={"x": 1.0}, loss=0.5, tolerance=1.0, wall_time=1.0),
-            ParticleRecord(method="A", replicate=0, seed=1, step=2,
-                           params={"x": 1.1}, loss=0.3, tolerance=2.0, wall_time=2.0),
-            ParticleRecord(method="B", replicate=0, seed=1, step=1,
-                           params={"x": 2.0}, loss=0.8, tolerance=10.0, wall_time=1.0),
+            ParticleRecord(method="abc_smc_baseline", replicate=0, seed=1, step=1,
+                           params={"x": 0.9}, loss=0.9, tolerance=2.0, wall_time=1.0, generation=0),
+            ParticleRecord(method="abc_smc_baseline", replicate=0, seed=1, step=2,
+                           params={"x": 0.1}, loss=0.1, tolerance=1.0, wall_time=2.0, generation=1),
+            ParticleRecord(method="abc_smc_baseline", replicate=1, seed=2, step=1,
+                           params={"x": 1.9}, loss=0.8, tolerance=3.0, wall_time=1.5, generation=0),
+            ParticleRecord(method="abc_smc_baseline", replicate=1, seed=2, step=2,
+                           params={"x": 1.1}, loss=0.2, tolerance=1.5, wall_time=2.5, generation=1),
         ]
         final = _final_population(records)
-        assert len(final) == 2  # method A tol=1.0 + method B tol=10.0
-        assert {r.method for r in final} == {"A", "B"}
-        assert {r.tolerance for r in final} == {1.0, 10.0}
+        assert len(final) == 2
+        assert {r.replicate for r in final} == {0, 1}
+        assert {r.generation for r in final} == {1}
+        assert {r.params["x"] for r in final} == {0.1, 1.1}
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +573,67 @@ def _heterogeneity_records():
     return records
 
 
+def _mixed_runtime_records():
+    return [
+        ParticleRecord(
+            method="async_propulate_abc__sigma1.0",
+            replicate=0,
+            seed=42,
+            step=1,
+            params={"x": 0.0},
+            loss=0.1,
+            tolerance=1.0,
+            wall_time=0.2,
+            worker_id="0",
+            sim_start_time=0.0,
+            sim_end_time=0.2,
+            attempt_count=1,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc__sigma1.0",
+            replicate=0,
+            seed=42,
+            step=2,
+            params={"x": 1.0},
+            loss=0.2,
+            tolerance=0.8,
+            wall_time=0.6,
+            worker_id="1",
+            sim_start_time=0.3,
+            sim_end_time=0.6,
+            attempt_count=2,
+        ),
+        ParticleRecord(
+            method="abc_smc_baseline__sigma1.0",
+            replicate=0,
+            seed=42,
+            step=1,
+            params={"x": 0.5},
+            loss=0.5,
+            tolerance=1.2,
+            wall_time=1.0,
+            sim_start_time=0.0,
+            sim_end_time=0.8,
+            generation=0,
+            attempt_count=2,
+        ),
+        ParticleRecord(
+            method="abc_smc_baseline__sigma1.0",
+            replicate=0,
+            seed=42,
+            step=2,
+            params={"x": 0.6},
+            loss=0.4,
+            tolerance=1.2,
+            wall_time=1.0,
+            sim_start_time=0.0,
+            sim_end_time=1.0,
+            generation=0,
+            attempt_count=2,
+        ),
+    ]
+
+
 class TestIdleFractionPlot:
     def test_idle_fraction_plot_saves_files(self, tmp_path):
         idle_fraction_plot([0.0, 0.5, 1.0], [0.1, 0.3, 0.5], tmp_path / "idle")
@@ -517,6 +643,13 @@ class TestIdleFractionPlot:
         output_dir = OutputDir(tmp_path, "test").ensure()
         plot_idle_fraction(_heterogeneity_records(), output_dir)
         assert (output_dir.plots / "idle_fraction.pdf").exists()
+
+    def test_plot_idle_fraction_includes_async_and_sync_measurement_methods(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_idle_fraction(_mixed_runtime_records(), output_dir)
+        rows = _read_csv(output_dir.plots / "idle_fraction_data.csv")
+        assert {row["measurement_method"] for row in rows} == {"worker_idle", "barrier_overhead"}
+        assert {row["base_method"] for row in rows} == {"async_propulate_abc", "abc_smc_baseline"}
 
 
 class TestThroughputOverTimePlot:
@@ -543,6 +676,12 @@ class TestIdleFractionComparisonPlot:
         plot_idle_fraction_comparison(_heterogeneity_records(), output_dir)
         assert (output_dir.plots / "idle_fraction_comparison.pdf").exists()
 
+    def test_plot_idle_fraction_comparison_exports_measurement_method_column(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_idle_fraction_comparison(_mixed_runtime_records(), output_dir)
+        rows = _read_csv(output_dir.plots / "idle_fraction_comparison_data.csv")
+        assert {row["measurement_method"] for row in rows} == {"worker_idle", "barrier_overhead"}
+
 
 class TestComputeIdleFraction:
     def test_returns_per_method_per_replicate(self):
@@ -551,6 +690,43 @@ class TestComputeIdleFraction:
         assert "async_propulate_abc__sigma0.0" in idle
         assert 0 in idle["async_propulate_abc__sigma0.0"]
         assert 0 <= idle["async_propulate_abc__sigma0.0"][0] <= 1
+
+
+class TestToleranceTrajectory:
+    def test_tolerance_over_wall_time_deduplicates_sync_generation_duplicates(self, abc_smc_records):
+        df = tolerance_over_wall_time(abc_smc_records)
+        assert len(df) == 2
+        assert list(df["tolerance"]) == [1.0, 0.5]
+
+
+class TestTaggedDbPaths:
+    def test_prepare_abc_db_path_tags_db_by_replicate_seed_and_checkpoint(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        db_file = output_dir.data / "abc_smc_baseline_rep3_seed11__sigma0_5.db"
+        wal_file = Path(f"{db_file}-wal")
+        db_file.write_text("stale")
+        wal_file.write_text("stale")
+        url = prepare_abc_db_path(
+            output_dir,
+            method_name="abc_smc_baseline",
+            replicate=3,
+            seed=11,
+            checkpoint_tag="sigma0.5",
+        )
+        assert "abc_smc_baseline_rep3_seed11__sigma0_5.db" in url
+        assert not db_file.exists()
+        assert not wal_file.exists()
+
+    def test_prepare_pyabc_db_path_tags_db_by_replicate_seed_and_checkpoint(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        url = prepare_pyabc_db_path(
+            output_dir,
+            method_name="pyabc_smc",
+            replicate=2,
+            seed=7,
+            checkpoint_tag="slowdown=5",
+        )
+        assert "pyabc_smc_rep2_seed7__slowdown_5.db" in url
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,10 @@
 from importlib import import_module
 
 _EXPORTS = {
+    "base_method_name": (".final_state", "base_method_name"),
     "barrier_overhead_fraction": (".barrier", "barrier_overhead_fraction"),
+    "final_state_records": (".final_state", "final_state_records"),
+    "final_state_results": (".final_state", "final_state_results"),
     "generation_spans": (".barrier", "generation_spans"),
     "posterior_quality_curve": (".convergence", "posterior_quality_curve"),
     "time_to_threshold": (".convergence", "time_to_threshold"),
@@ -18,11 +21,14 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "base_method_name",
     "barrier_overhead_fraction",
     "compute_ess",
     "compute_rank",
     "empirical_coverage",
     "ess_over_time",
+    "final_state_records",
+    "final_state_results",
     "generation_spans",
     "loss_over_steps",
     "posterior_quality_curve",

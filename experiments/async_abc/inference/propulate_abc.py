@@ -281,10 +281,15 @@ def run_propulate_abc(
         ),
     )
     records: List[ParticleRecord] = []
+    current_tolerance = float(tol_init)
     for step, ind in enumerate(population, start=1):
         params = _individual_params(ind, limits)
         weight = float(ind.weight) if ind.weight is not None else None
-        tolerance = float(ind.tolerance) if ind.tolerance is not None else None
+        if ind.tolerance is not None:
+            current_tolerance = min(current_tolerance, float(ind.tolerance))
+            tolerance = float(ind.tolerance)
+        else:
+            tolerance = current_tolerance
         sim_end_time = (
             float(ind.evaltime) - run_start
             if hasattr(ind, "evaltime") and ind.evaltime is not None

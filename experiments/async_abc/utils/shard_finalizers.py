@@ -20,6 +20,7 @@ from ..io.records import ParticleRecord, load_records
 from ..plotting.reporters import (
     plot_ablation_summary,
     plot_benchmark_diagnostics,
+    plot_generation_timeline,
     plot_idle_fraction,
     plot_idle_fraction_comparison,
     plot_sensitivity_summary,
@@ -252,7 +253,7 @@ def _plot_rank_histogram(ranks_df, output_dir: OutputDir) -> None:
     for idx, method in enumerate(methods):
         ax = axes[idx, 0]
         group = ranks_df[ranks_df["method"] == method]
-        bins = int(group["n_samples"].iloc[0]) + 1 if not group.empty else 10
+        bins = int(group["n_samples"].max()) + 1 if not group.empty else 10
         ax.hist(group["rank"], bins=min(max(bins, 5), 30), color="steelblue", alpha=0.8)
         ax.set_title(f"Rank histogram: {method}")
         ax.set_xlabel("rank")
@@ -376,10 +377,27 @@ def finalize_straggler_experiment(
             match = slowdown_pattern.search(record.method)
             if match:
                 tagged_records.append((record, float(match.group(1))))
-    if tagged_records:
+        if tagged_records:
             worst = max(factor for _, factor in tagged_records)
             worst_records = [record for record, factor in tagged_records if factor == worst]
-            plot_worker_gantt(worst_records, tmp_output)
+            async_worst_records = [
+                record for record in worst_records
+                if record.worker_id is not None and record.sim_start_time is not None and record.sim_end_time is not None
+            ]
+            sync_worst_records = [
+                record for record in worst_records
+                if record.generation is not None and record.sim_start_time is not None and record.sim_end_time is not None
+                and record.worker_id is None
+            ]
+            if async_worst_records:
+                plot_worker_gantt(async_worst_records, tmp_output)
+            if sync_worst_records:
+                plot_generation_timeline(
+                    sync_worst_records,
+                    tmp_output,
+                    stem_name="sync_generation_timeline",
+                    title="Sync generation timeline (worst straggler slowdown)",
+                )
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     _rewrite_root_timing_summary(layout.output_root)

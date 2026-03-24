@@ -200,6 +200,8 @@ def sensitivity_heatmap(
     col_labels: List[str],
     path_stem: Union[str, Path],
     facet_labels: Optional[List[str]] = None,
+    facet_row_labels: Optional[List[str]] = None,
+    facet_col_labels: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
     """Heatmap for sensitivity / ablation results.
 
@@ -236,8 +238,61 @@ def sensitivity_heatmap(
             csv_data[col] = data[:, j].tolist()
         return save_figure(fig, path_stem, data=csv_data)
 
+    if data.ndim == 4:
+        row_facets, col_facets = data.shape[:2]
+        facet_row_labels = facet_row_labels or [f"row_facet_{i}" for i in range(row_facets)]
+        facet_col_labels = facet_col_labels or [f"col_facet_{j}" for j in range(col_facets)]
+        fig, axes = plt.subplots(
+            row_facets,
+            col_facets,
+            figsize=(max(4, len(col_labels)) * col_facets, max(3, len(row_labels)) * row_facets),
+            squeeze=False,
+        )
+        finite = data[np.isfinite(data)]
+        if finite.size == 0:
+            vmin, vmax = 0.0, 1.0
+        else:
+            vmin = float(np.min(finite))
+            vmax = float(np.max(finite))
+        for row_idx in range(row_facets):
+            for col_idx in range(col_facets):
+                ax = axes[row_idx, col_idx]
+                im = ax.imshow(data[row_idx, col_idx], aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
+                ax.set_title(
+                    f"tol_init_multiplier={facet_row_labels[row_idx]}, "
+                    f"scheduler_type={facet_col_labels[col_idx]}"
+                )
+                ax.set_xticks(range(len(col_labels)))
+                ax.set_xticklabels(col_labels, rotation=45, ha="right")
+                ax.set_yticks(range(len(row_labels)))
+                ax.set_yticklabels(row_labels)
+                if row_idx == row_facets - 1:
+                    ax.set_xlabel("perturbation_scale")
+                if col_idx == 0:
+                    ax.set_ylabel("k")
+        fig.colorbar(im, ax=axes.ravel().tolist())
+        fig.subplots_adjust(wspace=0.35, hspace=0.35, bottom=0.12)
+
+        csv_data = {
+            "tol_init_multiplier": [],
+            "scheduler_type": [],
+            "k": [],
+            "perturbation_scale": [],
+            "value": [],
+        }
+        for facet_row_idx, facet_row_label in enumerate(facet_row_labels):
+            for facet_col_idx, facet_col_label in enumerate(facet_col_labels):
+                for row_idx, row_label in enumerate(row_labels):
+                    for col_idx, col_label in enumerate(col_labels):
+                        csv_data["tol_init_multiplier"].append(str(facet_row_label))
+                        csv_data["scheduler_type"].append(str(facet_col_label))
+                        csv_data["k"].append(str(row_label))
+                        csv_data["perturbation_scale"].append(str(col_label))
+                        csv_data["value"].append(float(data[facet_row_idx, facet_col_idx, row_idx, col_idx]))
+        return save_figure(fig, path_stem, data=csv_data)
+
     if data.ndim != 3:
-        raise ValueError("sensitivity_heatmap expects 2-D or 3-D data.")
+        raise ValueError("sensitivity_heatmap expects 2-D, 3-D, or 4-D data.")
 
     n_facets = data.shape[0]
     facet_labels = facet_labels or [f"facet_{i}" for i in range(n_facets)]

@@ -6,7 +6,6 @@ always a `_meta.json` with provenance fields (git hash, timestamp).
 import csv
 import json
 import shutil
-import subprocess
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -14,19 +13,12 @@ from typing import Dict, List, Optional, Union
 
 import matplotlib.figure
 
+from ..utils.git import get_git_hash as _shared_git_hash
+
 
 def get_git_hash() -> str:
     """Return the short HEAD git hash, or ``'unknown'`` on failure."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).parent,
-        )
-        return result.stdout.strip() or "unknown"
-    except Exception:
-        return "unknown"
+    return _shared_git_hash(Path(__file__))
 
 
 def _save_png_via_pdftoppm(pdf_path: Path, png_path: Path, dpi: int = 150) -> bool:

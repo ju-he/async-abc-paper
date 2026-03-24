@@ -1,7 +1,6 @@
 """Experiment metadata serialisation."""
 import json
 import platform
-import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -9,18 +8,11 @@ from typing import Any, Dict, Optional
 
 from ..io.config import get_run_mode, is_test_mode
 from ..io.paths import OutputDir
+from .git import get_git_hash
 
 
 def _get_git_hash() -> str:
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True,
-            cwd=Path(__file__).parent,
-        )
-        return result.stdout.strip() or "unknown"
-    except Exception:
-        return "unknown"
+    return get_git_hash(Path(__file__))
 
 
 def _installed_packages() -> Dict[str, str]:

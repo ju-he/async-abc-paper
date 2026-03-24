@@ -11,11 +11,32 @@ def tolerance_over_wall_time(records) -> pd.DataFrame:
     if frame.empty:
         return pd.DataFrame(columns=["method", "replicate", "wall_time", "tolerance"])
     cols = ["method", "replicate", "wall_time", "tolerance"]
-    return (
+    result = (
         frame.loc[frame["tolerance"].notna(), cols]
         .sort_values(["method", "replicate", "wall_time", "tolerance"])
         .reset_index(drop=True)
     )
+    return result.drop_duplicates(
+        subset=["method", "replicate", "wall_time", "tolerance"],
+        keep="last",
+    ).reset_index(drop=True)
+
+
+def tolerance_over_attempts(records) -> pd.DataFrame:
+    """Return tolerance trajectories over attempt count or step."""
+    frame = records_to_frame(records)
+    if frame.empty:
+        return pd.DataFrame(columns=["method", "replicate", "attempt_count", "tolerance"])
+    if "attempt_count" not in frame.columns:
+        frame["attempt_count"] = frame["step"]
+    result = frame.loc[frame["tolerance"].notna(), ["method", "replicate", "attempt_count", "tolerance"]].copy()
+    result["attempt_count"] = pd.to_numeric(result["attempt_count"], errors="coerce").fillna(0).astype(int)
+    result["tolerance"] = pd.to_numeric(result["tolerance"], errors="coerce")
+    result = result.sort_values(["method", "replicate", "attempt_count", "tolerance"]).reset_index(drop=True)
+    return result.drop_duplicates(
+        subset=["method", "replicate", "attempt_count", "tolerance"],
+        keep="last",
+    ).reset_index(drop=True)
 
 
 def loss_over_steps(records) -> pd.DataFrame:

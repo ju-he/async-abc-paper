@@ -10,6 +10,7 @@ instructions.
 """
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
@@ -24,6 +25,28 @@ from .pyabc_sampler import (
 logger = logging.getLogger(__name__)
 
 
+def _db_suffix(checkpoint_tag: str) -> str:
+    if not checkpoint_tag:
+        return ""
+    safe_tag = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in str(checkpoint_tag))
+    return f"__{safe_tag}" if safe_tag else ""
+
+
+def _prepare_db_path(
+    output_dir: OutputDir,
+    *,
+    method_name: str,
+    replicate: int,
+    seed: int,
+    checkpoint_tag: str,
+) -> str:
+    db_file = output_dir.data / f"{method_name}_rep{replicate}_seed{seed}{_db_suffix(checkpoint_tag)}.db"
+    for path in (db_file, Path(f"{db_file}-wal"), Path(f"{db_file}-shm")):
+        if path.exists():
+            path.unlink()
+    return f"sqlite:///{db_file}"
+
+
 def _run_abc_smc_baseline_with_sampler(
     *,
     sampler,
@@ -35,6 +58,7 @@ def _run_abc_smc_baseline_with_sampler(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    checkpoint_tag: str = "",
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -67,7 +91,13 @@ def _run_abc_smc_baseline_with_sampler(
     def pyabc_distance(x, x0):
         return x["distance"]
 
-    db_path = f"sqlite:///{output_dir.data / f'abc_smc_baseline_rep{replicate}.db'}"
+    db_path = _prepare_db_path(
+        output_dir,
+        method_name="abc_smc_baseline",
+        replicate=replicate,
+        seed=seed,
+        checkpoint_tag=checkpoint_tag,
+    )
 
     abc = pyabc.ABCSMC(
         models=pyabc_model,
@@ -199,6 +229,7 @@ def run_abc_smc_baseline(
         method_name="abc_smc_baseline",
         simulate_fn=simulate_fn,
     )
+    checkpoint_tag = str(inference_cfg.get("_checkpoint_tag", ""))
     n_procs = resolve_pyabc_worker_count(
         simulate_fn,
         int(n_procs),
@@ -234,6 +265,7 @@ def run_abc_smc_baseline(
                 output_dir=output_dir,
                 replicate=replicate,
                 seed=seed,
+                checkpoint_tag=checkpoint_tag,
                 progress=progress,
             )
 
@@ -248,5 +280,6 @@ def run_abc_smc_baseline(
         output_dir=output_dir,
         replicate=replicate,
         seed=seed,
+        checkpoint_tag=checkpoint_tag,
         progress=progress,
     )

@@ -121,6 +121,74 @@ def test_sbc_runner_executes_methods_in_method_major_order(tmp_path, monkeypatch
     ]
 
 
+def test_posterior_samples_reconstructs_async_final_archive_per_replicate():
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    records = [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=1,
+            params={"mu": 4.5},
+            loss=0.45,
+            tolerance=3.0,
+            wall_time=1.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=2,
+            params={"mu": 3.5},
+            loss=0.35,
+            tolerance=2.0,
+            wall_time=2.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=3,
+            params={"mu": 2.5},
+            loss=0.25,
+            tolerance=1.0,
+            wall_time=3.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=4,
+            params={"mu": 1.5},
+            loss=0.15,
+            tolerance=0.5,
+            wall_time=4.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=1,
+            seed=2,
+            step=1,
+            params={"mu": -4.0},
+            loss=0.40,
+            tolerance=2.0,
+            wall_time=1.0,
+        ),
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=1,
+            seed=2,
+            step=2,
+            params={"mu": -3.0},
+            loss=0.30,
+            tolerance=0.5,
+            wall_time=2.0,
+        ),
+    ]
+    samples = module._posterior_samples(records, "mu", archive_size=2)
+    assert np.allclose(np.sort(samples), np.array([-4.0, -3.0, 1.5, 2.5]))
+
+
 def test_sbc_full_config_treats_abc_smc_baseline_as_all_ranks_under_mpi():
     cfg = load_config(EXPERIMENTS_DIR / "configs" / "sbc.json", test_mode=False, small_mode=False)
     benchmark = make_benchmark(cfg["benchmark"])

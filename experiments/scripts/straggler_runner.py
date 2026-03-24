@@ -344,9 +344,26 @@ def main(argv: list[str] | None = None) -> None:
     if plots_cfg.get("throughput_vs_slowdown"):
         _plot_throughput_vs_slowdown(throughput_rows, output_dir)
     if plots_cfg.get("gantt") and worst_records:
-        from async_abc.plotting.reporters import plot_worker_gantt
+        from async_abc.plotting.reporters import plot_generation_timeline, plot_worker_gantt
 
-        plot_worker_gantt(worst_records, output_dir)
+        async_worst_records = [
+            record for record in worst_records
+            if record.worker_id is not None and record.sim_start_time is not None and record.sim_end_time is not None
+        ]
+        sync_worst_records = [
+            record for record in worst_records
+            if record.generation is not None and record.sim_start_time is not None and record.sim_end_time is not None
+            and record.worker_id is None
+        ]
+        if async_worst_records:
+            plot_worker_gantt(async_worst_records, output_dir)
+        if sync_worst_records:
+            plot_generation_timeline(
+                sync_worst_records,
+                output_dir,
+                stem_name="sync_generation_timeline",
+                title="Sync generation timeline (worst straggler slowdown)",
+            )
 
     write_metadata(
         output_dir,

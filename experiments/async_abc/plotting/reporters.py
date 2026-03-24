@@ -9,9 +9,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import pandas as pd
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ..analysis import (
+    barrier_overhead_fraction,
+    base_method_name,
+    final_state_records,
+    final_state_results,
+    generation_spans,
+)
 from .common import (
     archive_evolution_plot,
     corner_plot,
@@ -38,26 +46,26 @@ def _param_names(records: List[ParticleRecord]) -> List[str]:
 
 
 def _final_population(records: List[ParticleRecord]) -> List[ParticleRecord]:
-    """Return particles from each method's lowest recorded tolerance."""
-    accepted = [r for r in records if r.tolerance is not None]
-    if not accepted:
-        return records  # fall back to all records
-    by_method: Dict[str, List[ParticleRecord]] = {}
-    for r in accepted:
-        by_method.setdefault(r.method, []).append(r)
-    result: List[ParticleRecord] = []
-    for method_records in by_method.values():
-        min_tol = min(r.tolerance for r in method_records)
-        result.extend(r for r in method_records if r.tolerance == min_tol)
-    return result
+    """Return pooled final posterior records across all method/replicate states."""
+    return final_state_records(records)
 
 
-def plot_posterior(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+def plot_posterior(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+) -> None:
     """Posterior histogram for each parameter from the final population."""
-    final = _final_population(records)
+    final = _final_population(records) if archive_size is None else final_state_records(records, archive_size=archive_size)
     if not final:
         return
+    state_results = final_state_results(records, archive_size=archive_size)
     methods = sorted({r.method for r in final})
+    sample_counts = {
+        result.method: result.n_particles_used
+        for result in state_results
+    }
     for param in _param_names(final):
         if len(methods) <= 1:
             samples = np.array([r.params[param] for r in final], dtype=float)
@@ -67,35 +75,69 @@ def plot_posterior(records: List[ParticleRecord], output_dir: OutputDir) -> None
                 m: np.array([r.params[param] for r in final if r.method == m], dtype=float)
                 for m in methods
             }
-            posterior_comparison_plot(
+            save_paths = posterior_comparison_plot(
                 method_samples, param_name=param, path_stem=output_dir.plots / f"posterior_{param}",
             )
+            meta_path = save_paths.get("meta")
+            if meta_path is not None and meta_path.exists():
+                import json
+
+                meta = json.loads(meta_path.read_text())
+                meta["sample_counts"] = sample_counts
+                meta_path.write_text(json.dumps(meta, indent=2))
 
 
 def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Mean tolerance vs. simulation step, averaged across replicates."""
-    # Collect (step, tolerance) for accepted particles only
-    by_step: Dict[int, List[float]] = defaultdict(list)
-    for r in records:
-        if r.tolerance is not None:
-            by_step[r.step].append(r.tolerance)
+    """Tolerance versus simulation attempts, one series per method/replicate."""
+    import matplotlib
 
-    if not by_step:
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = []
+    seen = set()
+    for record in records:
+        if record.tolerance is None:
+            continue
+        attempt_count = int(record.attempt_count) if record.attempt_count is not None else int(record.step)
+        key = (record.method, int(record.replicate), attempt_count, float(record.tolerance))
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(
+            {
+                "method": record.method,
+                "replicate": int(record.replicate),
+                "attempt_count": attempt_count,
+                "tolerance": float(record.tolerance),
+            }
+        )
+
+    if not rows:
         return
 
-    steps = sorted(by_step)
-    mean_tols = [float(np.mean(by_step[s])) for s in steps]
-
-    stem = output_dir.plots / "archive_evolution"
-    archive_evolution_plot(
-        sim_counts=np.array(steps, dtype=float),
-        tolerances=np.array(mean_tols, dtype=float),
-        path_stem=stem,
+    trajectory_df = pd.DataFrame(rows).sort_values(["method", "replicate", "attempt_count"])
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for (method, replicate), group in trajectory_df.groupby(["method", "replicate"], sort=True):
+        label = method if trajectory_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
+        ax.plot(group["attempt_count"], group["tolerance"], marker="o", linewidth=1.2, label=label)
+    ax.set_xlabel("simulation attempts")
+    ax.set_ylabel("tolerance ε")
+    ax.set_title("Tolerance vs. simulation attempts")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir.plots / "archive_evolution",
+        data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
+        metadata={"plot_name": "tolerance_vs_simulations"},
     )
 
 
 def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> None:
     """Worker timeline from simulation start/end metadata."""
+    import json
+
     timed = [
         r for r in records
         if r.worker_id is not None and r.sim_start_time is not None and r.sim_end_time is not None
@@ -104,6 +146,12 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         return
 
     fig = gantt_plot(timed)
+    omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})
+    if fig.axes:
+        if omitted_methods:
+            fig.axes[0].set_title("Async worker timeline")
+        elif all(base_method_name(r.method) == "async_propulate_abc" for r in timed):
+            fig.axes[0].set_title("Async worker timeline")
     data = {
         "method": [r.method for r in timed],
         "replicate": [r.replicate for r in timed],
@@ -112,7 +160,20 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         "sim_end_time": [r.sim_end_time for r in timed],
         "generation": [r.generation for r in timed],
     }
-    save_figure(fig, output_dir.plots / "worker_gantt", data=data)
+    save_paths = save_figure(
+        fig,
+        output_dir.plots / "worker_gantt",
+        data=data,
+        metadata={
+            "included_methods": sorted({r.method for r in timed}),
+            "omitted_methods": omitted_methods,
+        },
+    )
+    meta_path = save_paths.get("meta")
+    if meta_path is not None and meta_path.exists() and omitted_methods:
+        meta = json.loads(meta_path.read_text())
+        meta["title"] = "Async worker timeline"
+        meta_path.write_text(json.dumps(meta, indent=2))
 
 
 def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
@@ -148,27 +209,44 @@ def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
 
 
 def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Bar chart of mean worker idle fraction per method/sigma level."""
-    idle_data = _compute_idle_fraction(records)
-    if not idle_data:
-        return
-    methods = sorted(idle_data)
-    mean_idles = [
-        float(np.mean(list(idle_data[m].values()))) if idle_data[m] else float("nan")
-        for m in methods
-    ]
-    # Extract sigma values from method names like "async_propulate_abc__sigma0.5"
-    sigma_levels = []
-    for m in methods:
-        if "__sigma" in m:
-            try:
-                sigma_levels.append(float(m.split("__sigma")[1]))
-            except ValueError:
-                sigma_levels.append(float("nan"))
-        else:
-            sigma_levels.append(float("nan"))
+    """Bar chart of utilization-loss fraction per method/sigma level."""
+    import matplotlib
 
-    idle_fraction_plot(sigma_levels, mean_idles, output_dir.plots / "idle_fraction")
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    summary_df = _runtime_utilization_rows(records)
+    if summary_df.empty:
+        return
+    mean_df = (
+        summary_df.groupby(["sigma", "base_method", "measurement_method"], sort=True)["utilization_loss_fraction"]
+        .mean()
+        .reset_index()
+    )
+    fig, ax = plt.subplots(figsize=(6, 4))
+    methods = list(dict.fromkeys(mean_df["base_method"].tolist()))
+    sigmas = sorted(mean_df["sigma"].unique().tolist())
+    x = np.arange(len(sigmas), dtype=float)
+    width = 0.8 / max(1, len(methods))
+    for idx, method in enumerate(methods):
+        group = mean_df[mean_df["base_method"] == method].sort_values("sigma")
+        y = group["utilization_loss_fraction"].to_numpy(dtype=float)
+        offset = (idx - (len(methods) - 1) / 2.0) * width
+        ax.bar(x + offset, y, width=width, alpha=0.8, label=method)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"σ={sigma}" for sigma in sigmas])
+    ax.set_xlabel("heterogeneity (σ)")
+    ax.set_ylabel("utilization loss fraction")
+    ax.set_ylim(0, 1)
+    ax.set_title("Utilization loss by heterogeneity")
+    ax.legend(frameon=False, fontsize="small")
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir.plots / "idle_fraction",
+        data={col: mean_df[col].tolist() for col in mean_df.columns},
+        metadata={"plot_name": "utilization_loss_by_heterogeneity"},
+    )
 
 
 def plot_throughput_over_time(
@@ -208,28 +286,49 @@ def plot_throughput_over_time(
 
 
 def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Idle fraction vs. sigma with per-replicate scatter and mean line."""
-    idle_data = _compute_idle_fraction(records)
-    if not idle_data:
+    """Utilization-loss fraction vs. sigma with per-replicate scatter and mean line."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    summary_df = _runtime_utilization_rows(records)
+    if summary_df.empty:
         return
-
-    sigma_levels: List[float] = []
-    idle_by_sigma: Dict[float, List[float]] = {}
-    for method in sorted(idle_data):
-        if "__sigma" not in method:
-            continue
-        try:
-            sigma = float(method.split("__sigma")[1])
-        except ValueError:
-            continue
-        sigma_levels.append(sigma)
-        idle_by_sigma[sigma] = list(idle_data[method].values())
-
-    if not sigma_levels:
-        return
-
-    sigma_levels = sorted(set(sigma_levels))
-    idle_fraction_comparison_plot(sigma_levels, idle_by_sigma, output_dir.plots / "idle_fraction_comparison")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    mean_df = (
+        summary_df.groupby(["sigma", "base_method", "measurement_method"], sort=True)["utilization_loss_fraction"]
+        .mean()
+        .reset_index()
+    )
+    for method, group in summary_df.groupby("base_method", sort=True):
+        ax.scatter(
+            group["sigma"].to_numpy(dtype=float),
+            group["utilization_loss_fraction"].to_numpy(dtype=float),
+            s=25,
+            alpha=0.5,
+            label=f"{method} samples",
+        )
+        mean_group = mean_df[mean_df["base_method"] == method].sort_values("sigma")
+        ax.plot(
+            mean_group["sigma"].to_numpy(dtype=float),
+            mean_group["utilization_loss_fraction"].to_numpy(dtype=float),
+            marker="o",
+            linewidth=2,
+            label=method,
+        )
+    ax.set_xlabel("heterogeneity (σ)")
+    ax.set_ylabel("utilization loss fraction")
+    ax.set_ylim(0, 1)
+    ax.set_title("Utilization loss vs. heterogeneity")
+    ax.legend(frameon=False, fontsize="small")
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir.plots / "idle_fraction_comparison",
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata={"plot_name": "utilization_loss_vs_heterogeneity"},
+    )
 
 
 def plot_quality_vs_wall_time_diagnostic(
@@ -239,6 +338,7 @@ def plot_quality_vs_wall_time_diagnostic(
     *,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
+    emit_legacy_alias: bool = False,
 ) -> None:
     """Appendix-style posterior quality diagnostic over wall-clock time."""
     from ..analysis import posterior_quality_curve
@@ -267,12 +367,13 @@ def plot_quality_vs_wall_time_diagnostic(
         axis_kind="wall_time",
         metadata=metadata,
     )
-    _save_quality_curve_artifact(
-        output_dir.plots / "quality_vs_time",
-        quality_df,
-        axis_kind="wall_time",
-        metadata={**metadata, "plot_name": "quality_vs_time", "deprecated_alias_for": "quality_vs_wall_time_diagnostic"},
-    )
+    if emit_legacy_alias:
+        _save_quality_curve_artifact(
+            output_dir.plots / "quality_vs_time",
+            quality_df,
+            axis_kind="wall_time",
+            metadata={**metadata, "plot_name": "quality_vs_time", "deprecated_alias_for": "quality_vs_wall_time_diagnostic"},
+        )
 
 
 def plot_quality_vs_posterior_samples(
@@ -433,6 +534,7 @@ def plot_quality_vs_time(
         output_dir=output_dir,
         archive_size=archive_size,
         checkpoint_count=checkpoint_count,
+        emit_legacy_alias=True,
     )
 
 
@@ -441,9 +543,11 @@ def plot_corner(
     param_names: List[str],
     output_dir: OutputDir,
     true_params: Optional[Dict[str, float]] = None,
+    *,
+    archive_size: int | None = None,
 ) -> None:
     """Corner plot for the final population."""
-    final = _final_population(records)
+    final = final_state_records(records, archive_size=archive_size)
     if not final or not param_names:
         return
 
@@ -455,7 +559,17 @@ def plot_corner(
     data: Dict[str, list] = {"method": [r.method for r in final]}
     for name in param_names:
         data[name] = [r.params.get(name) for r in final]
-    save_figure(fig, output_dir.plots / "corner", data=data)
+    save_figure(
+        fig,
+        output_dir.plots / "corner",
+        data=data,
+        metadata={
+            "sample_counts": {
+                result.method: result.n_particles_used
+                for result in final_state_results(records, archive_size=archive_size)
+            },
+        },
+    )
 
 
 def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputDir) -> None:
@@ -467,10 +581,12 @@ def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputD
         return
 
     fig = tolerance_trajectory_plot(trajectory_df)
+    missing_methods = sorted({record.method for record in records if record.tolerance is None})
     save_figure(
         fig,
         output_dir.plots / "tolerance_trajectory",
         data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
+        metadata={"missing_tolerance_methods": missing_methods},
     )
 
 
@@ -507,11 +623,13 @@ def plot_sensitivity_summary(
     row_key = "k" if "k" in grid else axes[0]
     col_key = "perturbation_scale" if "perturbation_scale" in grid else axes[1]
     facet_key = "tol_init_multiplier" if "tol_init_multiplier" in grid else None
+    scheduler_key = "scheduler_type" if "scheduler_type" in grid else None
     row_vals = grid[row_key]
     col_vals = grid[col_key]
     facet_vals = grid[facet_key] if facet_key else None
+    scheduler_vals = grid[scheduler_key] if scheduler_key else None
 
-    # Build lookup: (row_val, col_val, facet_val) → mean final tolerance
+    # Build lookup: (row_val, col_val, facet_val, scheduler_val) → mean final tolerance
     tol_map: Dict = defaultdict(list)
     for csv_path in sorted(data_dir.glob("sensitivity_*.csv")):
         rows = _read_csv(csv_path)
@@ -531,8 +649,9 @@ def plot_sensitivity_summary(
         rv = variant.get(row_key)
         cv = variant.get(col_key)
         fv = variant.get(facet_key) if facet_key else None
+        sv = variant.get(scheduler_key) if scheduler_key else None
         if rv is not None and cv is not None:
-            tol_map[(rv, cv, fv)].append(mean_tol)
+            tol_map[(rv, cv, fv, sv)].append(mean_tol)
 
     if not tol_map:
         return
@@ -540,12 +659,33 @@ def plot_sensitivity_summary(
     row_labels = [str(v) for v in row_vals]
     col_labels = [str(v) for v in col_vals]
     stem = output_dir.plots / "sensitivity_heatmap"
+    if facet_key and facet_vals is not None and scheduler_key and scheduler_vals is not None:
+        matrix = np.full((len(facet_vals), len(scheduler_vals), len(row_vals), len(col_vals)), np.nan)
+        for f_idx, fv in enumerate(facet_vals):
+            for s_idx, sv in enumerate(scheduler_vals):
+                for i, rv in enumerate(row_vals):
+                    for j, cv in enumerate(col_vals):
+                        key = (rv, cv, fv, sv)
+                        if key in tol_map:
+                            matrix[f_idx, s_idx, i, j] = float(np.mean(tol_map[key]))
+        if not np.isfinite(matrix).any():
+            return
+        sensitivity_heatmap(
+            matrix,
+            row_labels=row_labels,
+            col_labels=col_labels,
+            path_stem=stem,
+            facet_row_labels=[str(v) for v in facet_vals],
+            facet_col_labels=[str(v) for v in scheduler_vals],
+        )
+        return
+
     if facet_key and facet_vals is not None:
         matrix = np.full((len(facet_vals), len(row_vals), len(col_vals)), np.nan)
         for f_idx, fv in enumerate(facet_vals):
             for i, rv in enumerate(row_vals):
                 for j, cv in enumerate(col_vals):
-                    key = (rv, cv, fv)
+                    key = (rv, cv, fv, None)
                     if key in tol_map:
                         matrix[f_idx, i, j] = float(np.mean(tol_map[key]))
         if not np.isfinite(matrix).any():
@@ -629,7 +769,7 @@ def plot_benchmark_diagnostics(
     archive_size = inference_cfg.get("k")
 
     if plots_cfg.get("posterior"):
-        plot_posterior(records, output_dir)
+        plot_posterior(records, output_dir, archive_size=archive_size)
     if plots_cfg.get("archive_evolution"):
         plot_archive_evolution(records, output_dir)
     if plots_cfg.get("corner"):
@@ -638,16 +778,17 @@ def plot_benchmark_diagnostics(
             param_names=_param_names(records),
             output_dir=output_dir,
             true_params=true_params,
+            archive_size=archive_size,
         )
     if plots_cfg.get("tolerance_trajectory"):
         plot_tolerance_trajectory(records, output_dir)
     if plots_cfg.get("quality_vs_time"):
-        plot_quality_vs_time(
+        plot_quality_vs_wall_time_diagnostic(
             records,
             true_params=true_params,
-            checkpoint_steps=_default_checkpoint_steps(records),
             output_dir=output_dir,
             archive_size=archive_size,
+            checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
         )
         plot_quality_vs_posterior_samples(
             records,
@@ -685,6 +826,98 @@ def plot_benchmark_diagnostics(
 def _read_csv(path: Path) -> List[Dict[str, str]]:
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
+
+
+def _runtime_utilization_rows(records: List[ParticleRecord]) -> pd.DataFrame:
+    """Return per-replicate utilization-loss rows for runtime heterogeneity sweeps."""
+    rows: list[dict[str, object]] = []
+    idle_data = _compute_idle_fraction(records)
+    for method, by_replicate in sorted(idle_data.items()):
+        if "__sigma" not in method:
+            continue
+        try:
+            sigma = float(method.split("__sigma", 1)[1])
+        except ValueError:
+            continue
+        for replicate, value in sorted(by_replicate.items()):
+            rows.append(
+                {
+                    "sigma": sigma,
+                    "method": method,
+                    "base_method": base_method_name(method),
+                    "replicate": int(replicate),
+                    "measurement_method": "worker_idle",
+                    "utilization_loss_fraction": float(value),
+                }
+            )
+
+    barrier_df = barrier_overhead_fraction(records)
+    if not barrier_df.empty:
+        for row in barrier_df.itertuples(index=False):
+            method = str(row.method)
+            if "__sigma" not in method:
+                continue
+            try:
+                sigma = float(method.split("__sigma", 1)[1])
+            except ValueError:
+                continue
+            rows.append(
+                {
+                    "sigma": sigma,
+                    "method": method,
+                    "base_method": base_method_name(method),
+                    "replicate": int(row.replicate),
+                    "measurement_method": "barrier_overhead",
+                    "utilization_loss_fraction": float(row.barrier_overhead_fraction),
+                }
+            )
+
+    return pd.DataFrame(rows).sort_values(["sigma", "base_method", "replicate"]) if rows else pd.DataFrame()
+
+
+def plot_generation_timeline(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    stem_name: str = "generation_timeline",
+    title: str = "Sync generation timeline",
+) -> None:
+    """Timeline plot for synchronous generation spans."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    spans_df = generation_spans(records)
+    if spans_df.empty:
+        return
+    spans_df = spans_df.sort_values(["method", "replicate", "generation"]).reset_index(drop=True)
+    labels = [
+        f"{row.method} rep {int(row.replicate)} g{int(row.generation)}"
+        for row in spans_df.itertuples(index=False)
+    ]
+    fig_height = max(3.5, 0.45 * len(labels))
+    fig, ax = plt.subplots(figsize=(8, min(10.0, fig_height)))
+    for idx, row in enumerate(spans_df.itertuples(index=False)):
+        ax.barh(
+            idx,
+            float(row.gen_duration),
+            left=float(row.gen_start),
+            height=0.7,
+            alpha=0.85,
+        )
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("generation")
+    ax.set_title(title)
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir.plots / stem_name,
+        data={col: spans_df[col].tolist() for col in spans_df.columns},
+        metadata={"plot_name": stem_name, "title": title},
+    )
 
 
 def _save_quality_curve_artifact(
