@@ -81,12 +81,13 @@ test -f "$merge_out/gaussian_mean/data/raw_results.csv"
 test -f "$merge_out/_shards/gaussian_mean/runs/default/merge.done.json"
 
 echo "Preparing estimate-only sharded test plan..."
-"$python_bin" - <<'PY' "$timing_out" "$timing_cfg"
+"$python_bin" - <<'PY' "$timing_out" "$timing_cfg" "$experiments_dir"
 import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(sys.argv[2]).resolve().parents[1]))
+experiments_dir = Path(sys.argv[3]).resolve()
+sys.path.insert(0, str(experiments_dir))
 from async_abc.io.config import load_config
 from async_abc.utils.sharding import ShardLayout, build_plan_payload, update_plan
 
@@ -98,7 +99,7 @@ layout = ShardLayout(output_dir, "gaussian_mean", "default", 0)
 plan = build_plan_payload(
     experiment_name="gaussian_mean",
     config_path=str(config_path),
-    runner_script=str((config_path.parents[1] / "scripts" / "gaussian_mean_runner.py").resolve()),
+    runner_script=str((experiments_dir / "scripts" / "gaussian_mean_runner.py").resolve()),
     unit_kind="replicate",
     full_total_units=int(full_cfg["execution"]["n_replicates"]),
     actual_total_units=int(test_cfg["execution"]["n_replicates"]),

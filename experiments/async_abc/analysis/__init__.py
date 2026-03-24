@@ -18,6 +18,7 @@ _EXPORTS = {
     "sbc_ranks": (".sbc", "sbc_ranks"),
     "loss_over_steps": (".trajectory", "loss_over_steps"),
     "tolerance_over_wall_time": (".trajectory", "tolerance_over_wall_time"),
+    "tolerance_over_attempts": (".trajectory", "tolerance_over_attempts"),
 }
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "posterior_quality_curve",
     "sbc_ranks",
     "time_to_threshold",
+    "tolerance_over_attempts",
     "tolerance_over_wall_time",
     "wasserstein_at_checkpoints",
 ]

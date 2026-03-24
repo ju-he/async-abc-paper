@@ -217,7 +217,7 @@ def clone_artifact_config(artifact: dict, dest_root: Path) -> Path:
 
 @pytest.fixture
 def minimal_config():
-    return dict(MINIMAL_CONFIG)
+    return copy.deepcopy(MINIMAL_CONFIG)
 
 
 @pytest.fixture

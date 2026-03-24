@@ -1,6 +1,7 @@
 """Tests for sharded execution and submission helpers."""
 import csv
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -429,7 +430,7 @@ class TestShardSubmitter:
         else:
             raise AssertionError("expected SystemExit")
 
-    def test_submit_replicate_shards_small_uses_reduced_small_tier_shard_count(self, tmp_path, monkeypatch):
+    def test_submit_replicate_shards_small_uses_small_tier_replicate_count(self, tmp_path, monkeypatch):
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
         monkeypatch.setattr(
             submitter.run_all,
@@ -454,8 +455,9 @@ class TestShardSubmitter:
         submitter.main()
 
         plan = json.loads(_plan_paths(tmp_path, "gaussian_mean")[0].read_text())
-        assert plan["requested_num_shards"] == 1
-        assert plan["actual_num_shards"] == 1
+        assert plan["target_total_units"] == 2
+        assert plan["requested_num_shards"] == 2
+        assert plan["actual_num_shards"] == 2
         assert plan["small_mode"] is True
         assert plan["run_mode"] == "small"
 
@@ -463,11 +465,14 @@ class TestShardSubmitter:
 class TestShardSmokeScript:
     def test_local_sharded_smoke_script(self, tmp_path):
         script = Path(__file__).resolve().parents[1] / "jobs" / "test_sharded.sh"
+        env = dict(os.environ)
+        env["PYTHON_BIN"] = sys.executable
         result = subprocess.run(
             ["bash", str(script), str(tmp_path / "script_run")],
             capture_output=True,
             text=True,
             timeout=180,
+            env=env,
         )
         assert result.returncode == 0, result.stderr
         assert "Sharded smoke test completed successfully." in result.stdout
