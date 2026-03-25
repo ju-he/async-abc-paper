@@ -58,7 +58,7 @@ def empirical_coverage(
 
     summary = (
         frame.groupby(["method", "param", "coverage_level"], dropna=False, sort=True)["covered"]
-        .mean()
-        .reset_index(name="empirical_coverage")
+        .agg(empirical_coverage="mean", n_trials="count")
+        .reset_index()
     )
     return summary

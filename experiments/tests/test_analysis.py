@@ -234,6 +234,25 @@ def test_time_to_threshold_supports_attempt_budget(sample_records):
     assert (df["attempts_to_threshold"] >= 0).all()
 
 
+def test_time_to_threshold_respects_min_particles(sample_records):
+    unrestricted = time_to_threshold(
+        sample_records,
+        true_params={"mu": 0.0},
+        target_wasserstein=10.0,
+        archive_size=20,
+        min_particles=1,
+    )
+    guarded = time_to_threshold(
+        sample_records,
+        true_params={"mu": 0.0},
+        target_wasserstein=10.0,
+        archive_size=20,
+        min_particles=1000,
+    )
+    assert not unrestricted.empty
+    assert guarded["wall_time_to_threshold"].isna().all()
+
+
 def test_tolerance_over_wall_time(sample_records):
     df = tolerance_over_wall_time(sample_records)
     assert "wall_time" in df.columns

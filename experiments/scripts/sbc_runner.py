@@ -156,9 +156,36 @@ def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> No
     if coverage_df.empty:
         return
 
+    plot_df = coverage_df.copy()
+    grouped = plot_df.groupby(["method", "param"], dropna=False, sort=False)
+    if "n_trials" not in plot_df.columns:
+        plot_df["n_trials"] = grouped["empirical_coverage"].transform("count")
+    if "empirical_coverage_ci_low" not in plot_df.columns or "empirical_coverage_ci_high" not in plot_df.columns:
+        z = 1.959963984540054
+        ci_low: list[float] = []
+        ci_high: list[float] = []
+        for row in plot_df.itertuples(index=False):
+            n = max(int(getattr(row, "n_trials", 0)), 1)
+            p = float(row.empirical_coverage)
+            denom = 1.0 + (z * z) / n
+            center = (p + (z * z) / (2.0 * n)) / denom
+            margin = (z / denom) * np.sqrt((p * (1.0 - p) / n) + (z * z) / (4.0 * n * n))
+            ci_low.append(max(0.0, center - margin))
+            ci_high.append(min(1.0, center + margin))
+        plot_df["empirical_coverage_ci_low"] = ci_low
+        plot_df["empirical_coverage_ci_high"] = ci_high
+
     fig, ax = plt.subplots(figsize=(6, 4))
-    for method, group in coverage_df.groupby("method", dropna=False, sort=True):
+    for method, group in plot_df.groupby("method", dropna=False, sort=True):
+        group = group.sort_values("coverage_level")
         ax.plot(group["coverage_level"], group["empirical_coverage"], marker="o", label=method or "method")
+        if {"empirical_coverage_ci_low", "empirical_coverage_ci_high"} <= set(group.columns):
+            ax.fill_between(
+                group["coverage_level"],
+                group["empirical_coverage_ci_low"],
+                group["empirical_coverage_ci_high"],
+                alpha=0.15,
+            )
     line = np.linspace(0.0, 1.0, 50)
     ax.plot(line, line, linestyle="--", color="grey", label="ideal")
     ax.set_xlabel("nominal coverage")
@@ -166,7 +193,7 @@ def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> No
     ax.set_title("SBC empirical coverage")
     ax.legend(frameon=False)
     fig.tight_layout()
-    save_figure(fig, output_dir.plots / "coverage_table", data={col: coverage_df[col].tolist() for col in coverage_df.columns})
+    save_figure(fig, output_dir.plots / "coverage_table", data={col: plot_df[col].tolist() for col in plot_df.columns})
 
 
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:

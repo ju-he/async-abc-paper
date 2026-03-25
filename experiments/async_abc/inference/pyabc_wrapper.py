@@ -105,7 +105,7 @@ def _run_pyabc_smc_with_sampler(
         distance_function=pyabc_distance,
         population_size=k,
         transitions=pyabc.MultivariateNormalTransition(),
-        eps=pyabc.QuantileEpsilon(alpha=0.5),
+        eps=pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5),
         sampler=sampler,
     )
     abc.new(db_path, {"distance": 0.0})
@@ -148,7 +148,7 @@ def _run_pyabc_smc_with_sampler(
             step += 1
             params = {col: float(row[col]) for col in limits}
             param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
-            actual_loss = _distance_cache.get(param_key, eps_t)
+            actual_loss = _distance_cache.get(param_key, float("nan"))
             weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None
             records.append(ParticleRecord(
                 method="pyabc_smc",

@@ -224,14 +224,15 @@ def sensitivity_heatmap(
     """
     data = np.asarray(data, dtype=float)
     if data.ndim == 2:
-        fig, ax = plt.subplots(figsize=(max(4, len(col_labels)), max(3, len(row_labels))))
+        fig, ax = plt.subplots(figsize=(max(4.5, 1.2 * len(col_labels)), max(3.5, 0.9 * len(row_labels))))
         im = ax.imshow(data, aspect="auto", cmap="viridis")
-        fig.colorbar(im, ax=ax)
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.ax.set_ylabel("mean final tolerance", rotation=270, labelpad=14)
         ax.set_xticks(range(len(col_labels)))
         ax.set_xticklabels(col_labels, rotation=45, ha="right")
         ax.set_yticks(range(len(row_labels)))
         ax.set_yticklabels(row_labels)
-        fig.tight_layout()
+        fig.tight_layout(pad=1.0)
 
         csv_data = {"row": row_labels}
         for j, col in enumerate(col_labels):
@@ -245,7 +246,7 @@ def sensitivity_heatmap(
         fig, axes = plt.subplots(
             row_facets,
             col_facets,
-            figsize=(max(4, len(col_labels)) * col_facets, max(3, len(row_labels)) * row_facets),
+            figsize=(max(4.0, 1.1 * len(col_labels)) * col_facets + 0.8, max(3.2, 0.9 * len(row_labels)) * row_facets + 0.4),
             squeeze=False,
         )
         finite = data[np.isfinite(data)]
@@ -259,8 +260,8 @@ def sensitivity_heatmap(
                 ax = axes[row_idx, col_idx]
                 im = ax.imshow(data[row_idx, col_idx], aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
                 ax.set_title(
-                    f"tol_init_multiplier={facet_row_labels[row_idx]}, "
-                    f"scheduler_type={facet_col_labels[col_idx]}"
+                    f"tol x {facet_row_labels[row_idx]} | scheduler={facet_col_labels[col_idx]}",
+                    fontsize=10,
                 )
                 ax.set_xticks(range(len(col_labels)))
                 ax.set_xticklabels(col_labels, rotation=45, ha="right")
@@ -270,8 +271,10 @@ def sensitivity_heatmap(
                     ax.set_xlabel("perturbation_scale")
                 if col_idx == 0:
                     ax.set_ylabel("k")
-        fig.colorbar(im, ax=axes.ravel().tolist())
-        fig.subplots_adjust(wspace=0.35, hspace=0.35, bottom=0.12)
+        fig.subplots_adjust(wspace=0.30, hspace=0.42, bottom=0.16, right=0.88)
+        cax = fig.add_axes([0.90, 0.15, 0.02, 0.7])
+        cbar = fig.colorbar(im, cax=cax)
+        cbar.ax.set_ylabel("mean final tolerance", rotation=270, labelpad=14)
 
         csv_data = {
             "tol_init_multiplier": [],
@@ -299,7 +302,7 @@ def sensitivity_heatmap(
     fig, axes = plt.subplots(
         1,
         n_facets,
-        figsize=(max(4, len(col_labels)) * n_facets, max(3, len(row_labels))),
+        figsize=(max(4.0, 1.1 * len(col_labels)) * n_facets + 0.7, max(3.4, 0.9 * len(row_labels))),
         squeeze=False,
     )
     finite = data[np.isfinite(data)]
@@ -311,13 +314,15 @@ def sensitivity_heatmap(
     for idx in range(n_facets):
         ax = axes[0, idx]
         im = ax.imshow(data[idx], aspect="auto", cmap="viridis", vmin=vmin, vmax=vmax)
-        ax.set_title(str(facet_labels[idx]))
+        ax.set_title(str(facet_labels[idx]), fontsize=10)
         ax.set_xticks(range(len(col_labels)))
         ax.set_xticklabels(col_labels, rotation=45, ha="right")
         ax.set_yticks(range(len(row_labels)))
         ax.set_yticklabels(row_labels)
-    fig.colorbar(im, ax=axes.ravel().tolist())
-    fig.subplots_adjust(wspace=0.35, bottom=0.2)
+    fig.subplots_adjust(wspace=0.30, bottom=0.20, right=0.88)
+    cax = fig.add_axes([0.90, 0.18, 0.02, 0.64])
+    cbar = fig.colorbar(im, cax=cax)
+    cbar.ax.set_ylabel("mean final tolerance", rotation=270, labelpad=14)
 
     csv_data = {"facet": [], "row": [], "col": [], "value": []}
     for facet_idx, facet_label in enumerate(facet_labels):
@@ -531,7 +536,13 @@ def posterior_quality_plot(quality_df: pd.DataFrame, axis_kind: str, ax=None):
     return fig
 
 
-def threshold_summary_plot(summary_df: pd.DataFrame, axis_kind: str, ax=None):
+def threshold_summary_plot(
+    summary_df: pd.DataFrame,
+    axis_kind: str,
+    ax=None,
+    *,
+    include_replicates: bool = False,
+):
     """Point summary of time/budget required to reach a target posterior quality."""
     created_fig = ax is None
     if ax is None:
@@ -564,8 +575,28 @@ def threshold_summary_plot(summary_df: pd.DataFrame, axis_kind: str, ax=None):
             continue
         x = valid["axis_value_to_threshold"].to_numpy(dtype=float)
         y = np.full(len(valid), y_positions[method], dtype=float)
-        ax.scatter(x, y, s=28, alpha=0.85, label=method)
-        ax.scatter([float(np.mean(x))], [y_positions[method]], s=72, marker="D", edgecolor="black", linewidth=0.7)
+        if include_replicates:
+            ax.scatter(x, y, s=24, alpha=0.35, label=method)
+        mean_x = float(np.mean(x))
+        if len(x) >= 2:
+            from scipy.stats import t
+
+            sem = float(np.std(x, ddof=1) / np.sqrt(len(x)))
+            half_width = float(t.ppf(0.975, len(x) - 1) * sem)
+        else:
+            half_width = float("nan")
+        xerr = None if not np.isfinite(half_width) else np.array([[half_width], [half_width]])
+        ax.errorbar(
+            [mean_x],
+            [y_positions[method]],
+            xerr=xerr,
+            fmt="D",
+            markersize=7,
+            capsize=4 if xerr is not None else 0,
+            markeredgecolor="black",
+            linewidth=1.2,
+            label=None if include_replicates else method,
+        )
 
     ax.set_yticks(list(y_positions.values()))
     ax.set_yticklabels(list(y_positions.keys()))

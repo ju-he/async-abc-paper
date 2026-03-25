@@ -14,6 +14,7 @@ import pandas as pd
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
 from ..analysis import (
+    benchmark_plot_audit,
     barrier_overhead_fraction,
     base_method_name,
     final_state_records,
@@ -35,7 +36,7 @@ from .common import (
     throughput_over_time_plot,
     tolerance_trajectory_plot,
 )
-from .export import save_figure
+from .export import save_figure, write_plot_metadata
 
 
 def _param_names(records: List[ParticleRecord]) -> List[str]:
@@ -48,6 +49,146 @@ def _param_names(records: List[ParticleRecord]) -> List[str]:
 def _final_population(records: List[ParticleRecord]) -> List[ParticleRecord]:
     """Return pooled final posterior records across all method/replicate states."""
     return final_state_records(records)
+
+
+def _ci_half_width(values: np.ndarray, ci_level: float) -> float:
+    """Return a t-based confidence half-width for finite *values*."""
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size < 2:
+        return float("nan")
+    from scipy.stats import t
+
+    sem = float(np.std(finite, ddof=1) / np.sqrt(finite.size))
+    if not np.isfinite(sem):
+        return float("nan")
+    return float(t.ppf(0.5 + 0.5 * float(ci_level), finite.size - 1) * sem)
+
+
+def _summarize_scalar(values: np.ndarray, ci_level: float) -> tuple[float, float, float]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if finite.size == 0:
+        return float("nan"), float("nan"), float("nan")
+    mean = float(np.mean(finite))
+    half_width = _ci_half_width(finite, ci_level=ci_level)
+    if not np.isfinite(half_width):
+        return mean, float("nan"), float("nan")
+    return mean, mean - half_width, mean + half_width
+
+
+def _step_curve_summary(
+    frame: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    ci_level: float,
+    log_y: bool = False,
+) -> pd.DataFrame:
+    """Aggregate per-replicate step curves to a mean + CI summary."""
+    rows: list[dict[str, object]] = []
+    for method, method_group in frame.groupby("method", sort=True):
+        x_grid = np.array(sorted(method_group[x_col].dropna().unique().tolist()), dtype=float)
+        if x_grid.size == 0:
+            continue
+        replicate_values: list[np.ndarray] = []
+        replicate_ids: list[int] = []
+        for replicate, rep_group in method_group.groupby("replicate", sort=True):
+            rep_group = rep_group.sort_values(x_col)
+            xs = rep_group[x_col].to_numpy(dtype=float)
+            ys = rep_group[y_col].to_numpy(dtype=float)
+            if xs.size == 0:
+                continue
+            aligned = np.full(x_grid.shape, np.nan, dtype=float)
+            idx = np.searchsorted(xs, x_grid, side="right") - 1
+            valid = idx >= 0
+            aligned[valid] = ys[idx[valid]]
+            if log_y:
+                positive = aligned > 0
+                aligned[~positive] = np.nan
+                aligned[positive] = np.log10(aligned[positive])
+            replicate_values.append(aligned)
+            replicate_ids.append(int(replicate))
+        if not replicate_values:
+            continue
+        stack = np.vstack(replicate_values)
+        for point_idx, x_val in enumerate(x_grid):
+            point = stack[:, point_idx]
+            finite = point[np.isfinite(point)]
+            if finite.size == 0:
+                continue
+            mean, ci_low, ci_high = _summarize_scalar(finite, ci_level=ci_level)
+            if log_y:
+                mean = 10 ** mean
+                ci_low = 10 ** ci_low if np.isfinite(ci_low) else float("nan")
+                ci_high = 10 ** ci_high if np.isfinite(ci_high) else float("nan")
+            rows.append(
+                {
+                    "method": method,
+                    x_col: float(x_val),
+                    y_col: float(mean),
+                    f"{y_col}_ci_low": float(ci_low),
+                    f"{y_col}_ci_high": float(ci_high),
+                    "n_replicates": int(finite.size),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _write_benchmark_audit(
+    records: List[ParticleRecord],
+    *,
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    archive_size: int | None,
+    min_particles_for_threshold: int,
+) -> pd.DataFrame:
+    """Write benchmark audit CSV/JSON and return the dataframe."""
+    import json
+
+    audit_df = benchmark_plot_audit(
+        records,
+        true_params=true_params,
+        archive_size=archive_size,
+        min_particles_for_threshold=min_particles_for_threshold,
+    )
+    csv_path = output_dir.data / "plot_audit.csv"
+    audit_df.to_csv(csv_path, index=False)
+    summary = {
+        "rows": int(len(audit_df)),
+        "invalid_quality_rows": int((~audit_df["paper_quality_plots_allowed"]).sum()) if not audit_df.empty else 0,
+        "invalid_threshold_rows": int((~audit_df["paper_threshold_plots_allowed"]).sum()) if not audit_df.empty else 0,
+        "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+    }
+    with open(output_dir.data / "plot_audit_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    return audit_df
+
+
+def _paper_plot_allowed(audit_df: pd.DataFrame, column: str) -> bool:
+    if audit_df.empty or column not in audit_df.columns:
+        return True
+    return bool(audit_df[column].all())
+
+
+def _audit_skip_metadata(
+    *,
+    plot_name: str,
+    audit_df: pd.DataFrame,
+    gate_column: str,
+    extra: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    invalid = audit_df.loc[~audit_df[gate_column]].copy() if not audit_df.empty and gate_column in audit_df.columns else pd.DataFrame()
+    metadata: Dict[str, Any] = {
+        "plot_name": plot_name,
+        "skip_reason": "plot_audit_failed",
+        "audit_gate": gate_column,
+    }
+    if not invalid.empty:
+        metadata["invalid_rows"] = invalid.to_dict(orient="records")
+    if extra:
+        metadata.update(extra)
+    return metadata
 
 
 def plot_posterior(
@@ -87,13 +228,8 @@ def plot_posterior(
                 meta_path.write_text(json.dumps(meta, indent=2))
 
 
-def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Tolerance versus simulation attempts, one series per method/replicate."""
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
+def _archive_evolution_frame(records: List[ParticleRecord]) -> pd.DataFrame:
+    """Tolerance versus simulation attempts, one row per observable state."""
     rows = []
     seen = set()
     for record in records:
@@ -112,11 +248,68 @@ def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir)
                 "tolerance": float(record.tolerance),
             }
         )
-
     if not rows:
+        return pd.DataFrame(columns=["method", "replicate", "attempt_count", "tolerance"])
+    return pd.DataFrame(rows).sort_values(["method", "replicate", "attempt_count"]).reset_index(drop=True)
+
+
+def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir, *, ci_level: float = 0.95) -> None:
+    """Paper summary: tolerance versus simulation attempts with mean + CI."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    trajectory_df = _archive_evolution_frame(records)
+    if trajectory_df.empty:
         return
 
-    trajectory_df = pd.DataFrame(rows).sort_values(["method", "replicate", "attempt_count"])
+    summary_df = _step_curve_summary(
+        trajectory_df,
+        x_col="attempt_count",
+        y_col="tolerance",
+        ci_level=ci_level,
+        log_y=True,
+    )
+    if summary_df.empty:
+        return
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for method, group in summary_df.groupby("method", sort=True):
+        group = group.sort_values("attempt_count")
+        ax.plot(group["attempt_count"], group["tolerance"], linewidth=1.8, label=method)
+        valid_ci = group["tolerance_ci_low"].notna() & group["tolerance_ci_high"].notna() & (group["n_replicates"] >= 2)
+        if valid_ci.any():
+            ax.fill_between(
+                group.loc[valid_ci, "attempt_count"],
+                group.loc[valid_ci, "tolerance_ci_low"],
+                group.loc[valid_ci, "tolerance_ci_high"],
+                alpha=0.2,
+            )
+    ax.set_xlabel("simulation attempts")
+    ax.set_ylabel("tolerance ε")
+    ax.set_title("Tolerance vs. simulation attempts")
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir.plots / "archive_evolution",
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata={"plot_name": "tolerance_vs_simulations", "summary_plot": True, "ci_level": float(ci_level)},
+    )
+
+
+def plot_archive_evolution_diagnostic(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Diagnostic replicate-level tolerance versus attempts plot."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    trajectory_df = _archive_evolution_frame(records)
+    if trajectory_df.empty:
+        return
+
     fig, ax = plt.subplots(figsize=(6, 4))
     for (method, replicate), group in trajectory_df.groupby(["method", "replicate"], sort=True):
         label = method if trajectory_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
@@ -124,19 +317,24 @@ def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir)
     ax.set_xlabel("simulation attempts")
     ax.set_ylabel("tolerance ε")
     ax.set_title("Tolerance vs. simulation attempts")
+    ax.set_yscale("log")
     ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     save_figure(
         fig,
-        output_dir.plots / "archive_evolution",
+        output_dir.plots / "archive_evolution_diagnostic",
         data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
-        metadata={"plot_name": "tolerance_vs_simulations"},
+        metadata={"plot_name": "tolerance_vs_simulations_diagnostic", "diagnostic_plot": True},
     )
 
 
 def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> None:
     """Worker timeline from simulation start/end metadata."""
     import json
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     timed = [
         r for r in records
@@ -145,7 +343,21 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
     if not timed:
         return
 
-    fig = gantt_plot(timed)
+    included_methods = sorted({r.method for r in timed})
+    if len(included_methods) <= 1:
+        fig = gantt_plot(timed)
+    else:
+        fig, axes = plt.subplots(
+            len(included_methods),
+            1,
+            figsize=(7, max(3.5, 2.8 * len(included_methods))),
+            squeeze=False,
+        )
+        for idx, method in enumerate(included_methods):
+            gantt_plot([r for r in timed if r.method == method], ax=axes[idx, 0])
+            axes[idx, 0].set_title(method)
+            axes[idx, 0].legend([], [], frameon=False)
+        fig.tight_layout()
     omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})
     if fig.axes:
         if omitted_methods:
@@ -165,7 +377,7 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         output_dir.plots / "worker_gantt",
         data=data,
         metadata={
-            "included_methods": sorted({r.method for r in timed}),
+            "included_methods": included_methods,
             "omitted_methods": omitted_methods,
         },
     )
@@ -218,21 +430,78 @@ def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> 
     summary_df = _runtime_utilization_rows(records)
     if summary_df.empty:
         return
-    mean_df = (
-        summary_df.groupby(["sigma", "base_method", "measurement_method"], sort=True)["utilization_loss_fraction"]
-        .mean()
-        .reset_index()
-    )
+    mean_rows: list[dict[str, object]] = []
+    for (sigma, base_method, measurement_method), group in summary_df.groupby(
+        ["sigma", "base_method", "measurement_method"], sort=True
+    ):
+        mean, ci_low, ci_high = _summarize_scalar(
+            group["utilization_loss_fraction"].to_numpy(dtype=float),
+            ci_level=0.95,
+        )
+        mean_rows.append(
+            {
+                "sigma": float(sigma),
+                "base_method": base_method,
+                "measurement_method": measurement_method,
+                "utilization_loss_fraction": mean,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
+                "n_replicates": int(group["replicate"].nunique()),
+            }
+        )
+    mean_df = pd.DataFrame(mean_rows)
     fig, ax = plt.subplots(figsize=(6, 4))
-    methods = list(dict.fromkeys(mean_df["base_method"].tolist()))
+    series = list(
+        dict.fromkeys(
+            (row["base_method"], row["measurement_method"])
+            for _, row in mean_df.iterrows()
+        )
+    )
     sigmas = sorted(mean_df["sigma"].unique().tolist())
     x = np.arange(len(sigmas), dtype=float)
-    width = 0.8 / max(1, len(methods))
-    for idx, method in enumerate(methods):
-        group = mean_df[mean_df["base_method"] == method].sort_values("sigma")
-        y = group["utilization_loss_fraction"].to_numpy(dtype=float)
-        offset = (idx - (len(methods) - 1) / 2.0) * width
-        ax.bar(x + offset, y, width=width, alpha=0.8, label=method)
+    width = 0.8 / max(1, len(series))
+    for idx, (method, measurement_method) in enumerate(series):
+        subset = mean_df[
+            (mean_df["base_method"] == method)
+            & (mean_df["measurement_method"] == measurement_method)
+        ]
+        subset = subset.sort_values("sigma")
+        sigma_to_row = {float(row["sigma"]): row for _, row in subset.iterrows()}
+        y = np.array(
+            [
+                float(sigma_to_row[sigma]["utilization_loss_fraction"]) if sigma in sigma_to_row else np.nan
+                for sigma in sigmas
+            ],
+            dtype=float,
+        )
+        yerr = np.array(
+            [
+                float(sigma_to_row[sigma]["ci_high"] - sigma_to_row[sigma]["utilization_loss_fraction"])
+                if sigma in sigma_to_row and np.isfinite(float(sigma_to_row[sigma]["ci_high"]))
+                else np.nan
+                for sigma in sigmas
+            ],
+            dtype=float,
+        )
+        offset = (idx - (len(series) - 1) / 2.0) * width
+        ax.bar(
+            x + offset,
+            y,
+            width=width,
+            alpha=0.8,
+            label=f"{method} ({measurement_method})",
+        )
+        finite_err = np.isfinite(yerr)
+        if finite_err.any():
+            ax.errorbar(
+                (x + offset)[finite_err],
+                y[finite_err],
+                yerr=yerr[finite_err],
+                fmt="none",
+                ecolor="black",
+                capsize=3,
+                linewidth=1.0,
+            )
     ax.set_xticks(x)
     ax.set_xticklabels([f"σ={sigma}" for sigma in sigmas])
     ax.set_xlabel("heterogeneity (σ)")
@@ -296,27 +565,52 @@ def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: Out
     if summary_df.empty:
         return
     fig, ax = plt.subplots(figsize=(6, 4))
-    mean_df = (
-        summary_df.groupby(["sigma", "base_method", "measurement_method"], sort=True)["utilization_loss_fraction"]
-        .mean()
-        .reset_index()
-    )
-    for method, group in summary_df.groupby("base_method", sort=True):
+    mean_rows: list[dict[str, object]] = []
+    for (sigma, base_method, measurement_method), group in summary_df.groupby(
+        ["sigma", "base_method", "measurement_method"], sort=True
+    ):
+        mean, ci_low, ci_high = _summarize_scalar(
+            group["utilization_loss_fraction"].to_numpy(dtype=float),
+            ci_level=0.95,
+        )
+        mean_rows.append(
+            {
+                "sigma": float(sigma),
+                "base_method": base_method,
+                "measurement_method": measurement_method,
+                "utilization_loss_fraction": mean,
+                "ci_low": ci_low,
+                "ci_high": ci_high,
+            }
+        )
+    mean_df = pd.DataFrame(mean_rows)
+    for (method, measurement_method), group in summary_df.groupby(["base_method", "measurement_method"], sort=True):
         ax.scatter(
             group["sigma"].to_numpy(dtype=float),
             group["utilization_loss_fraction"].to_numpy(dtype=float),
-            s=25,
-            alpha=0.5,
-            label=f"{method} samples",
+            s=22,
+            alpha=0.35,
+            label=f"{method} {measurement_method} samples",
         )
-        mean_group = mean_df[mean_df["base_method"] == method].sort_values("sigma")
+        mean_group = mean_df[
+            (mean_df["base_method"] == method)
+            & (mean_df["measurement_method"] == measurement_method)
+        ].sort_values("sigma")
         ax.plot(
             mean_group["sigma"].to_numpy(dtype=float),
             mean_group["utilization_loss_fraction"].to_numpy(dtype=float),
             marker="o",
             linewidth=2,
-            label=method,
+            label=f"{method} ({measurement_method})",
         )
+        valid_ci = mean_group["ci_low"].notna() & mean_group["ci_high"].notna()
+        if valid_ci.any():
+            ax.fill_between(
+                mean_group.loc[valid_ci, "sigma"].to_numpy(dtype=float),
+                mean_group.loc[valid_ci, "ci_low"].to_numpy(dtype=float),
+                mean_group.loc[valid_ci, "ci_high"].to_numpy(dtype=float),
+                alpha=0.15,
+            )
     ax.set_xlabel("heterogeneity (σ)")
     ax.set_ylabel("utilization loss fraction")
     ax.set_ylim(0, 1)
@@ -339,6 +633,7 @@ def plot_quality_vs_wall_time_diagnostic(
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     emit_legacy_alias: bool = False,
+    audit_df: pd.DataFrame | None = None,
 ) -> None:
     """Appendix-style posterior quality diagnostic over wall-clock time."""
     from ..analysis import posterior_quality_curve
@@ -352,6 +647,14 @@ def plot_quality_vs_wall_time_diagnostic(
         archive_size=archive_size,
     )
     if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_wall_time_diagnostic",
+            metadata={
+                "plot_name": "quality_vs_wall_time_diagnostic",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
         return
 
     metadata = {
@@ -376,6 +679,65 @@ def plot_quality_vs_wall_time_diagnostic(
         )
 
 
+def plot_quality_vs_wall_time(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+    ci_level: float = 0.95,
+    audit_df: pd.DataFrame | None = None,
+) -> None:
+    """Paper summary: posterior quality over wall-clock time."""
+    from ..analysis import posterior_quality_curve
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_wall_time",
+            metadata=_audit_skip_metadata(
+                plot_name="quality_vs_wall_time",
+                audit_df=audit_df,
+                gate_column="paper_quality_plots_allowed",
+                extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+            ),
+        )
+        return
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_wall_time",
+            metadata={
+                "plot_name": "quality_vs_wall_time",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+    _save_quality_summary_artifact(
+        output_dir.plots / "quality_vs_wall_time",
+        quality_df,
+        axis_kind="wall_time",
+        ci_level=ci_level,
+        metadata={
+            "plot_name": "quality_vs_wall_time",
+            "axis_kind": "wall_time",
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
 def plot_quality_vs_posterior_samples(
     records: List[ParticleRecord],
     true_params: Dict[str, float],
@@ -383,8 +745,68 @@ def plot_quality_vs_posterior_samples(
     *,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
+    ci_level: float = 0.95,
+    audit_df: pd.DataFrame | None = None,
 ) -> None:
-    """Alternative convergence plot over posterior sample count."""
+    """Paper summary: convergence over posterior sample count."""
+    from ..analysis import posterior_quality_curve
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_posterior_samples",
+            metadata=_audit_skip_metadata(
+                plot_name="quality_vs_posterior_samples",
+                audit_df=audit_df,
+                gate_column="paper_quality_plots_allowed",
+                extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+            ),
+        )
+        return
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="posterior_samples",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_posterior_samples",
+            metadata={
+                "plot_name": "quality_vs_posterior_samples",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    _save_quality_summary_artifact(
+        output_dir.plots / "quality_vs_posterior_samples",
+        quality_df,
+        axis_kind="posterior_samples",
+        ci_level=ci_level,
+        metadata={
+            "plot_name": "quality_vs_posterior_samples",
+            "axis_kind": "posterior_samples",
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_quality_vs_posterior_samples_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Diagnostic replicate-level convergence over posterior sample count."""
     from ..analysis import posterior_quality_curve
 
     quality_df = posterior_quality_curve(
@@ -396,17 +818,23 @@ def plot_quality_vs_posterior_samples(
         archive_size=archive_size,
     )
     if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_posterior_samples_diagnostic",
+            metadata={
+                "plot_name": "quality_vs_posterior_samples_diagnostic",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
         return
-
     _save_quality_curve_artifact(
-        output_dir.plots / "quality_vs_posterior_samples",
+        output_dir.plots / "quality_vs_posterior_samples_diagnostic",
         quality_df,
         axis_kind="posterior_samples",
         metadata={
-            "plot_name": "quality_vs_posterior_samples",
+            "plot_name": "quality_vs_posterior_samples_diagnostic",
             "axis_kind": "posterior_samples",
-            "state_kind": "observable_posterior_state",
-            "checkpoint_strategy": "quantile",
+            "diagnostic_plot": True,
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
         },
     )
@@ -419,8 +847,68 @@ def plot_quality_vs_attempt_budget(
     *,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
+    ci_level: float = 0.95,
+    audit_df: pd.DataFrame | None = None,
 ) -> None:
-    """Alternative convergence plot over cumulative attempt budget."""
+    """Paper summary: convergence over cumulative attempt budget."""
+    from ..analysis import posterior_quality_curve
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_attempt_budget",
+            metadata=_audit_skip_metadata(
+                plot_name="quality_vs_attempt_budget",
+                audit_df=audit_df,
+                gate_column="paper_quality_plots_allowed",
+                extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+            ),
+        )
+        return
+
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="attempt_budget",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_attempt_budget",
+            metadata={
+                "plot_name": "quality_vs_attempt_budget",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    _save_quality_summary_artifact(
+        output_dir.plots / "quality_vs_attempt_budget",
+        quality_df,
+        axis_kind="attempt_budget",
+        ci_level=ci_level,
+        metadata={
+            "plot_name": "quality_vs_attempt_budget",
+            "axis_kind": "attempt_budget",
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_quality_vs_attempt_budget_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Diagnostic replicate-level convergence over cumulative attempt budget."""
     from ..analysis import posterior_quality_curve
 
     quality_df = posterior_quality_curve(
@@ -432,17 +920,23 @@ def plot_quality_vs_attempt_budget(
         archive_size=archive_size,
     )
     if quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "quality_vs_attempt_budget_diagnostic",
+            metadata={
+                "plot_name": "quality_vs_attempt_budget_diagnostic",
+                "skip_reason": "missing_true_params_or_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
         return
-
     _save_quality_curve_artifact(
-        output_dir.plots / "quality_vs_attempt_budget",
+        output_dir.plots / "quality_vs_attempt_budget_diagnostic",
         quality_df,
         axis_kind="attempt_budget",
         metadata={
-            "plot_name": "quality_vs_attempt_budget",
+            "plot_name": "quality_vs_attempt_budget_diagnostic",
             "axis_kind": "attempt_budget",
-            "state_kind": "observable_posterior_state",
-            "checkpoint_strategy": "quantile",
+            "diagnostic_plot": True,
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
         },
     )
@@ -455,8 +949,76 @@ def plot_time_to_target_summary(
     output_dir: OutputDir,
     *,
     archive_size: int | None = None,
+    ci_level: float = 0.95,
+    min_particles_for_threshold: int = 1,
+    audit_df: pd.DataFrame | None = None,
 ) -> None:
     """Main paper summary: wall-clock time required to reach a target quality."""
+    from ..analysis import time_to_threshold
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    if true_params and not _paper_plot_allowed(audit_df, "paper_threshold_plots_allowed"):
+        write_plot_metadata(
+            output_dir.plots / "time_to_target_summary",
+            metadata=_audit_skip_metadata(
+                plot_name="time_to_target_summary",
+                audit_df=audit_df,
+                gate_column="paper_threshold_plots_allowed",
+                extra={
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                    "target_wasserstein": float(target_wasserstein),
+                },
+            ),
+        )
+        return
+
+    summary_df = time_to_threshold(
+        records,
+        true_params=true_params,
+        target_wasserstein=target_wasserstein,
+        axis_kind="wall_time",
+        archive_size=archive_size,
+        min_particles=int(min_particles_for_threshold),
+    )
+    if summary_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "time_to_target_summary",
+            metadata={
+                "plot_name": "time_to_target_summary",
+                "skip_reason": "missing_true_params_or_threshold_rows",
+                "target_wasserstein": float(target_wasserstein),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    _save_threshold_summary_artifact(
+        output_dir.plots / "time_to_target_summary",
+        summary_df,
+        axis_kind="wall_time",
+        include_replicates=False,
+        metadata={
+            "plot_name": "time_to_target_summary",
+            "axis_kind": "wall_time",
+            "target_wasserstein": float(target_wasserstein),
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "min_particles_for_threshold": int(min_particles_for_threshold),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_time_to_target_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    target_wasserstein: float,
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    min_particles_for_threshold: int = 1,
+) -> None:
+    """Diagnostic replicate-level threshold summary over wall-clock time."""
     from ..analysis import time_to_threshold
 
     summary_df = time_to_threshold(
@@ -465,18 +1027,30 @@ def plot_time_to_target_summary(
         target_wasserstein=target_wasserstein,
         axis_kind="wall_time",
         archive_size=archive_size,
+        min_particles=int(min_particles_for_threshold),
     )
     if summary_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "time_to_target_diagnostic",
+            metadata={
+                "plot_name": "time_to_target_diagnostic",
+                "skip_reason": "missing_true_params_or_threshold_rows",
+                "target_wasserstein": float(target_wasserstein),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
         return
-
     _save_threshold_summary_artifact(
-        output_dir.plots / "time_to_target_summary",
+        output_dir.plots / "time_to_target_diagnostic",
         summary_df,
         axis_kind="wall_time",
+        include_replicates=True,
         metadata={
-            "plot_name": "time_to_target_summary",
+            "plot_name": "time_to_target_diagnostic",
             "axis_kind": "wall_time",
             "target_wasserstein": float(target_wasserstein),
+            "diagnostic_plot": True,
+            "min_particles_for_threshold": int(min_particles_for_threshold),
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
         },
     )
@@ -489,8 +1063,76 @@ def plot_attempts_to_target_summary(
     output_dir: OutputDir,
     *,
     archive_size: int | None = None,
+    ci_level: float = 0.95,
+    min_particles_for_threshold: int = 1,
+    audit_df: pd.DataFrame | None = None,
 ) -> None:
     """Alternative summary: simulation attempts required to reach target quality."""
+    from ..analysis import time_to_threshold
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    if true_params and not _paper_plot_allowed(audit_df, "paper_threshold_plots_allowed"):
+        write_plot_metadata(
+            output_dir.plots / "attempts_to_target_summary",
+            metadata=_audit_skip_metadata(
+                plot_name="attempts_to_target_summary",
+                audit_df=audit_df,
+                gate_column="paper_threshold_plots_allowed",
+                extra={
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                    "target_wasserstein": float(target_wasserstein),
+                },
+            ),
+        )
+        return
+
+    summary_df = time_to_threshold(
+        records,
+        true_params=true_params,
+        target_wasserstein=target_wasserstein,
+        axis_kind="attempt_budget",
+        archive_size=archive_size,
+        min_particles=int(min_particles_for_threshold),
+    )
+    if summary_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "attempts_to_target_summary",
+            metadata={
+                "plot_name": "attempts_to_target_summary",
+                "skip_reason": "missing_true_params_or_threshold_rows",
+                "target_wasserstein": float(target_wasserstein),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    _save_threshold_summary_artifact(
+        output_dir.plots / "attempts_to_target_summary",
+        summary_df,
+        axis_kind="attempt_budget",
+        include_replicates=False,
+        metadata={
+            "plot_name": "attempts_to_target_summary",
+            "axis_kind": "attempt_budget",
+            "target_wasserstein": float(target_wasserstein),
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "min_particles_for_threshold": int(min_particles_for_threshold),
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_attempts_to_target_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    target_wasserstein: float,
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    min_particles_for_threshold: int = 1,
+) -> None:
+    """Diagnostic replicate-level attempt-threshold summary."""
     from ..analysis import time_to_threshold
 
     summary_df = time_to_threshold(
@@ -499,18 +1141,30 @@ def plot_attempts_to_target_summary(
         target_wasserstein=target_wasserstein,
         axis_kind="attempt_budget",
         archive_size=archive_size,
+        min_particles=int(min_particles_for_threshold),
     )
     if summary_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "attempts_to_target_diagnostic",
+            metadata={
+                "plot_name": "attempts_to_target_diagnostic",
+                "skip_reason": "missing_true_params_or_threshold_rows",
+                "target_wasserstein": float(target_wasserstein),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
         return
-
     _save_threshold_summary_artifact(
-        output_dir.plots / "attempts_to_target_summary",
+        output_dir.plots / "attempts_to_target_diagnostic",
         summary_df,
         axis_kind="attempt_budget",
+        include_replicates=True,
         metadata={
-            "plot_name": "attempts_to_target_summary",
+            "plot_name": "attempts_to_target_diagnostic",
             "axis_kind": "attempt_budget",
             "target_wasserstein": float(target_wasserstein),
+            "diagnostic_plot": True,
+            "min_particles_for_threshold": int(min_particles_for_threshold),
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
         },
     )
@@ -572,8 +1226,67 @@ def plot_corner(
     )
 
 
-def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Tolerance schedule over wall-clock time."""
+def plot_tolerance_trajectory(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    ci_level: float = 0.95,
+) -> None:
+    """Paper summary: tolerance schedule over wall-clock time."""
+    from ..analysis import tolerance_over_wall_time
+
+    trajectory_df = tolerance_over_wall_time(records)
+    if trajectory_df.empty:
+        return
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    summary_df = _step_curve_summary(
+        trajectory_df,
+        x_col="wall_time",
+        y_col="tolerance",
+        ci_level=ci_level,
+        log_y=True,
+    )
+    if summary_df.empty:
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for method, group in summary_df.groupby("method", sort=True):
+        group = group.sort_values("wall_time")
+        ax.plot(group["wall_time"], group["tolerance"], linewidth=1.8, label=method)
+        valid_ci = group["tolerance_ci_low"].notna() & group["tolerance_ci_high"].notna() & (group["n_replicates"] >= 2)
+        if valid_ci.any():
+            ax.fill_between(
+                group.loc[valid_ci, "wall_time"],
+                group.loc[valid_ci, "tolerance_ci_low"],
+                group.loc[valid_ci, "tolerance_ci_high"],
+                alpha=0.2,
+            )
+    ax.set_xlabel("wall-clock time")
+    ax.set_ylabel("tolerance")
+    ax.set_yscale("log")
+    ax.set_title("Tolerance trajectory")
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    missing_methods = sorted({record.method for record in records if record.tolerance is None})
+    save_figure(
+        fig,
+        output_dir.plots / "tolerance_trajectory",
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata={
+            "missing_tolerance_methods": missing_methods,
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+        },
+    )
+
+
+def plot_tolerance_trajectory_diagnostic(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+    """Diagnostic replicate-level tolerance schedule over wall-clock time."""
     from ..analysis import tolerance_over_wall_time
 
     trajectory_df = tolerance_over_wall_time(records)
@@ -584,9 +1297,9 @@ def plot_tolerance_trajectory(records: List[ParticleRecord], output_dir: OutputD
     missing_methods = sorted({record.method for record in records if record.tolerance is None})
     save_figure(
         fig,
-        output_dir.plots / "tolerance_trajectory",
+        output_dir.plots / "tolerance_trajectory_diagnostic",
         data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
-        metadata={"missing_tolerance_methods": missing_methods},
+        metadata={"missing_tolerance_methods": missing_methods, "diagnostic_plot": True},
     )
 
 
@@ -725,11 +1438,17 @@ def plot_ablation_summary(
 
     variant_names = [v.get("name", f"v{i}") for i, v in enumerate(variants)]
     mean_tols = []
+    ci_lows = []
+    ci_highs = []
+    n_values = []
 
     for name in variant_names:
         csv_path = data_dir / f"ablation_{name}.csv"
         if not csv_path.exists():
             mean_tols.append(float("nan"))
+            ci_lows.append(float("nan"))
+            ci_highs.append(float("nan"))
+            n_values.append(0)
             continue
         rows = _read_csv(csv_path)
         tolerances = [
@@ -737,20 +1456,45 @@ def plot_ablation_summary(
             if r.get("tolerance") not in ("", None)
         ]
         if tolerances:
-            mean_tols.append(float(np.mean(tolerances[-max(1, len(tolerances) // 10):])))
+            tail = np.asarray(tolerances[-max(1, len(tolerances) // 10):], dtype=float)
+            mean, ci_low, ci_high = _summarize_scalar(tail, ci_level=0.95)
+            mean_tols.append(mean)
+            ci_lows.append(ci_low)
+            ci_highs.append(ci_high)
+            n_values.append(int(np.isfinite(tail).sum()))
         else:
             mean_tols.append(float("nan"))
+            ci_lows.append(float("nan"))
+            ci_highs.append(float("nan"))
+            n_values.append(0)
 
     fig, ax = plt.subplots(figsize=(max(5, len(variant_names) * 1.2), 4))
     x = np.arange(len(variant_names))
     ax.bar(x, mean_tols, color="steelblue", alpha=0.8)
+    for idx, (mean, ci_low, ci_high, n_obs) in enumerate(zip(mean_tols, ci_lows, ci_highs, n_values)):
+        if np.isfinite(mean) and np.isfinite(ci_low) and np.isfinite(ci_high) and n_obs >= 2:
+            ax.errorbar(
+                idx,
+                mean,
+                yerr=[[mean - ci_low], [ci_high - mean]],
+                fmt="none",
+                ecolor="black",
+                elinewidth=1.2,
+                capsize=3,
+            )
     ax.set_xticks(x)
     ax.set_xticklabels(variant_names, rotation=30, ha="right")
     ax.set_ylabel("mean final tolerance ε")
     ax.set_title("Ablation comparison")
     fig.tight_layout()
 
-    data = {"variant": variant_names, "mean_final_tolerance": mean_tols}
+    data = {
+        "variant": variant_names,
+        "mean_final_tolerance": mean_tols,
+        "mean_final_tolerance_ci_low": ci_lows,
+        "mean_final_tolerance_ci_high": ci_highs,
+        "n_observations": n_values,
+    }
     stem = output_dir.plots / "ablation_comparison"
     save_figure(fig, stem, data=data)
 
@@ -767,11 +1511,24 @@ def plot_benchmark_diagnostics(
     analysis_cfg = cfg.get("analysis", {})
     true_params = _true_params_from_cfg(records, benchmark_cfg)
     archive_size = inference_cfg.get("k")
+    emit_paper = bool(plots_cfg.get("emit_paper_summaries", True))
+    emit_diagnostics = bool(plots_cfg.get("emit_diagnostics", True))
+    ci_level = float(analysis_cfg.get("ci_level", 0.95))
+    min_particles_for_threshold = int(analysis_cfg.get("min_particles_for_threshold", archive_size or 100))
+    audit_df = _write_benchmark_audit(
+        records,
+        true_params=true_params,
+        output_dir=output_dir,
+        archive_size=archive_size,
+        min_particles_for_threshold=min_particles_for_threshold,
+    )
 
     if plots_cfg.get("posterior"):
         plot_posterior(records, output_dir, archive_size=archive_size)
-    if plots_cfg.get("archive_evolution"):
+    if plots_cfg.get("archive_evolution") and emit_paper:
         plot_archive_evolution(records, output_dir)
+    if plots_cfg.get("archive_evolution") and emit_diagnostics:
+        plot_archive_evolution_diagnostic(records, output_dir)
     if plots_cfg.get("corner"):
         plot_corner(
             records,
@@ -780,43 +1537,98 @@ def plot_benchmark_diagnostics(
             true_params=true_params,
             archive_size=archive_size,
         )
-    if plots_cfg.get("tolerance_trajectory"):
-        plot_tolerance_trajectory(records, output_dir)
+    if plots_cfg.get("tolerance_trajectory") and emit_paper:
+        plot_tolerance_trajectory(records, output_dir, ci_level=ci_level)
+    if plots_cfg.get("tolerance_trajectory") and emit_diagnostics:
+        plot_tolerance_trajectory_diagnostic(records, output_dir)
     if plots_cfg.get("quality_vs_time"):
-        plot_quality_vs_wall_time_diagnostic(
-            records,
-            true_params=true_params,
-            output_dir=output_dir,
-            archive_size=archive_size,
-            checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
-        )
-        plot_quality_vs_posterior_samples(
-            records,
-            true_params=true_params,
-            output_dir=output_dir,
-            archive_size=archive_size,
-        )
-        plot_quality_vs_attempt_budget(
-            records,
-            true_params=true_params,
-            output_dir=output_dir,
-            archive_size=archive_size,
-        )
         target = float(analysis_cfg.get("target_wasserstein", 1.0))
-        plot_time_to_target_summary(
-            records,
-            true_params=true_params,
-            target_wasserstein=target,
-            output_dir=output_dir,
-            archive_size=archive_size,
-        )
-        plot_attempts_to_target_summary(
-            records,
-            true_params=true_params,
-            target_wasserstein=target,
-            output_dir=output_dir,
-            archive_size=archive_size,
-        )
+        checkpoint_count = len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8
+        if emit_paper:
+            plot_quality_vs_wall_time(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+                ci_level=ci_level,
+                audit_df=audit_df,
+            )
+            plot_quality_vs_posterior_samples(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                ci_level=ci_level,
+                audit_df=audit_df,
+            )
+            plot_quality_vs_attempt_budget(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                ci_level=ci_level,
+                audit_df=audit_df,
+            )
+            plot_time_to_target_summary(
+                records,
+                true_params=true_params,
+                target_wasserstein=target,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                ci_level=ci_level,
+                min_particles_for_threshold=min_particles_for_threshold,
+                audit_df=audit_df,
+            )
+            plot_attempts_to_target_summary(
+                records,
+                true_params=true_params,
+                target_wasserstein=target,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                ci_level=ci_level,
+                min_particles_for_threshold=min_particles_for_threshold,
+                audit_df=audit_df,
+            )
+        if emit_diagnostics:
+            plot_quality_vs_wall_time_diagnostic(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+                audit_df=audit_df,
+            )
+            plot_quality_vs_posterior_samples_diagnostic(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+            )
+            plot_quality_vs_attempt_budget_diagnostic(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+            )
+            plot_time_to_target_diagnostic(
+                records,
+                true_params=true_params,
+                target_wasserstein=target,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                min_particles_for_threshold=min_particles_for_threshold,
+            )
+            plot_attempts_to_target_diagnostic(
+                records,
+                true_params=true_params,
+                target_wasserstein=target,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                min_particles_for_threshold=min_particles_for_threshold,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -936,14 +1748,82 @@ def _save_quality_curve_artifact(
     )
 
 
+def _save_quality_summary_artifact(
+    stem: Path,
+    quality_df: pd.DataFrame,
+    *,
+    axis_kind: str,
+    ci_level: float,
+    metadata: Dict[str, Any],
+) -> None:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    summary_df = _step_curve_summary(
+        quality_df,
+        x_col="axis_value",
+        y_col="wasserstein",
+        ci_level=ci_level,
+        log_y=False,
+    )
+    if summary_df.empty:
+        write_plot_metadata(stem, metadata={**metadata, "skip_reason": "empty_summary"})
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    title = {
+        "wall_time": "Posterior quality vs. wall-clock time",
+        "posterior_samples": "Posterior quality vs. posterior samples",
+        "attempt_budget": "Posterior quality vs. simulation attempts",
+    }[axis_kind]
+    xlabel = {
+        "wall_time": "wall-clock time",
+        "posterior_samples": "posterior samples",
+        "attempt_budget": "simulation attempts",
+    }[axis_kind]
+    for method, group in summary_df.groupby("method", sort=True):
+        group = group.sort_values("axis_value")
+        ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=method)
+        valid_ci = group["wasserstein_ci_low"].notna() & group["wasserstein_ci_high"].notna() & (group["n_replicates"] >= 2)
+        if valid_ci.any():
+            ax.fill_between(
+                group.loc[valid_ci, "axis_value"],
+                group.loc[valid_ci, "wasserstein_ci_low"],
+                group.loc[valid_ci, "wasserstein_ci_high"],
+                alpha=0.2,
+            )
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("wasserstein")
+    ax.set_title(title)
+    ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    save_figure(
+        fig,
+        stem,
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata=metadata,
+    )
+
+
 def _save_threshold_summary_artifact(
     stem: Path,
     summary_df,
     *,
     axis_kind: str,
+    include_replicates: bool,
     metadata: Dict[str, Any],
 ) -> None:
-    fig = threshold_summary_plot(summary_df, axis_kind=axis_kind)
+    value_col = {
+        "wall_time": "wall_time_to_threshold",
+        "posterior_samples": "posterior_samples_to_threshold",
+        "attempt_budget": "attempts_to_threshold",
+    }[axis_kind]
+    if summary_df.empty or value_col not in summary_df.columns or not np.isfinite(summary_df[value_col].to_numpy(dtype=float)).any():
+        write_plot_metadata(stem, metadata={**metadata, "skip_reason": "threshold_not_reached"})
+        return
+    fig = threshold_summary_plot(summary_df, axis_kind=axis_kind, include_replicates=include_replicates)
     save_figure(
         fig,
         stem,

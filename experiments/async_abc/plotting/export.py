@@ -154,3 +154,45 @@ def save_figure(
     plt.close(fig)
 
     return out
+
+
+def write_plot_metadata(
+    path_stem: Union[str, Path],
+    *,
+    data: Optional[Dict[str, List]] = None,
+    metadata: Optional[Dict[str, object]] = None,
+) -> Dict[str, Path]:
+    """Write plot metadata and optional CSV without creating a figure.
+
+    This is used for plots that are intentionally skipped because the
+    underlying data is invalid or incomplete. The metadata JSON is still
+    created so downstream tooling can distinguish an intentional skip from
+    a missing file.
+    """
+    stem = Path(path_stem)
+    out: Dict[str, Path] = {}
+
+    if data is not None:
+        csv_path = Path(str(stem) + "_data.csv")
+        columns = list(data.keys())
+        rows = list(zip(*[data[c] for c in columns])) if columns else []
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(columns)
+            writer.writerows(rows)
+        out["csv"] = csv_path
+
+    meta_path = Path(str(stem) + "_meta.json")
+    meta = {
+        "git_hash": get_git_hash(),
+        "timestamp": datetime.now().isoformat(),
+        "pdf": None,
+        "png": None,
+        "skipped": True,
+    }
+    if metadata:
+        meta.update(metadata)
+    with open(meta_path, "w") as f:
+        json.dump(meta, f, indent=2)
+    out["meta"] = meta_path
+    return out

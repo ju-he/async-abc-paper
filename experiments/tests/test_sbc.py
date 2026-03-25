@@ -57,6 +57,7 @@ def test_empirical_coverage_uniform_posterior():
     df = empirical_coverage(trials, coverage_levels=[0.5, 0.9])
     row_50 = df[df["coverage_level"] == 0.5]["empirical_coverage"].iloc[0]
     assert abs(row_50 - 0.5) < 0.05
+    assert int(df[df["coverage_level"] == 0.5]["n_trials"].iloc[0]) == 500
 
 
 def test_sbc_runner_executes_methods_in_method_major_order(tmp_path, monkeypatch):

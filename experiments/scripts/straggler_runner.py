@@ -78,6 +78,22 @@ def _make_straggler_simulate(
     return wrapped
 
 
+def _active_wall_time(records) -> float:
+    """Canonical wall-clock span from recorded simulation timing metadata."""
+    starts = [float(r.sim_start_time) for r in records if r.sim_start_time is not None]
+    ends = [float(r.sim_end_time) for r in records if r.sim_end_time is not None]
+    if starts and ends:
+        span = max(ends) - min(starts)
+        if span > 0:
+            return float(span)
+    wall_times = [float(r.wall_time) for r in records if r.wall_time is not None]
+    if wall_times:
+        span = max(wall_times) - min(wall_times)
+        if span > 0:
+            return float(span)
+    return 0.0
+
+
 def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None:
     if not throughput_rows:
         return
@@ -87,12 +103,30 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
     for method in methods:
         rows = [row for row in throughput_rows if row["base_method"] == method]
         rows = sorted(rows, key=lambda row: row["slowdown_factor"])
+        summary_rows = []
+        for slowdown in sorted({float(row["slowdown_factor"]) for row in rows}):
+            subset = [row for row in rows if float(row["slowdown_factor"]) == slowdown]
+            values = np.asarray([float(row["throughput_sims_per_s"]) for row in subset], dtype=float)
+            mean = float(np.mean(values))
+            ci = 0.0
+            if values.size >= 2:
+                from scipy.stats import t
+
+                ci = float(t.ppf(0.975, values.size - 1) * np.std(values, ddof=1) / np.sqrt(values.size))
+            summary_rows.append((slowdown, mean, ci))
         ax.plot(
-            [row["slowdown_factor"] for row in rows],
-            [row["throughput_sims_per_s"] for row in rows],
+            [row[0] for row in summary_rows],
+            [row[1] for row in summary_rows],
             marker="o",
             label=method,
         )
+        if any(row[2] > 0 for row in summary_rows):
+            ax.fill_between(
+                [row[0] for row in summary_rows],
+                [row[1] - row[2] for row in summary_rows],
+                [row[1] + row[2] for row in summary_rows],
+                alpha=0.2,
+            )
 
     ax.set_xlabel("slowdown factor")
     ax.set_ylabel("throughput (sim/s)")
@@ -105,7 +139,8 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
         "base_method": [row["base_method"] for row in throughput_rows],
         "replicate": [row["replicate"] for row in throughput_rows],
         "throughput_sims_per_s": [row["throughput_sims_per_s"] for row in throughput_rows],
-        "wall_time_s": [row["wall_time_s"] for row in throughput_rows],
+        "active_wall_time_s": [row["active_wall_time_s"] for row in throughput_rows],
+        "elapsed_wall_time_s": [row["elapsed_wall_time_s"] for row in throughput_rows],
     }
     save_figure(fig, output_dir.plots / "throughput_vs_slowdown", data=data)
 
@@ -241,6 +276,8 @@ def main(argv: list[str] | None = None) -> None:
                         seed,
                     )
                     elapsed = time.time() - t0
+                    active_wall_time = _active_wall_time(records)
+                    throughput_wall_time = active_wall_time if active_wall_time > 0 else elapsed
                     for record in records:
                         record.method = tagged_method
                     if is_root_rank():
@@ -255,8 +292,9 @@ def main(argv: list[str] | None = None) -> None:
                                 "replicate": replicate,
                                 "seed": seed,
                                 "n_simulations": len(records),
-                                "wall_time_s": elapsed,
-                                "throughput_sims_per_s": len(records) / elapsed if elapsed > 0 else float("nan"),
+                                "active_wall_time_s": throughput_wall_time,
+                                "elapsed_wall_time_s": elapsed,
+                                "throughput_sims_per_s": len(records) / throughput_wall_time if throughput_wall_time > 0 else float("nan"),
                                 "test_mode": test_mode,
                             }
                         )

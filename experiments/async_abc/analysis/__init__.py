@@ -3,6 +3,7 @@
 from importlib import import_module
 
 _EXPORTS = {
+    "benchmark_plot_audit": (".audit", "benchmark_plot_audit"),
     "base_method_name": (".final_state", "base_method_name"),
     "barrier_overhead_fraction": (".barrier", "barrier_overhead_fraction"),
     "final_state_records": (".final_state", "final_state_records"),
@@ -22,6 +23,7 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "benchmark_plot_audit",
     "base_method_name",
     "barrier_overhead_fraction",
     "compute_ess",

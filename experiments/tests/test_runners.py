@@ -146,12 +146,19 @@ class TestGaussianMeanRunner:
 
     def test_creates_phase3_plots(self, gaussian_runner_artifact):
         plots_dir = gaussian_runner_artifact["root"] / "gaussian_mean" / "plots"
+        data_dir = gaussian_runner_artifact["root"] / "gaussian_mean" / "data"
+        assert (plots_dir / "quality_vs_wall_time.pdf").exists()
         assert (plots_dir / "quality_vs_wall_time_diagnostic.pdf").exists()
         assert (plots_dir / "quality_vs_posterior_samples.pdf").exists()
+        assert (plots_dir / "quality_vs_posterior_samples_diagnostic.pdf").exists()
         assert (plots_dir / "quality_vs_attempt_budget.pdf").exists()
-        assert (plots_dir / "time_to_target_summary.pdf").exists()
+        assert (plots_dir / "quality_vs_attempt_budget_diagnostic.pdf").exists()
+        assert (plots_dir / "time_to_target_summary_meta.json").exists()
+        assert (plots_dir / "time_to_target_diagnostic_meta.json").exists()
         assert (plots_dir / "tolerance_trajectory.pdf").exists()
+        assert (plots_dir / "tolerance_trajectory_diagnostic.pdf").exists()
         assert (plots_dir / "corner.pdf").exists()
+        assert (data_dir / "plot_audit.csv").exists()
 
     def test_small_mode_writes_run_mode_metadata_and_timing(self, tmp_path):
         cfg = test_helpers.make_fast_runner_config(
@@ -332,3 +339,15 @@ class TestStragglerRunner:
             val = row.get("throughput_sims_per_s", "")
             if val:
                 assert not math.isinf(float(val))
+
+    def test_throughput_csv_exports_active_and_elapsed_wall_time(self, straggler_runner_artifact):
+        csv_path = (
+            straggler_runner_artifact["root"]
+            / "straggler"
+            / "data"
+            / "throughput_vs_slowdown_summary.csv"
+        )
+        rows = _rows(csv_path)
+        assert rows
+        assert "active_wall_time_s" in rows[0]
+        assert "elapsed_wall_time_s" in rows[0]

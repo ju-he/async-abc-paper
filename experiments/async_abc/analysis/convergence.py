@@ -172,6 +172,7 @@ def time_to_threshold(
     *,
     axis_kind: str = "wall_time",
     archive_size: int | None = None,
+    min_particles: int = 1,
     n_projections: int = 50,
 ) -> pd.DataFrame:
     """Return the earliest observable state that reaches a target distance."""
@@ -189,7 +190,10 @@ def time_to_threshold(
     rows: list[dict[str, object]] = []
     for (method, replicate), group in quality_df.groupby(["method", "replicate"], sort=True):
         ordered = group.sort_values("axis_value")
-        reached = ordered.loc[ordered["wasserstein"] <= target_wasserstein]
+        reached = ordered.loc[
+            (ordered["wasserstein"] <= target_wasserstein)
+            & (ordered["posterior_samples"] >= int(max(1, min_particles)))
+        ]
         if reached.empty:
             rows.append(
                 {

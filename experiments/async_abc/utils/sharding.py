@@ -588,6 +588,15 @@ def _normalized_extension_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     inference = normalized.setdefault("inference", {})
     inference.pop("test_mode", None)
     inference.setdefault("progress_log_interval_s", 10.0)
+    plots = normalized.setdefault("plots", {})
+    plots.setdefault("emit_paper_summaries", True)
+    plots.setdefault("emit_diagnostics", True)
+    analysis = normalized.setdefault("analysis", {})
+    analysis.setdefault("ci_level", 0.95)
+    default_min_particles = inference.get("k")
+    if default_min_particles is None:
+        default_min_particles = 100
+    analysis.setdefault("min_particles_for_threshold", int(default_min_particles))
     if normalized.get("benchmark", {}).get("name") == "cellular_potts":
         normalized["benchmark"].pop("output_dir", None)
     return normalized

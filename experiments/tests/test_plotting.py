@@ -345,6 +345,44 @@ class TestPhase3Reporters:
         assert (output_dir.plots / "quality_vs_attempt_budget.pdf").exists()
         assert not (output_dir.plots / "quality_vs_time.pdf").exists()
 
+    def test_plot_benchmark_diagnostics_writes_audit_and_diagnostic_companions(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        cfg = {
+            "benchmark": {"true_mu": 0.0},
+            "inference": {"k": 20},
+            "analysis": {"target_wasserstein": 1.0, "min_particles_for_threshold": 5},
+            "plots": {
+                "archive_evolution": True,
+                "tolerance_trajectory": True,
+                "quality_vs_time": True,
+                "emit_paper_summaries": True,
+                "emit_diagnostics": True,
+            },
+        }
+        plot_benchmark_diagnostics(sample_records, cfg, output_dir)
+        assert (output_dir.data / "plot_audit.csv").exists()
+        assert (output_dir.data / "plot_audit_summary.json").exists()
+        assert (output_dir.plots / "archive_evolution.pdf").exists()
+        assert (output_dir.plots / "archive_evolution_diagnostic.pdf").exists()
+        assert (output_dir.plots / "tolerance_trajectory.pdf").exists()
+        assert (output_dir.plots / "tolerance_trajectory_diagnostic.pdf").exists()
+        assert (output_dir.plots / "time_to_target_diagnostic_meta.json").exists()
+
+    def test_plot_benchmark_diagnostics_writes_skip_metadata_when_true_params_missing(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        cfg = {
+            "benchmark": {},
+            "inference": {"k": 20},
+            "analysis": {"target_wasserstein": 1.0, "min_particles_for_threshold": 5},
+            "plots": {"quality_vs_time": True, "emit_paper_summaries": True, "emit_diagnostics": True},
+        }
+        plot_benchmark_diagnostics(sample_records, cfg, output_dir)
+        meta = json.loads((output_dir.plots / "quality_vs_wall_time_meta.json").read_text())
+        assert meta["skip_reason"] == "missing_true_params_or_quality_rows"
+        assert meta["skipped"] is True
+        diag_meta = json.loads((output_dir.plots / "quality_vs_wall_time_diagnostic_meta.json").read_text())
+        assert diag_meta["skip_reason"] == "missing_true_params_or_quality_rows"
+
     def test_plot_quality_vs_posterior_samples_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
         plot_quality_vs_posterior_samples(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
@@ -359,6 +397,19 @@ class TestPhase3Reporters:
         output_dir = OutputDir(tmp_path, "plots").ensure()
         plot_time_to_target_summary(sample_records, {"mu": 0.0}, 10.0, output_dir, archive_size=20)
         assert (output_dir.plots / "time_to_target_summary.pdf").exists()
+
+    def test_plot_time_to_target_summary_respects_min_particles_threshold(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_time_to_target_summary(
+            sample_records,
+            {"mu": 0.0},
+            10.0,
+            output_dir,
+            archive_size=20,
+            min_particles_for_threshold=1000,
+        )
+        meta = json.loads((output_dir.plots / "time_to_target_summary_meta.json").read_text())
+        assert meta["skip_reason"] == "threshold_not_reached"
 
     def test_plot_attempts_to_target_summary_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
@@ -634,6 +685,43 @@ def _mixed_runtime_records():
     ]
 
 
+def _mixed_runtime_records_multi_sigma():
+    records = _mixed_runtime_records()
+    records.extend(
+        [
+            ParticleRecord(
+                method="async_propulate_abc__sigma2.0",
+                replicate=1,
+                seed=43,
+                step=1,
+                params={"x": 0.0},
+                loss=0.1,
+                tolerance=1.0,
+                wall_time=0.4,
+                worker_id="0",
+                sim_start_time=0.0,
+                sim_end_time=0.4,
+                attempt_count=1,
+            ),
+            ParticleRecord(
+                method="abc_smc_baseline__sigma2.0",
+                replicate=1,
+                seed=43,
+                step=1,
+                params={"x": 0.5},
+                loss=0.5,
+                tolerance=1.2,
+                wall_time=1.5,
+                sim_start_time=0.0,
+                sim_end_time=1.5,
+                generation=0,
+                attempt_count=3,
+            ),
+        ]
+    )
+    return records
+
+
 class TestIdleFractionPlot:
     def test_idle_fraction_plot_saves_files(self, tmp_path):
         idle_fraction_plot([0.0, 0.5, 1.0], [0.1, 0.3, 0.5], tmp_path / "idle")
@@ -650,6 +738,13 @@ class TestIdleFractionPlot:
         rows = _read_csv(output_dir.plots / "idle_fraction_data.csv")
         assert {row["measurement_method"] for row in rows} == {"worker_idle", "barrier_overhead"}
         assert {row["base_method"] for row in rows} == {"async_propulate_abc", "abc_smc_baseline"}
+
+    def test_plot_idle_fraction_handles_multiple_sigmas_without_shape_mismatch(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        plot_idle_fraction(_mixed_runtime_records_multi_sigma(), output_dir)
+        rows = _read_csv(output_dir.plots / "idle_fraction_data.csv")
+        assert {row["sigma"] for row in rows} == {"1.0", "2.0"}
+        assert (output_dir.plots / "idle_fraction.pdf").exists()
 
 
 class TestThroughputOverTimePlot:

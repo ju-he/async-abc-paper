@@ -54,6 +54,7 @@ def _run_abc_smc_baseline_with_sampler(
     limits: Dict,
     max_sims: int,
     k: int,
+    tol_init: float,
     n_generations: int,
     output_dir: OutputDir,
     replicate: int,
@@ -105,7 +106,7 @@ def _run_abc_smc_baseline_with_sampler(
         distance_function=pyabc_distance,
         population_size=k,
         transitions=pyabc.MultivariateNormalTransition(),
-        eps=pyabc.QuantileEpsilon(alpha=0.5),
+        eps=pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5),
         sampler=sampler,
     )
     abc.new(db_path, {"distance": 0.0})
@@ -147,7 +148,7 @@ def _run_abc_smc_baseline_with_sampler(
             step += 1
             params = {col: float(row[col]) for col in limits}
             param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
-            actual_loss = _distance_cache.get(param_key, eps_t)
+            actual_loss = _distance_cache.get(param_key, float("nan"))
             weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None
             records.append(ParticleRecord(
                 method="abc_smc_baseline",
@@ -222,6 +223,7 @@ def run_abc_smc_baseline(
 
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
+    tol_init = inference_cfg.get("tol_init", 10.0)
     n_generations = inference_cfg.get("n_generations", 5)
     n_procs          = inference_cfg.get("n_workers", 1)
     parallel_backend = resolve_pyabc_parallel_backend(
@@ -261,6 +263,7 @@ def run_abc_smc_baseline(
                 limits=limits,
                 max_sims=max_sims,
                 k=k,
+                tol_init=tol_init,
                 n_generations=n_generations,
                 output_dir=output_dir,
                 replicate=replicate,
@@ -276,6 +279,7 @@ def run_abc_smc_baseline(
         limits=limits,
         max_sims=max_sims,
         k=k,
+        tol_init=tol_init,
         n_generations=n_generations,
         output_dir=output_dir,
         replicate=replicate,
