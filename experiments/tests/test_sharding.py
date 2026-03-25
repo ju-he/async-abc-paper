@@ -172,6 +172,31 @@ class TestShardFailureStatus:
         assert "started_at_s" in status
         assert "finished_at_s" in status
 
+    def test_finalize_only_can_retry_merge_after_finalize_stage_failure(self, tmp_path):
+        from async_abc.utils.sharding import ShardLayout, all_shards_completed
+
+        layout = ShardLayout(tmp_path, "gaussian_mean", "default", 0)
+        shard0 = ShardLayout(tmp_path, "gaussian_mean", "default", 0)
+        shard1 = ShardLayout(tmp_path, "gaussian_mean", "default", 1)
+        shard0.shard_output_dir.ensure()
+        shard1.shard_output_dir.ensure()
+
+        (shard0.shard_output_dir.data / "raw_results.csv").write_text("method,replicate\nm,0\n")
+        (shard1.shard_output_dir.data / "raw_results.csv").write_text("method,replicate\nm,1\n")
+        shard0.shard_status_path.parent.mkdir(parents=True, exist_ok=True)
+        shard1.shard_status_path.parent.mkdir(parents=True, exist_ok=True)
+        shard0.shard_status_path.write_text(json.dumps({"state": "completed"}))
+        shard1.shard_status_path.write_text(
+            json.dumps(
+                {
+                    "state": "failed",
+                    "traceback": "Traceback...\nmaybe_finalize_sharded_run\nfinalize_experiment_by_name\n",
+                }
+            )
+        )
+
+        assert all_shards_completed(layout, 2) is True
+
 
 class TestShardedTestModeMetadata:
     def test_sensitivity_test_mode_metadata_uses_completed_shards(self, tmp_path):

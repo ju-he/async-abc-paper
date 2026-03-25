@@ -324,7 +324,7 @@ Empirical calibration via simulation-based calibration (SBC):
 * Run inference given simulated data
 * Check whether θ* falls within α-credible intervals with frequency α
 
-Produce rank histograms and empirical coverage tables at levels 0.5, 0.8, 0.9, 0.95.
+Produce rank histograms and empirical coverage tables at levels 0.5, 0.8, 0.9, 0.95. In the current implementation, empirical coverage is the paper-facing SBC summary and includes Wilson-style confidence intervals; rank histograms are retained mainly as diagnostics.
 
 ---
 
@@ -519,31 +519,49 @@ Pairwise joint marginals for multi-parameter posteriors. Diagonal: marginal KDE.
 
 ### Gantt / worker timeline
 
-Horizontal bar chart with one row per worker; colored blocks show individual simulation intervals. Requires per-simulation `sim_start_time` and `sim_end_time` fields. Visualizes generation barriers for sync methods and continuous utilization for async.
+Horizontal bar chart with one row per worker; colored blocks show individual simulation intervals. Requires per-simulation `sim_start_time` and `sim_end_time` fields. In the current implementation this is treated as a diagnostic plot, not a paper-facing summary plot. For runtime heterogeneity, worker timelines are faceted to avoid method overplotting.
 
 ---
 
 ### Posterior quality vs. wall-clock time
 
-Wasserstein distance curves per method over wall time. Shows convergence speed differences between async and sync algorithms.
+Wasserstein distance curves per method over wall time. The paper-facing version is now a summary curve over replicates with pointwise 95% confidence bands where possible. Replicate-level traces are emitted separately as diagnostic plots.
 
 ---
 
 ### Tolerance trajectory
 
-ε over wall-clock time (log scale), sync vs. async overlaid. Shows how each method tightens the tolerance schedule.
+ε over wall-clock time (log scale), sync vs. async overlaid. The paper-facing version is a summary over replicates, aggregated in log-space, with replicate-level variants retained separately for diagnostics.
 
 ---
 
 ### SBC rank histograms
 
-Uniform rank histogram indicates correct posterior calibration. Shown per method and per parameter.
+Uniform rank histogram indicates correct posterior calibration. In the current plotting pipeline this remains useful diagnostically, while coverage tables are the main paper-facing SBC summary.
 
 ---
 
 ### Straggler throughput curves
 
-Simulation throughput vs. slowdown factor, comparing async and sync methods.
+Simulation throughput vs. slowdown factor, comparing async and sync methods. The implemented summary uses active simulation span as the canonical denominator and shows mean + 95% confidence intervals over replicates.
+
+---
+
+### Threshold summaries
+
+Wall-clock time, posterior samples, or simulation attempts required to reach a target posterior quality. The paper-facing figures are summary points with confidence intervals. Crossings that occur before a minimum posterior size are ignored.
+
+---
+
+### Audit-controlled paper plots
+
+Paper-facing quality and threshold plots are emitted only when the recorded data pass a benchmark audit. If required information is missing or the run is clearly pathological, the plot metadata records an explicit skip instead of silently producing a misleading figure.
+
+---
+
+### Lotka calibration diagnostic
+
+Lotka-Volterra currently emits an auxiliary diagnostic that estimates fallback/extinction prevalence and recommends a more realistic `tol_init` from the non-extinction loss distribution. This is a data-quality diagnostic, not a paper figure.
 
 ---
 
@@ -605,4 +623,3 @@ The paper contributes:
 7. A comprehensive sensitivity analysis including initial tolerance as a key hyperparameter
 
 The results should show that asynchronous steady-state ABC is a promising approach for **large-scale simulator-based inference on modern HPC systems**, with particular strength in environments with heterogeneous or unreliable worker performance.
-

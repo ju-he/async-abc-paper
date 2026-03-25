@@ -21,6 +21,7 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 import matplotlib
 matplotlib.use("Agg")
+import pandas as pd
 
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import load_records, ParticleRecord
@@ -123,6 +124,19 @@ def _replot_ablation(name: str, output_dir: OutputDir, cfg: dict) -> None:
         plot_ablation_summary(output_dir.data, cfg.get("ablation_variants", []), output_dir)
 
 
+def _replot_sbc(name: str, output_dir: OutputDir, cfg: dict) -> None:
+    """SBC: regenerate rank histogram and coverage table from saved CSVs."""
+    from async_abc.utils.shard_finalizers import _plot_coverage_table, _plot_rank_histogram
+
+    plots_cfg = cfg.get("plots", {})
+    ranks_csv = output_dir.data / "sbc_ranks.csv"
+    coverage_csv = output_dir.data / "coverage.csv"
+    if plots_cfg.get("rank_histogram") and ranks_csv.exists():
+        _plot_rank_histogram(pd.read_csv(ranks_csv), output_dir)
+    if plots_cfg.get("coverage_table") and coverage_csv.exists():
+        _plot_coverage_table(pd.read_csv(coverage_csv), output_dir)
+
+
 _REPLOT_DISPATCH = {
     "gaussian_mean": _replot_benchmark,
     "gandk": _replot_benchmark,
@@ -132,6 +146,7 @@ _REPLOT_DISPATCH = {
     "straggler": _replot_straggler,
     "sensitivity": _replot_sensitivity,
     "ablation": _replot_ablation,
+    "sbc": _replot_sbc,
 }
 
 ALL_EXPERIMENTS = list(_REPLOT_DISPATCH.keys())

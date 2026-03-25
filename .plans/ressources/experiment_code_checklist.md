@@ -1,59 +1,40 @@
 # Detailed Code Checklist for Reproducible Experiments
 
-This checklist describes the code structure needed to run, reproduce, and extend all experiments for the asynchronous steady-state ABC-SMC paper. It is organized so that a reviewer can reproduce **all results and plots with one command**, while still allowing each benchmark or analysis to be run independently from a JSON config.
+This checklist describes the code structure needed to run, reproduce, and extend the experiments for the asynchronous steady-state ABC-SMC paper. This file has been updated to match the current implementation, especially the plotting pipeline, which now distinguishes paper-facing summary plots from replicate-level diagnostics and can explicitly skip paper plots when the recorded data fail an audit.
 
 ## 1. Repository-Level Layout
 
 ```text
 project_root/
-  async_abc/
-    __init__.py
-    propagators/
-    schedulers/
-    benchmarks/
-    inference/
-    runtime/
-    plotting/
-    io/
-    utils/
   experiments/
+    async_abc/
+      analysis/
+      benchmarks/
+      inference/
+      io/
+      plotting/
+      utils/
     configs/
-      gaussian/
-      gandk/
-      lotka_volterra/
-      cellular_potts/
-      runtime_heterogeneity/
-      scaling/
-      sensitivity/
-      ablation/
-      paper/
+      *.json
+      small/
+        *.json
     scripts/
-      run_gaussian_mean.py
-      run_gandk.py
-      run_lotka_volterra.py
-      run_cellular_potts.py
-      run_runtime_heterogeneity.py
-      run_scaling.py
-      run_sensitivity.py
-      run_ablation.py
-      run_all_paper_experiments.py
-    templates/
-      plot_styles.py
-      report_helpers.py
-  results/
-    raw/
-    processed/
-    plots/
-    metadata/
-    logs/
-  tests/
-    test_configs/
-    test_benchmarks/
-    test_plotting/
-    test_end_to_end/
-  requirements.txt
-  pyproject.toml
-  README.md
+      gaussian_mean_runner.py
+      gandk_runner.py
+      lotka_volterra_runner.py
+      cellular_potts_runner.py
+      runtime_heterogeneity_runner.py
+      scaling_runner.py
+      sensitivity_runner.py
+      ablation_runner.py
+      straggler_runner.py
+      sbc_runner.py
+      replot.py
+    jobs/
+      submit_replicate_shards.py
+  .plans/
+    ressources/
+  nastjapy_copy/.venv/
 ```
 
 ## 2. Core Requirements
@@ -64,6 +45,7 @@ The codebase should support these guarantees.
 - Every runner script accepts a `--config <json>` argument.
 - Every runner script accepts a `--output-dir <path>` argument.
 - Every runner script accepts a `--test` flag.
+- Benchmark-style runners also support `--small`.
 - The `--test` flag must:
   - use at most 8 CPUs
   - reduce simulation budgets drastically
@@ -75,7 +57,9 @@ The codebase should support these guarantees.
   - an image file, preferably `.pdf` and `.png`
   - a plot CSV with the plotted data
   - a metadata JSON describing how the plot was created
-- A single top-level script must run all experiments and regenerate all plots.
+- Benchmark plots support a paper-facing summary mode and, where useful, a replicate-level diagnostic mode.
+- Paper-facing plots may be intentionally skipped when audit checks fail; this must still emit metadata documenting the skip.
+- Plot regeneration from saved outputs is supported by `experiments/scripts/replot.py`.
 
 ## 3. Shared Infrastructure That Must Exist
 
@@ -181,10 +165,11 @@ Required modules:
 
 Required functionality:
 
-- load processed data
+- load saved experiment outputs
 - generate plot
 - export plot data CSV
 - export plot metadata JSON
+- export explicit skip metadata for suppressed paper plots
 - save figure as PDF and PNG
 
 Recommended plot metadata fields:
@@ -192,17 +177,17 @@ Recommended plot metadata fields:
 ```json
 {
   "plot_name": "scaling_efficiency",
-  "source_processed_csv": "processed/scaling_summary.csv",
   "source_raw_files": ["raw/run_001.csv", "raw/run_002.csv"],
-  "script": "experiments/scripts/run_scaling.py",
-  "resolved_config": "resolved_config.json",
+  "summary_plot": true,
+  "diagnostic_plot": false,
   "x": "n_workers",
   "y": "efficiency_mean",
   "group_by": ["method", "benchmark"],
   "filters": {"test_mode": false},
-  "aggregation": "mean_over_seeds",
-  "error_bars": "std",
-  "figure_files": ["plots/scaling_efficiency.pdf", "plots/scaling_efficiency.png"]
+  "aggregation": "mean_over_replicates",
+  "ci_level": 0.95,
+  "skipped": false,
+  "skip_reason": null
 }
 ```
 
@@ -233,10 +218,10 @@ run_inference(method_name: str, benchmark_name: str, cfg: dict, seed: int) -> di
 
 Required files:
 
-- `async_abc/benchmarks/gaussian_mean.py`
-- `experiments/scripts/run_gaussian_mean.py`
-- `experiments/configs/gaussian/default.json`
-- `experiments/configs/gaussian/test.json`
+- `experiments/async_abc/benchmarks/gaussian_mean.py`
+- `experiments/scripts/gaussian_mean_runner.py`
+- `experiments/configs/gaussian_mean.json`
+- `experiments/configs/small/gaussian_mean.json`
 
 Required functionality:
 
@@ -298,10 +283,10 @@ Default config should include:
 
 Required files:
 
-- `async_abc/benchmarks/gandk.py`
-- `experiments/scripts/run_gandk.py`
-- `experiments/configs/gandk/default.json`
-- `experiments/configs/gandk/test.json`
+- `experiments/async_abc/benchmarks/gandk.py`
+- `experiments/scripts/gandk_runner.py`
+- `experiments/configs/gandk.json`
+- `experiments/configs/small/gandk.json`
 
 Required functionality:
 
@@ -321,10 +306,10 @@ Outputs:
 
 Required files:
 
-- `async_abc/benchmarks/lotka_volterra.py`
-- `experiments/scripts/run_lotka_volterra.py`
-- `experiments/configs/lotka_volterra/default.json`
-- `experiments/configs/lotka_volterra/test.json`
+- `experiments/async_abc/benchmarks/lotka_volterra.py`
+- `experiments/scripts/lotka_volterra_runner.py`
+- `experiments/configs/lotka_volterra.json`
+- `experiments/configs/small/lotka_volterra.json`
 
 Required functionality:
 
@@ -338,17 +323,18 @@ Outputs:
 
 - posterior recovery plots
 - runtime and simulation budget comparisons
+- Lotka-specific fallback / `tol_init` calibration diagnostics
 - CSVs and metadata
 
 ### 4.4 Cellular Potts benchmark using cellsInSilico / nastjapy
 
 Required files:
 
-- `async_abc/benchmarks/cellular_potts.py`
-- `async_abc/benchmarks/cellular_potts_wrappers.py`
-- `experiments/scripts/run_cellular_potts.py`
-- `experiments/configs/cellular_potts/default.json`
-- `experiments/configs/cellular_potts/test.json`
+- `experiments/async_abc/benchmarks/cellular_potts.py`
+- `experiments/async_abc/benchmarks/cellular_potts_wrappers.py`
+- `experiments/scripts/cellular_potts_runner.py`
+- `experiments/configs/cellular_potts.json`
+- `experiments/configs/small/cellular_potts.json`
 
 Required functionality:
 
@@ -380,10 +366,10 @@ Outputs:
 
 Scripts:
 
-- `run_gaussian_mean.py`
-- `run_gandk.py`
-- `run_lotka_volterra.py`
-- `run_cellular_potts.py`
+- `gaussian_mean_runner.py`
+- `gandk_runner.py`
+- `lotka_volterra_runner.py`
+- `cellular_potts_runner.py`
 
 Each script must:
 
@@ -399,16 +385,16 @@ Each script must:
 Command-line interface each script should support:
 
 ```bash
-python experiments/scripts/run_gaussian_mean.py \
-  --config experiments/configs/gaussian/default.json \
+python experiments/scripts/gaussian_mean_runner.py \
+  --config experiments/configs/gaussian_mean.json \
   --output-dir results/gaussian
 ```
 
 and
 
 ```bash
-python experiments/scripts/run_gaussian_mean.py \
-  --config experiments/configs/gaussian/default.json \
+python experiments/scripts/gaussian_mean_runner.py \
+  --config experiments/configs/gaussian_mean.json \
   --output-dir results/gaussian_test \
   --test
 ```
@@ -421,10 +407,9 @@ Purpose:
 
 Required files:
 
-- `experiments/scripts/run_runtime_heterogeneity.py`
-- `experiments/configs/runtime_heterogeneity/default.json`
-- `experiments/configs/runtime_heterogeneity/test.json`
-- `async_abc/runtime/heterogeneity.py`
+- `experiments/scripts/runtime_heterogeneity_runner.py`
+- `experiments/configs/runtime_heterogeneity.json`
+- `experiments/configs/small/runtime_heterogeneity.json`
 
 Required functionality:
 
@@ -451,9 +436,11 @@ Suggested config fields:
 
 Outputs:
 
-- efficiency vs runtime variance plot
-- idle fraction vs variance plot
-- throughput vs variance plot
+- worker Gantt diagnostics
+- idle fraction summary plots
+- idle fraction comparison plots
+- throughput-over-time plots
+- benchmark summary and diagnostic plots via the standard benchmark plotting pipeline
 - each with CSV and metadata
 
 ### 5.3 Scaling experiment
@@ -464,9 +451,9 @@ Purpose:
 
 Required files:
 
-- `experiments/scripts/run_scaling.py`
-- `experiments/configs/scaling/default.json`
-- `experiments/configs/scaling/test.json`
+- `experiments/scripts/scaling_runner.py`
+- `experiments/configs/scaling.json`
+- `experiments/configs/small/scaling.json`
 
 Required functionality:
 
@@ -500,42 +487,39 @@ Purpose:
 
 - show robustness to method hyperparameters
 
-Required files:
+Implemented files:
 
-- `experiments/scripts/run_sensitivity.py`
-- `experiments/configs/sensitivity/default.json`
-- `experiments/configs/sensitivity/test.json`
+- `experiments/scripts/sensitivity_runner.py`
+- `experiments/configs/sensitivity.json`
+- `experiments/configs/small/sensitivity.json`
 
 Parameters to vary:
 
 - archive size `k`
 - perturbation scale
 - tolerance scheduler type
-- scheduler parameters
-- optional archive selection strategy
+- initial tolerance multiplier `tol_init_multiplier`
 
-Suggested config structure:
+Current config shape:
 
 ```json
 {
-  "benchmarks": ["gandk", "lotka_volterra"],
+  "experiment_name": "sensitivity",
   "methods": ["async_propulate_abc"],
-  "parameter_grid": {
-    "archive_size": [50, 100, 200],
+  "sensitivity_grid": {
+    "k": [50, 100, 200],
     "perturbation_scale": [0.5, 0.8, 1.2],
-    "scheduler_type": ["quantile", "geometric_decay", "acceptance_rate"]
-  },
-  "execution": {
-    "n_workers": 32,
-    "seeds": [1,2,3,4,5]
+    "scheduler_type": ["acceptance_rate", "quantile", "geometric_decay"],
+    "tol_init_multiplier": [0.5, 1.0, 2.0, 5.0]
   }
 }
 ```
 
 Outputs:
 
-- heatmaps or line plots for posterior error vs hyperparameter
-- runtime vs hyperparameter
+- `sensitivity_heatmap.{pdf,png}`
+- `sensitivity_heatmap_data.csv`
+- `sensitivity_heatmap_meta.json`
 - CSV and metadata
 
 ### 5.5 Ablation study
@@ -544,11 +528,11 @@ Purpose:
 
 - isolate the contribution of algorithmic components
 
-Required files:
+Implemented files:
 
-- `experiments/scripts/run_ablation.py`
-- `experiments/configs/ablation/default.json`
-- `experiments/configs/ablation/test.json`
+- `experiments/scripts/ablation_runner.py`
+- `experiments/configs/ablation.json`
+- `experiments/configs/small/ablation.json`
 
 Ablations to include:
 
@@ -559,55 +543,24 @@ Ablations to include:
 
 Outputs:
 
-- component contribution plots
-- summary tables
+- `ablation_comparison.{pdf,png}`
+- `ablation_comparison_data.csv`
+- `ablation_comparison_meta.json`
+- mean final tolerance with 95% confidence intervals where enough data are available
 - CSV and metadata
 
-### 5.6 One-command full reproduction script
+### 5.6 Replot and shard submission entry points
 
-Required file:
+Implemented files:
 
-- `experiments/scripts/run_all_paper_experiments.py`
+- `experiments/scripts/replot.py`
+- `experiments/jobs/submit_replicate_shards.py`
 
-Required behavior:
+Current behavior:
 
-- sequentially or selectively launch every experiment set
-- accept global `--output-dir`
-- accept global `--test`
-- optionally accept `--only` to restrict to a subset
-- generate a final manifest listing all produced result files
-
-Suggested CLI:
-
-```bash
-python experiments/scripts/run_all_paper_experiments.py \
-  --output-dir results/paper_full
-```
-
-and for pipeline validation:
-
-```bash
-python experiments/scripts/run_all_paper_experiments.py \
-  --output-dir results/paper_test \
-  --test
-```
-
-The script should invoke:
-
-1. Gaussian mean benchmark
-2. g-and-k benchmark
-3. Lotka-Volterra benchmark
-4. Cellular Potts benchmark
-5. Runtime heterogeneity experiment
-6. Scaling experiment
-7. Sensitivity analysis
-8. Ablation study
-
-It should also write:
-
-- `results_manifest.json`
-- `plots_manifest.json`
-- `environment_metadata.json`
+- `replot.py` regenerates plots from saved outputs without rerunning inference.
+- `submit_replicate_shards.py` prepares sharded submissions for benchmark and analysis runs.
+- `--finalize-only` can now recover shard batches that failed during finalization if the shard payloads were already written.
 
 ## 6. Plot and Data Export Requirements
 
@@ -624,56 +577,74 @@ This CSV must contain the exact data used for the final figure.
 
 Examples:
 
-- `posterior_overlay_gaussian.csv`
-- `scaling_efficiency.csv`
-- `runtime_heterogeneity_idle_fraction.csv`
+- `quality_vs_wall_time_data.csv`
+- `quality_vs_wall_time_diagnostic_data.csv`
+- `coverage_table_data.csv`
+- `idle_fraction_data.csv`
+
+Benchmark paper plots currently use canonical names:
+
+- `archive_evolution`
+- `tolerance_trajectory`
+- `quality_vs_wall_time`
+- `quality_vs_attempt_budget`
+- `quality_vs_posterior_samples`
+- `time_to_target_summary`
+- `attempts_to_target_summary`
+
+Benchmark diagnostics use explicit suffixes:
+
+- `archive_evolution_diagnostic`
+- `tolerance_trajectory_diagnostic`
+- `quality_vs_wall_time_diagnostic`
+- `quality_vs_attempt_budget_diagnostic`
+- `quality_vs_posterior_samples_diagnostic`
+- `time_to_target_diagnostic`
+- `attempts_to_target_diagnostic`
 
 ### 6.3 Plot metadata JSON
 
 Each plot metadata file should capture:
 
-- experiment script path
-- benchmark name
-- methods shown
 - source raw files
-- source processed CSVs
-- resolved config path
+- plot kind (`summary_plot` / `diagnostic_plot`)
 - aggregation recipe
-- filters used
-- plotting columns
-- error-bar definition
-- random seeds included
+- confidence interval level where relevant
+- skip state and skip reason for audit-blocked plots
 - git commit hash if available
 - package versions if available
 
-## 7. Default Configs That Must Exist
+Benchmark outputs also emit:
 
-Create a default and test config for each experiment family.
+- `plot_audit.csv`
+- `plot_audit_summary.json`
 
-Required files:
+Lotka-Volterra additionally emits:
+
+- `lotka_tol_init_diagnostic.csv`
+- `lotka_tol_init_diagnostic.json`
+
+## 7. Configs That Currently Exist
+
+Current experiment families use one main config plus a `small/` companion where applicable.
+
+Key files:
 
 ```text
-experiments/configs/gaussian/default.json
-experiments/configs/gaussian/test.json
-experiments/configs/gandk/default.json
-experiments/configs/gandk/test.json
-experiments/configs/lotka_volterra/default.json
-experiments/configs/lotka_volterra/test.json
-experiments/configs/cellular_potts/default.json
-experiments/configs/cellular_potts/test.json
-experiments/configs/runtime_heterogeneity/default.json
-experiments/configs/runtime_heterogeneity/test.json
-experiments/configs/scaling/default.json
-experiments/configs/scaling/test.json
-experiments/configs/sensitivity/default.json
-experiments/configs/sensitivity/test.json
-experiments/configs/ablation/default.json
-experiments/configs/ablation/test.json
-experiments/configs/paper/default.json
-experiments/configs/paper/test.json
+experiments/configs/gaussian_mean.json
+experiments/configs/gandk.json
+experiments/configs/lotka_volterra.json
+experiments/configs/cellular_potts.json
+experiments/configs/runtime_heterogeneity.json
+experiments/configs/scaling.json
+experiments/configs/sensitivity.json
+experiments/configs/ablation.json
+experiments/configs/straggler.json
+experiments/configs/sbc.json
+experiments/configs/small/gaussian_mean.json
+experiments/configs/small/gandk.json
+...
 ```
-
-The `paper/default.json` should point to the default configs for all sub-experiments. The `paper/test.json` should point to the test configs.
 
 ## 8. Logging and Provenance
 
@@ -700,24 +671,15 @@ Outputs:
 
 ## 9. Review-Ready Reproduction Workflow
 
-A reviewer with sufficient compute resources should be able to run:
+A reviewer validating the plotting pipeline from existing outputs should be able to run:
 
 ```bash
-python experiments/scripts/run_all_paper_experiments.py \
-  --config experiments/configs/paper/default.json \
-  --output-dir results/reviewer_run
+python experiments/scripts/replot.py /path/to/run_root all
 ```
 
-A reviewer validating the full pipeline quickly should be able to run:
+Small-budget execution currently relies on `--small` and `--test` rather than separate `paper/test.json` orchestration.
 
-```bash
-python experiments/scripts/run_all_paper_experiments.py \
-  --config experiments/configs/paper/test.json \
-  --output-dir results/reviewer_test \
-  --test
-```
-
-The latter must exercise the complete pipeline end-to-end while staying within the following constraints:
+Quick-validation constraints remain:
 
 - no more than 8 CPUs
 - small simulation budgets
@@ -731,16 +693,14 @@ Before paper release, verify all of the following.
 
 - [ ] Every script runs with a default config.
 - [ ] Every script runs with `--test`.
-- [ ] Every script writes a resolved config.
-- [ ] Every script writes raw results.
-- [ ] Every script writes processed summaries.
+- [ ] Every runner writes metadata and raw results.
 - [ ] Every plot has both PDF and PNG outputs.
 - [ ] Every plot has a CSV file with plotted data.
 - [ ] Every plot has a metadata JSON file.
-- [ ] The full reproduction script works in `--test` mode on one machine with at most 8 CPUs.
-- [ ] The full reproduction script creates a manifest of outputs.
+- [ ] Paper-facing benchmark plots emit summary outputs and diagnostic companions when enabled.
+- [ ] Audit-blocked paper plots emit skip metadata instead of silent omission.
 - [ ] pyABC comparisons are included where configured.
-- [ ] Gaussian, g-and-k, Lotka-Volterra, and Cellular Potts benchmarks all run end-to-end.
+- [ ] Gaussian, g-and-k, Lotka-Volterra, Cellular Potts, SBC, and straggler experiments all run end-to-end.
 - [ ] Runtime heterogeneity, scaling, sensitivity, and ablation experiments all run end-to-end.
 
 ## 11. Recommended Implementation Order

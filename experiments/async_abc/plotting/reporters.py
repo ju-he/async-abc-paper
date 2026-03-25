@@ -20,6 +20,7 @@ from ..analysis import (
     final_state_records,
     final_state_results,
     generation_spans,
+    lotka_tol_init_diagnostic,
 )
 from .common import (
     archive_evolution_plot,
@@ -163,6 +164,25 @@ def _write_benchmark_audit(
     with open(output_dir.data / "plot_audit_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
     return audit_df
+
+
+def _write_lotka_tol_init_diagnostic(
+    records: List[ParticleRecord],
+    *,
+    cfg: Dict[str, Any],
+    output_dir: OutputDir,
+) -> None:
+    """Write Lotka-specific fallback diagnostics and tol_init recommendation."""
+    import json
+
+    diagnostic_df, summary = lotka_tol_init_diagnostic(records)
+    diagnostic_df.to_csv(output_dir.data / "lotka_tol_init_diagnostic.csv", index=False)
+    summary_payload = {
+        **summary,
+        "current_tol_init": float(cfg.get("inference", {}).get("tol_init", float("nan"))),
+    }
+    with open(output_dir.data / "lotka_tol_init_diagnostic.json", "w") as f:
+        json.dump(summary_payload, f, indent=2)
 
 
 def _paper_plot_allowed(audit_df: pd.DataFrame, column: str) -> bool:
@@ -1515,6 +1535,8 @@ def plot_benchmark_diagnostics(
     emit_diagnostics = bool(plots_cfg.get("emit_diagnostics", True))
     ci_level = float(analysis_cfg.get("ci_level", 0.95))
     min_particles_for_threshold = int(analysis_cfg.get("min_particles_for_threshold", archive_size or 100))
+    if benchmark_cfg.get("name") == "lotka_volterra":
+        _write_lotka_tol_init_diagnostic(records, cfg=cfg, output_dir=output_dir)
     audit_df = _write_benchmark_audit(
         records,
         true_params=true_params,

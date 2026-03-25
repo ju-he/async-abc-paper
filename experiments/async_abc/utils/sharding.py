@@ -331,7 +331,34 @@ def load_shard_statuses(layout: ShardLayout, num_shards: int) -> List[Dict[str, 
 
 def all_shards_completed(layout: ShardLayout, num_shards: int) -> bool:
     """Return whether every shard has completed."""
-    return all(status.get("state") == "completed" for status in load_shard_statuses(layout, num_shards))
+    statuses = load_shard_statuses(layout, num_shards)
+    return all(
+        _status_ready_for_merge(layout, shard_index, status)
+        for shard_index, status in enumerate(statuses)
+    )
+
+
+def _status_ready_for_merge(layout: ShardLayout, shard_index: int, status: Dict[str, Any]) -> bool:
+    """Return whether a shard status is safe to merge.
+
+    A shard that failed during the merge/finalization stage can be retried via
+    ``--finalize-only`` if its shard-local payload was already written.
+    """
+    state = str(status.get("state") or "")
+    if state == "completed":
+        return True
+    if state != "failed":
+        return False
+    traceback_text = str(status.get("traceback") or "")
+    failed_during_finalize = (
+        "finalize_experiment_by_name" in traceback_text
+        or "maybe_finalize_sharded_run" in traceback_text
+    )
+    if not failed_during_finalize:
+        return False
+    shard_layout = ShardLayout(layout.output_root, layout.experiment_name, layout.run_id, shard_index)
+    shard_output = shard_layout.shard_output_dir
+    return any(shard_output.data.glob("*.csv"))
 
 
 def _lock_owner_alive(lock_payload: Dict[str, Any]) -> bool:

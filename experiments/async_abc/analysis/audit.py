@@ -11,6 +11,7 @@ from ._helpers import records_to_frame
 from .final_state import final_state_results
 
 FALLBACK_LOSS_THRESHOLD = 1e6
+PATHOLOGICAL_FALLBACK_FRACTION = 0.95
 
 
 def benchmark_plot_audit(
@@ -103,6 +104,8 @@ def benchmark_plot_audit(
             invalid_reasons.append("empty_final_posterior")
         if not tolerance_monotone:
             invalid_reasons.append("non_monotone_tolerance")
+        if np.isfinite(fallback_fraction) and fallback_fraction >= PATHOLOGICAL_FALLBACK_FRACTION:
+            invalid_reasons.append("pathological_fallback_or_extinction")
 
         paper_quality_allowed = not invalid_reasons
         paper_threshold_allowed = paper_quality_allowed and final_posterior_size >= int(min_particles_for_threshold)
@@ -127,3 +130,83 @@ def benchmark_plot_audit(
         )
 
     return pd.DataFrame(rows).sort_values(["method", "replicate"]).reset_index(drop=True)
+
+
+def lotka_tol_init_diagnostic(
+    records: Iterable,
+    *,
+    fallback_loss_threshold: float = FALLBACK_LOSS_THRESHOLD,
+    recommended_quantile: float = 0.95,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    """Summarize fallback prevalence and a recommended Lotka ``tol_init``.
+
+    The recommendation is based on the specified quantile of all finite,
+    non-fallback losses observed across the run.
+    """
+    frame = records_to_frame(records)
+    columns = [
+        "method",
+        "replicate",
+        "finite_loss_count",
+        "non_fallback_loss_count",
+        "fallback_or_extinction_fraction",
+        "non_fallback_loss_p50",
+        "non_fallback_loss_p95",
+        "recommended_tol_init",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns), {
+            "pathological_fallback": False,
+            "fallback_loss_threshold": float(fallback_loss_threshold),
+            "recommended_quantile": float(recommended_quantile),
+            "recommended_tol_init": None,
+            "non_fallback_loss_count": 0,
+        }
+
+    frame = frame.copy()
+    frame["loss"] = pd.to_numeric(frame.get("loss"), errors="coerce")
+    rows: list[dict[str, object]] = []
+    all_non_fallback_losses: list[float] = []
+
+    for (method, replicate), group in frame.groupby(["method", "replicate"], sort=True):
+        losses = group["loss"].replace([np.inf, -np.inf], np.nan).dropna().to_numpy(dtype=float)
+        non_fallback = losses[losses < float(fallback_loss_threshold)]
+        if non_fallback.size:
+            all_non_fallback_losses.extend(non_fallback.tolist())
+        rows.append(
+            {
+                "method": method,
+                "replicate": int(replicate),
+                "finite_loss_count": int(losses.size),
+                "non_fallback_loss_count": int(non_fallback.size),
+                "fallback_or_extinction_fraction": float((losses >= float(fallback_loss_threshold)).mean()) if losses.size else float("nan"),
+                "non_fallback_loss_p50": float(np.quantile(non_fallback, 0.5)) if non_fallback.size else float("nan"),
+                "non_fallback_loss_p95": float(np.quantile(non_fallback, 0.95)) if non_fallback.size else float("nan"),
+                "recommended_tol_init": float(np.quantile(non_fallback, float(recommended_quantile))) if non_fallback.size else float("nan"),
+            }
+        )
+
+    diagnostic_df = pd.DataFrame(rows).sort_values(["method", "replicate"]).reset_index(drop=True)
+    finite_fallback = diagnostic_df["fallback_or_extinction_fraction"].replace([np.inf, -np.inf], np.nan).dropna()
+    overall_fallback = float(finite_fallback.mean()) if not finite_fallback.empty else float("nan")
+    if all_non_fallback_losses:
+        overall_losses = np.asarray(all_non_fallback_losses, dtype=float)
+        recommended_tol_init = float(np.quantile(overall_losses, float(recommended_quantile)))
+        p50 = float(np.quantile(overall_losses, 0.5))
+        p95 = float(np.quantile(overall_losses, 0.95))
+    else:
+        recommended_tol_init = None
+        p50 = None
+        p95 = None
+
+    summary = {
+        "pathological_fallback": bool(np.isfinite(overall_fallback) and overall_fallback > 0.5),
+        "overall_fallback_fraction": overall_fallback,
+        "fallback_loss_threshold": float(fallback_loss_threshold),
+        "recommended_quantile": float(recommended_quantile),
+        "recommended_tol_init": recommended_tol_init,
+        "non_fallback_loss_count": int(len(all_non_fallback_losses)),
+        "non_fallback_loss_p50": p50,
+        "non_fallback_loss_p95": p95,
+    }
+    return diagnostic_df, summary

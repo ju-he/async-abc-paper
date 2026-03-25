@@ -8,7 +8,7 @@
 - [x] Phase 3: split paper summaries from diagnostics
 - [x] Phase 4: upgrade existing summary experiments
 - [x] Phase 5: add config/interface defaults
-- [ ] Phase 6: validate and sign off
+- [x] Phase 6: validate and sign off
 
 ## Summary
 
@@ -144,8 +144,15 @@ nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_runners.py
 - 2026-03-25: Upgraded sensitivity heatmap layout, ablation summaries, SBC coverage summaries, and runtime/straggler paper plots to include uncertainty-aware summary outputs.
 - 2026-03-25: Added regression coverage in `test_analysis.py`, `test_plotting.py`, `test_runners.py`, `test_sbc.py`, and confirmed `test_sharding.py` remains green under the new defaults.
 - 2026-03-25: Validation completed for `experiments/tests/test_analysis.py`, `experiments/tests/test_plotting.py`, `experiments/tests/test_sharding.py`, `experiments/tests/test_runners.py`, and `experiments/tests/test_sbc.py` with `nastjapy_copy/.venv/bin/python -m pytest ...`.
+- 2026-03-25: Added retry support for `--finalize-only` after shard batches that failed during finalization, which allowed the saved `runtime_heterogeneity` batch `run_20260324_222442` to publish a top-level output tree successfully.
+- 2026-03-25: Added `replot.py` coverage for SBC so saved `sbc_ranks.csv` and `coverage.csv` can regenerate paper/diagnostic plots without rerunning inference.
+- 2026-03-25: Added Lotka-specific `tol_init` diagnostics and tightened the audit to mark pathologically fallback-dominated runs invalid for paper-facing quality/threshold plots.
+- 2026-03-25: Artifact validation against `/home/juhe/remotes/scratch/herold2/async-abc/small2` confirmed:
+  - `runtime_heterogeneity` finalization now succeeds and emits top-level plots/data plus `plot_audit.csv`.
+  - `sbc` replot now refreshes `coverage_table_data.csv` with `n_trials`, `empirical_coverage_ci_low`, and `empirical_coverage_ci_high`.
+  - `lotka_volterra` now emits `lotka_tol_init_diagnostic.json`/`.csv`, with `recommended_tol_init ~= 407.69` and `pathological_fallback = true`.
+  - `lotka_volterra` paper quality plots now skip with `skip_reason = plot_audit_failed` because all method/replicate rows are flagged `pathological_fallback_or_extinction`.
 
 ## Remaining Follow-up
 
-- Run artifact-based replot/finalize checks against the saved cluster outputs under `/home/juhe/remotes/scratch/herold2/async-abc/small2` to confirm the repaired semantics on the real failing data.
-- Re-audit Lotka-Volterra on those saved artifacts and decide whether a benchmark-level `tol_init` recalibration is still needed after the recording fixes.
+- Optional operational next step: rerun the Lotka-Volterra benchmark with a calibrated `tol_init` near the diagnostic recommendation (`~408` rather than `500000`) and compare extinction/fallback rates before accepting any Lotka paper figure.

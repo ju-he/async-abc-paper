@@ -383,6 +383,67 @@ class TestPhase3Reporters:
         diag_meta = json.loads((output_dir.plots / "quality_vs_wall_time_diagnostic_meta.json").read_text())
         assert diag_meta["skip_reason"] == "missing_true_params_or_quality_rows"
 
+    def test_plot_benchmark_diagnostics_writes_lotka_tol_init_diagnostic(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        records = [
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"theta1": 0.5, "theta2": 0.02, "theta3": 0.02, "theta4": 0.5},
+                loss=1_000_000.0,
+                tolerance=500_000.0,
+                wall_time=0.1,
+                attempt_count=1,
+            ),
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=2,
+                params={"theta1": 0.6, "theta2": 0.03, "theta3": 0.03, "theta4": 0.6},
+                loss=120.0,
+                tolerance=400_000.0,
+                wall_time=0.2,
+                attempt_count=2,
+            ),
+            ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"theta1": 0.7, "theta2": 0.04, "theta3": 0.04, "theta4": 0.7},
+                loss=1_000_000.0,
+                tolerance=500_000.0,
+                wall_time=0.3,
+                generation=0,
+                record_kind="population_particle",
+                time_semantics="generation_end",
+                attempt_count=3,
+            ),
+        ]
+        cfg = {
+            "benchmark": {
+                "name": "lotka_volterra",
+                "true_theta1": 0.5,
+                "true_theta2": 0.025,
+                "true_theta3": 0.025,
+                "true_theta4": 0.5,
+            },
+            "inference": {"k": 20, "tol_init": 500_000.0},
+            "plots": {},
+        }
+        plot_benchmark_diagnostics(records, cfg, output_dir)
+        diagnostic_json = json.loads((output_dir.data / "lotka_tol_init_diagnostic.json").read_text())
+        rows = _read_csv(output_dir.data / "lotka_tol_init_diagnostic.csv")
+        audit_rows = _read_csv(output_dir.data / "plot_audit.csv")
+        assert diagnostic_json["current_tol_init"] == 500000.0
+        assert diagnostic_json["recommended_tol_init"] == pytest.approx(120.0)
+        assert diagnostic_json["pathological_fallback"] is True
+        assert rows
+        assert any("pathological_fallback_or_extinction" in row["invalid_reason"] for row in audit_rows)
+
     def test_plot_quality_vs_posterior_samples_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
         plot_quality_vs_posterior_samples(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
