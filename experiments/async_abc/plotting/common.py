@@ -403,8 +403,13 @@ def gantt_plot(records, ax=None):
             alpha=0.85,
         )
 
-    ax.set_yticks(list(worker_to_y.values()))
-    ax.set_yticklabels(list(worker_to_y.keys()))
+    worker_ticks = list(worker_to_y.values())
+    worker_labels = list(worker_to_y.keys())
+    if len(worker_labels) > 20:
+        step = max(1, int(np.ceil(len(worker_labels) / 20.0)))
+        worker_labels = [label if idx % step == 0 else "" for idx, label in enumerate(worker_labels)]
+    ax.set_yticks(worker_ticks)
+    ax.set_yticklabels(worker_labels)
     ax.set_xlabel("wall-clock time")
     ax.set_ylabel("worker")
     ax.set_title("Worker timeline")

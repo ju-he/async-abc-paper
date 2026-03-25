@@ -114,6 +114,13 @@ def _async_archive_state(
 
 
 def _sync_generation_state(records: list[ParticleRecord]) -> list[ParticleRecord]:
+    population_records = [
+        record
+        for record in records
+        if record.record_kind in (None, "", "population_particle")
+    ]
+    if population_records:
+        records = population_records
     generations = [record.generation for record in records if record.generation is not None]
     if generations:
         final_generation = max(int(generation) for generation in generations)

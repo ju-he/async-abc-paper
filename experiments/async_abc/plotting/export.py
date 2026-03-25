@@ -6,6 +6,7 @@ always a `_meta.json` with provenance fields (git hash, timestamp).
 import csv
 import json
 import shutil
+import subprocess
 import warnings
 from datetime import datetime
 from pathlib import Path

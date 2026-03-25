@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import sys
 import time
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -45,6 +46,11 @@ from async_abc.utils.seeding import make_seeds
 logger = logging.getLogger(__name__)
 
 
+def _attempt_records(records):
+    attempt_rows = [record for record in records if record.record_kind == "simulation_attempt"]
+    return attempt_rows if attempt_rows else records
+
+
 def _current_worker_rank() -> int:
     """Best-effort worker rank for MPI or multiprocessing workers."""
     try:
@@ -80,13 +86,14 @@ def _make_straggler_simulate(
 
 def _active_wall_time(records) -> float:
     """Canonical wall-clock span from recorded simulation timing metadata."""
-    starts = [float(r.sim_start_time) for r in records if r.sim_start_time is not None]
-    ends = [float(r.sim_end_time) for r in records if r.sim_end_time is not None]
+    attempt_rows = _attempt_records(records)
+    starts = [float(r.sim_start_time) for r in attempt_rows if r.sim_start_time is not None]
+    ends = [float(r.sim_end_time) for r in attempt_rows if r.sim_end_time is not None]
     if starts and ends:
         span = max(ends) - min(starts)
         if span > 0:
             return float(span)
-    wall_times = [float(r.wall_time) for r in records if r.wall_time is not None]
+    wall_times = [float(r.wall_time) for r in attempt_rows if r.wall_time is not None]
     if wall_times:
         span = max(wall_times) - min(wall_times)
         if span > 0:
@@ -130,7 +137,7 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
 
     ax.set_xlabel("slowdown factor")
     ax.set_ylabel("throughput (sim/s)")
-    ax.set_title("Throughput vs. straggler slowdown")
+    ax.set_title("Throughput vs. straggler slowdown by method")
     ax.legend(frameon=False)
     fig.tight_layout()
 
@@ -142,7 +149,20 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
         "active_wall_time_s": [row["active_wall_time_s"] for row in throughput_rows],
         "elapsed_wall_time_s": [row["elapsed_wall_time_s"] for row in throughput_rows],
     }
-    save_figure(fig, output_dir.plots / "throughput_vs_slowdown", data=data)
+    save_figure(
+        fig,
+        output_dir.plots / "throughput_vs_slowdown",
+        data=data,
+        metadata={
+            "plot_name": "throughput_vs_slowdown",
+            "title": "Throughput vs. straggler slowdown by method",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": methods,
+        },
+    )
 
 
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
@@ -256,6 +276,7 @@ def main(argv: list[str] | None = None) -> None:
             done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
             for method in cfg["methods"]:
                 tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
+                skip_method = False
                 for replicate in selected_replicates:
                     seed = seeds[replicate]
                     if (tagged_method, str(replicate)) in done:
@@ -266,17 +287,31 @@ def main(argv: list[str] | None = None) -> None:
                         )
                         continue
                     t0 = time.time()
-                    records = run_method_distributed(
-                        method,
-                        bm.simulate,
-                        bm.limits,
-                        {**cfg["inference"], "_checkpoint_tag": f"slowdown{slowdown_factor:.4g}x"},
-                        output_dir,
-                        replicate,
-                        seed,
-                    )
+                    try:
+                        records = run_method_distributed(
+                            method,
+                            bm.simulate,
+                            bm.limits,
+                            {**cfg["inference"], "_checkpoint_tag": f"slowdown{slowdown_factor:.4g}x"},
+                            output_dir,
+                            replicate,
+                            seed,
+                        )
+                    except ImportError as exc:
+                        logger.warning(
+                            "[straggler] skipping method %s due to missing dependency: %s",
+                            method,
+                            exc,
+                        )
+                        warnings.warn(
+                            f"Skipping method '{method}' (missing dependency): {exc}",
+                            stacklevel=2,
+                        )
+                        skip_method = True
+                        break
                     elapsed = time.time() - t0
-                    active_wall_time = _active_wall_time(records)
+                    attempt_rows = _attempt_records(records)
+                    active_wall_time = _active_wall_time(attempt_rows)
                     throughput_wall_time = active_wall_time if active_wall_time > 0 else elapsed
                     for record in records:
                         record.method = tagged_method
@@ -291,13 +326,15 @@ def main(argv: list[str] | None = None) -> None:
                                 "method": tagged_method,
                                 "replicate": replicate,
                                 "seed": seed,
-                                "n_simulations": len(records),
+                                "n_simulations": len(attempt_rows),
                                 "active_wall_time_s": throughput_wall_time,
                                 "elapsed_wall_time_s": elapsed,
-                                "throughput_sims_per_s": len(records) / throughput_wall_time if throughput_wall_time > 0 else float("nan"),
+                                "throughput_sims_per_s": len(attempt_rows) / throughput_wall_time if throughput_wall_time > 0 else float("nan"),
                                 "test_mode": test_mode,
                             }
                         )
+                if skip_method:
+                    continue
 
             if slowdown_factor == max(slowdown_factors):
                 worst_records = factor_records
@@ -402,6 +439,9 @@ def main(argv: list[str] | None = None) -> None:
                 stem_name="sync_generation_timeline",
                 title="Sync generation timeline (worst straggler slowdown)",
             )
+    from async_abc.plotting.reporters import write_runtime_debug_summary
+
+    write_runtime_debug_summary(all_records, output_dir)
 
     write_metadata(
         output_dir,

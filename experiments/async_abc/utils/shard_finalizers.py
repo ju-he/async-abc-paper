@@ -26,6 +26,7 @@ from ..plotting.reporters import (
     plot_sensitivity_summary,
     plot_throughput_over_time,
     plot_worker_gantt,
+    write_runtime_debug_summary,
 )
 from ..io.config import get_run_mode
 from ..plotting.export import save_figure
@@ -248,7 +249,7 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
 
     ax.set_xlabel("slowdown factor")
     ax.set_ylabel("throughput (sim/s)")
-    ax.set_title("Throughput vs. straggler slowdown")
+    ax.set_title("Throughput vs. straggler slowdown by method")
     ax.legend(frameon=False)
     fig.tight_layout()
 
@@ -260,7 +261,20 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
         "active_wall_time_s": [row.get("active_wall_time_s", row.get("wall_time_s")) for row in throughput_rows],
         "elapsed_wall_time_s": [row.get("elapsed_wall_time_s", row.get("wall_time_s")) for row in throughput_rows],
     }
-    save_figure(fig, output_dir.plots / "throughput_vs_slowdown", data=data)
+    save_figure(
+        fig,
+        output_dir.plots / "throughput_vs_slowdown",
+        data=data,
+        metadata={
+            "plot_name": "throughput_vs_slowdown",
+            "title": "Throughput vs. straggler slowdown by method",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": methods,
+        },
+    )
 
 
 def _plot_rank_histogram(ranks_df, output_dir: OutputDir) -> None:
@@ -278,7 +292,20 @@ def _plot_rank_histogram(ranks_df, output_dir: OutputDir) -> None:
         ax.set_xlabel("rank")
         ax.set_ylabel("count")
     fig.tight_layout()
-    save_figure(fig, output_dir.plots / "rank_histogram", data={col: ranks_df[col].tolist() for col in ranks_df.columns})
+    save_figure(
+        fig,
+        output_dir.plots / "rank_histogram",
+        data={col: ranks_df[col].tolist() for col in ranks_df.columns},
+        metadata={
+            "plot_name": "rank_histogram",
+            "title": "Rank histogram",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": methods,
+        },
+    )
 
 
 def _plot_coverage_table(coverage_df, output_dir: OutputDir) -> None:
@@ -322,7 +349,20 @@ def _plot_coverage_table(coverage_df, output_dir: OutputDir) -> None:
     ax.set_title("SBC empirical coverage")
     ax.legend(frameon=False)
     fig.tight_layout()
-    save_figure(fig, output_dir.plots / "coverage_table", data={col: plot_df[col].tolist() for col in plot_df.columns})
+    save_figure(
+        fig,
+        output_dir.plots / "coverage_table",
+        data={col: plot_df[col].tolist() for col in plot_df.columns},
+        metadata={
+            "plot_name": "coverage_table",
+            "title": "SBC empirical coverage",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": sorted(plot_df["method"].dropna().unique().tolist()),
+        },
+    )
 
 
 def finalize_benchmark_experiment(
@@ -416,6 +456,7 @@ def finalize_straggler_experiment(
         with open(tmp_output.data / "throughput_vs_slowdown_summary.csv", newline="") as f:
             rows = list(csv.DictReader(f))
         _plot_throughput_vs_slowdown(rows, tmp_output)
+    write_runtime_debug_summary(records, tmp_output)
     if plots_cfg.get("gantt"):
         slowdown_pattern = re.compile(r"__straggler_slowdown([0-9.eE+-]+)x$")
         tagged_records: List[tuple[ParticleRecord, float]] = []
@@ -472,6 +513,7 @@ def finalize_runtime_heterogeneity_experiment(
         plot_throughput_over_time(records, tmp_output)
     if plots_cfg.get("idle_fraction_comparison"):
         plot_idle_fraction_comparison(records, tmp_output)
+    write_runtime_debug_summary(records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     _rewrite_root_timing_summary(layout.output_root)

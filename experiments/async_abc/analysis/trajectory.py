@@ -2,6 +2,7 @@
 
 import pandas as pd
 
+from . import base_method_name
 from ._helpers import records_to_frame
 
 
@@ -16,10 +17,17 @@ def tolerance_over_wall_time(records) -> pd.DataFrame:
         .sort_values(["method", "replicate", "wall_time", "tolerance"])
         .reset_index(drop=True)
     )
-    return result.drop_duplicates(
+    result = result.drop_duplicates(
         subset=["method", "replicate", "wall_time", "tolerance"],
         keep="last",
     ).reset_index(drop=True)
+    if result.empty:
+        return result
+    for (method, replicate), group in result.groupby(["method", "replicate"], sort=False):
+        if base_method_name(str(method)) != "async_propulate_abc":
+            continue
+        result.loc[group.index, "tolerance"] = group["tolerance"].cummin().to_numpy(dtype=float)
+    return result.reset_index(drop=True)
 
 
 def tolerance_over_attempts(records) -> pd.DataFrame:
@@ -33,10 +41,17 @@ def tolerance_over_attempts(records) -> pd.DataFrame:
     result["attempt_count"] = pd.to_numeric(result["attempt_count"], errors="coerce").fillna(0).astype(int)
     result["tolerance"] = pd.to_numeric(result["tolerance"], errors="coerce")
     result = result.sort_values(["method", "replicate", "attempt_count", "tolerance"]).reset_index(drop=True)
-    return result.drop_duplicates(
+    result = result.drop_duplicates(
         subset=["method", "replicate", "attempt_count", "tolerance"],
         keep="last",
     ).reset_index(drop=True)
+    if result.empty:
+        return result
+    for (method, replicate), group in result.groupby(["method", "replicate"], sort=False):
+        if base_method_name(str(method)) != "async_propulate_abc":
+            continue
+        result.loc[group.index, "tolerance"] = group["tolerance"].cummin().to_numpy(dtype=float)
+    return result.reset_index(drop=True)
 
 
 def loss_over_steps(records) -> pd.DataFrame:

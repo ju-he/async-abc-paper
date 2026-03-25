@@ -319,6 +319,21 @@ class TestRuntimeHeterogeneityRunner:
         plots_dir = runtime_heterogeneity_runner_artifact["root"] / "runtime_heterogeneity" / "plots"
         assert (plots_dir / "worker_gantt.pdf").exists()
 
+    def test_writes_runtime_debug_summary(self, runtime_heterogeneity_runner_artifact):
+        data_dir = runtime_heterogeneity_runner_artifact["root"] / "runtime_heterogeneity" / "data"
+        rows = _rows(data_dir / "runtime_debug_summary.csv")
+        assert rows
+        assert {
+            "method",
+            "base_method",
+            "replicate",
+            "worker_id",
+            "n_attempts",
+            "total_busy_s",
+            "elapsed_wall_s",
+            "active_span_s",
+        } <= set(rows[0].keys())
+
 
 class TestStragglerRunner:
     def test_tags_records_with_slowdown(self, straggler_runner_artifact):
@@ -351,3 +366,26 @@ class TestStragglerRunner:
         assert rows
         assert "active_wall_time_s" in rows[0]
         assert "elapsed_wall_time_s" in rows[0]
+
+    def test_throughput_plot_metadata_is_complete(self, straggler_runner_artifact):
+        meta_path = (
+            straggler_runner_artifact["root"]
+            / "straggler"
+            / "plots"
+            / "throughput_vs_slowdown_meta.json"
+        )
+        meta = json.loads(meta_path.read_text())
+        assert meta["plot_name"] == "throughput_vs_slowdown"
+        assert meta["summary_plot"] is True
+        assert meta["experiment_name"] == "straggler"
+        assert meta["benchmark"] is False
+
+    def test_writes_runtime_debug_summary(self, straggler_runner_artifact):
+        csv_path = (
+            straggler_runner_artifact["root"]
+            / "straggler"
+            / "data"
+            / "runtime_debug_summary.csv"
+        )
+        rows = _rows(csv_path)
+        assert rows

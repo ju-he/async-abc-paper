@@ -882,12 +882,8 @@ class TestIdleFractionPlot:
         plot_idle_fraction(records, output_dir)
         rows = _read_csv(output_dir.plots / "idle_fraction_data.csv")
         for row in rows:
-            ci_low = float(row["ci_low"])
-            ci_high = float(row["ci_high"])
-            if np.isfinite(ci_low):
-                assert 0.0 <= ci_low <= 1.0
-            if np.isfinite(ci_high):
-                assert 0.0 <= ci_high <= 1.0
+            assert 0.0 <= float(row["ci_low"]) <= 1.0
+            assert 0.0 <= float(row["ci_high"]) <= 1.0
 
     def test_plot_idle_fraction_comparison_metadata_is_complete(self, tmp_path):
         output_dir = OutputDir(tmp_path, "test").ensure()

@@ -287,7 +287,7 @@ def run_propulate_abc(
         weight = float(ind.weight) if ind.weight is not None else None
         if ind.tolerance is not None:
             current_tolerance = min(current_tolerance, float(ind.tolerance))
-            tolerance = float(ind.tolerance)
+            tolerance = current_tolerance
         else:
             tolerance = current_tolerance
         sim_end_time = (

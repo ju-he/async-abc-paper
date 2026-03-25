@@ -4,6 +4,7 @@ Each function reads already-collected records (or CSVs) and produces the
 standard set of figures for a given experiment type.
 """
 import csv
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -50,6 +51,143 @@ def _param_names(records: List[ParticleRecord]) -> List[str]:
 def _final_population(records: List[ParticleRecord]) -> List[ParticleRecord]:
     """Return pooled final posterior records across all method/replicate states."""
     return final_state_records(records)
+
+
+def _merge_metadata(meta_path: Path, extra: Dict[str, Any]) -> None:
+    if not meta_path.exists():
+        return
+    meta = json.loads(meta_path.read_text())
+    meta.update(extra)
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+
+def _nonbenchmark_plot_metadata(
+    output_dir: OutputDir,
+    *,
+    plot_name: str,
+    title: str,
+    methods: List[str] | None = None,
+    summary_plot: bool = False,
+    diagnostic_plot: bool = False,
+    skip_reason: str | None = None,
+    extra: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {
+        "plot_name": plot_name,
+        "title": title,
+        "summary_plot": bool(summary_plot),
+        "diagnostic_plot": bool(diagnostic_plot),
+        "experiment_name": output_dir.root.name,
+        "benchmark": False,
+        "methods": sorted(methods or []),
+    }
+    if skip_reason:
+        metadata["skip_reason"] = skip_reason
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def _attempt_timing_records(records: List[ParticleRecord]) -> List[ParticleRecord]:
+    timed = [
+        record for record in records
+        if record.sim_start_time is not None and record.sim_end_time is not None
+    ]
+    if not timed:
+        return []
+
+    selected: List[ParticleRecord] = []
+    by_method_replicate: Dict[tuple[str, int], List[ParticleRecord]] = defaultdict(list)
+    for record in timed:
+        by_method_replicate[(record.method, int(record.replicate))].append(record)
+
+    for _, group in sorted(by_method_replicate.items()):
+        attempt_rows = [record for record in group if record.record_kind == "simulation_attempt"]
+        if attempt_rows:
+            selected.extend(attempt_rows)
+        else:
+            selected.extend([record for record in group if record.worker_id is not None])
+    return selected
+
+
+def _runtime_debug_frame(records: List[ParticleRecord]) -> pd.DataFrame:
+    timed = _attempt_timing_records(records)
+    if not timed:
+        return pd.DataFrame(
+            columns=[
+                "method",
+                "base_method",
+                "replicate",
+                "worker_id",
+                "n_attempts",
+                "total_busy_s",
+                "min_start",
+                "max_end",
+                "elapsed_wall_s",
+                "active_span_s",
+                "record_kind",
+                "time_semantics",
+            ]
+        )
+
+    run_bounds: Dict[tuple[str, int], tuple[float, float]] = {}
+    for (method, replicate), group in defaultdict(list, {
+        key: [r for r in timed if r.method == key[0] and int(r.replicate) == key[1]]
+        for key in {(record.method, int(record.replicate)) for record in timed}
+    }).items():
+        starts = [float(record.sim_start_time) for record in group]
+        ends = [float(record.sim_end_time) for record in group]
+        run_bounds[(method, int(replicate))] = (min(starts), max(ends))
+
+    rows: list[dict[str, object]] = []
+    by_worker: Dict[tuple[str, int, str], List[ParticleRecord]] = defaultdict(list)
+    for record in timed:
+        worker_id = str(record.worker_id) if record.worker_id is not None else "unknown"
+        by_worker[(record.method, int(record.replicate), worker_id)].append(record)
+
+    for (method, replicate, worker_id), group in sorted(by_worker.items()):
+        starts = np.asarray([float(record.sim_start_time) for record in group], dtype=float)
+        ends = np.asarray([float(record.sim_end_time) for record in group], dtype=float)
+        run_start, run_end = run_bounds[(method, replicate)]
+        rows.append(
+            {
+                "method": method,
+                "base_method": base_method_name(method),
+                "replicate": int(replicate),
+                "worker_id": worker_id,
+                "n_attempts": int(len(group)),
+                "total_busy_s": float(np.sum(ends - starts)),
+                "min_start": float(starts.min()),
+                "max_end": float(ends.max()),
+                "elapsed_wall_s": float(run_end - run_start),
+                "active_span_s": float(ends.max() - starts.min()),
+                "record_kind": group[0].record_kind or "",
+                "time_semantics": group[0].time_semantics or "",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def write_runtime_debug_summary(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    stem_name: str = "runtime_debug_summary",
+) -> None:
+    debug_df = _runtime_debug_frame(records)
+    csv_path = output_dir.data / f"{stem_name}.csv"
+    debug_df.to_csv(csv_path, index=False)
+    methods = sorted(debug_df["base_method"].dropna().unique().tolist()) if not debug_df.empty else []
+    metadata = _nonbenchmark_plot_metadata(
+        output_dir,
+        plot_name=stem_name,
+        title="Runtime debug summary",
+        methods=methods,
+        diagnostic_plot=True,
+        skip_reason="empty_summary" if debug_df.empty else None,
+        extra={"csv": str(csv_path)},
+    )
+    write_plot_metadata(output_dir.data / stem_name, metadata=metadata)
 
 
 def _ci_half_width(values: np.ndarray, ci_level: float) -> float:
@@ -350,40 +488,39 @@ def plot_archive_evolution_diagnostic(records: List[ParticleRecord], output_dir:
 
 def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> None:
     """Worker timeline from simulation start/end metadata."""
-    import json
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    timed = [
-        r for r in records
-        if r.worker_id is not None and r.sim_start_time is not None and r.sim_end_time is not None
-    ]
+    timed = [record for record in _attempt_timing_records(records) if record.worker_id is not None]
     if not timed:
         return
 
     included_methods = sorted({r.method for r in timed})
-    if len(included_methods) <= 1:
+    conditions = sorted({r.method.split("__", 1)[1] if "__" in r.method else "all" for r in timed})
+    title = "Worker timeline by condition" if len(conditions) > 1 else "Worker timeline"
+    if len(conditions) <= 1:
         fig = gantt_plot(timed)
+        if fig.axes:
+            fig.axes[0].set_title(title)
     else:
         fig, axes = plt.subplots(
-            len(included_methods),
+            len(conditions),
             1,
-            figsize=(7, max(3.5, 2.8 * len(included_methods))),
+            figsize=(7.5, max(3.5, 2.8 * len(conditions))),
             squeeze=False,
         )
-        for idx, method in enumerate(included_methods):
-            gantt_plot([r for r in timed if r.method == method], ax=axes[idx, 0])
-            axes[idx, 0].set_title(method)
+        for idx, condition in enumerate(conditions):
+            condition_records = [
+                r for r in timed
+                if (r.method.split("__", 1)[1] if "__" in r.method else "all") == condition
+            ]
+            gantt_plot(condition_records, ax=axes[idx, 0])
+            axes[idx, 0].set_title("all conditions" if condition == "all" else condition.replace("_", " "))
             axes[idx, 0].legend([], [], frameon=False)
         fig.tight_layout()
     omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})
-    if fig.axes:
-        if omitted_methods:
-            fig.axes[0].set_title("Async worker timeline")
-        elif all(base_method_name(r.method) == "async_propulate_abc" for r in timed):
-            fig.axes[0].set_title("Async worker timeline")
     data = {
         "method": [r.method for r in timed],
         "replicate": [r.replicate for r in timed],
@@ -396,26 +533,26 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         fig,
         output_dir.plots / "worker_gantt",
         data=data,
-        metadata={
-            "included_methods": included_methods,
-            "omitted_methods": omitted_methods,
-        },
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="worker_gantt",
+            title=title,
+            methods=sorted({base_method_name(method) for method in included_methods}),
+            diagnostic_plot=True,
+            extra={
+                "included_methods": included_methods,
+                "omitted_methods": omitted_methods,
+                "conditions": conditions,
+            },
+        ),
     )
-    meta_path = save_paths.get("meta")
-    if meta_path is not None and meta_path.exists() and omitted_methods:
-        meta = json.loads(meta_path.read_text())
-        meta["title"] = "Async worker timeline"
-        meta_path.write_text(json.dumps(meta, indent=2))
 
 
 def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
     """Compute per-method, per-replicate idle fractions from timing data.
 
     Returns ``{method: {replicate: idle_fraction}}``."""
-    timed = [
-        r for r in records
-        if r.worker_id is not None and r.sim_start_time is not None and r.sim_end_time is not None
-    ]
+    timed = [r for r in _attempt_timing_records(records) if r.worker_id is not None]
     if not timed:
         return {}
 
@@ -470,6 +607,10 @@ def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> 
             }
         )
     mean_df = pd.DataFrame(mean_rows)
+    if mean_df.empty:
+        return
+    for col in ("utilization_loss_fraction", "ci_low", "ci_high"):
+        mean_df[col] = mean_df[col].clip(lower=0.0, upper=1.0)
     fig, ax = plt.subplots(figsize=(6, 4))
     series = list(
         dict.fromkeys(
@@ -527,51 +668,128 @@ def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> 
     ax.set_xlabel("heterogeneity (σ)")
     ax.set_ylabel("utilization loss fraction")
     ax.set_ylim(0, 1)
-    ax.set_title("Utilization loss by heterogeneity")
+    ax.set_title("Utilization loss by heterogeneity and method")
     ax.legend(frameon=False, fontsize="small")
     fig.tight_layout()
     save_figure(
         fig,
         output_dir.plots / "idle_fraction",
         data={col: mean_df[col].tolist() for col in mean_df.columns},
-        metadata={"plot_name": "utilization_loss_by_heterogeneity"},
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="idle_fraction",
+            title="Utilization loss by heterogeneity and method",
+            methods=sorted(mean_df["base_method"].dropna().unique().tolist()),
+            summary_plot=True,
+        ),
     )
 
 
 def plot_throughput_over_time(
     records: List[ParticleRecord], output_dir: OutputDir, n_bins: int = 20,
 ) -> None:
-    """Throughput (completions per time bin) over wall-clock time, per method."""
-    timed = [
-        r for r in records
-        if r.sim_end_time is not None
-    ]
+    """Throughput over wall-clock time, faceted by heterogeneity condition."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    timed = _attempt_timing_records(records)
     if not timed:
         return
 
-    methods = sorted({r.method for r in timed})
-    time_bins: Dict[str, np.ndarray] = {}
-    throughput_bins: Dict[str, np.ndarray] = {}
-
-    for method in methods:
-        ends = np.array([r.sim_end_time for r in timed if r.method == method], dtype=float)
-        if ends.size == 0:
-            continue
-        t_min, t_max = float(ends.min()), float(ends.max())
-        if t_max <= t_min:
-            continue
-        edges = np.linspace(t_min, t_max, n_bins + 1)
-        counts, _ = np.histogram(ends, bins=edges)
-        mids = 0.5 * (edges[:-1] + edges[1:])
-        label = method.split("__sigma")[1] if "__sigma" in method else method
-        label = f"σ={label}" if "__sigma" in method else label
-        time_bins[label] = mids
-        throughput_bins[label] = counts.astype(float)
-
-    if not time_bins:
+    rows: list[dict[str, object]] = []
+    for record in timed:
+        method = str(record.method)
+        sigma = 0.0
+        if "__sigma" in method:
+            try:
+                sigma = float(method.split("__sigma", 1)[1])
+            except ValueError:
+                sigma = 0.0
+        rows.append(
+            {
+                "sigma": sigma,
+                "base_method": base_method_name(method),
+                "replicate": int(record.replicate),
+                "sim_start_time": float(record.sim_start_time),
+                "sim_end_time": float(record.sim_end_time),
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
         return
 
-    throughput_over_time_plot(time_bins, throughput_bins, output_dir.plots / "throughput_over_time")
+    frame["relative_end_time"] = 0.0
+    for _, group in frame.groupby(["sigma", "base_method", "replicate"], sort=False):
+        frame.loc[group.index, "relative_end_time"] = (
+            group["sim_end_time"] - float(group["sim_start_time"].min())
+        )
+
+    sigmas = sorted(frame["sigma"].dropna().unique().tolist())
+    fig, axes = plt.subplots(
+        len(sigmas),
+        1,
+        figsize=(7.0, max(3.5, 2.8 * len(sigmas))),
+        squeeze=False,
+    )
+    summary_rows: list[dict[str, object]] = []
+    cmap = plt.get_cmap("tab10")
+    plotted = False
+    for sigma_idx, sigma in enumerate(sigmas):
+        ax = axes[sigma_idx, 0]
+        sigma_frame = frame.loc[frame["sigma"] == sigma].copy()
+        max_time = float(sigma_frame["relative_end_time"].max())
+        if not np.isfinite(max_time) or max_time <= 0:
+            continue
+        edges = np.linspace(0.0, max_time, n_bins + 1)
+        mids = 0.5 * (edges[:-1] + edges[1:])
+        bin_width = float(edges[1] - edges[0]) if len(edges) > 1 else 1.0
+        for method_idx, base_method in enumerate(sorted(sigma_frame["base_method"].unique().tolist())):
+            method_frame = sigma_frame.loc[sigma_frame["base_method"] == base_method]
+            replicate_curves: list[np.ndarray] = []
+            for _, rep_group in method_frame.groupby("replicate", sort=True):
+                counts, _ = np.histogram(rep_group["relative_end_time"].to_numpy(dtype=float), bins=edges)
+                replicate_curves.append(counts.astype(float) / max(bin_width, 1e-12))
+            if not replicate_curves:
+                continue
+            stack = np.vstack(replicate_curves)
+            mean_curve = np.mean(stack, axis=0)
+            ax.plot(mids, mean_curve, linewidth=1.8, label=base_method, color=cmap(method_idx % 10))
+            plotted = True
+            for x_val, y_val in zip(mids, mean_curve):
+                summary_rows.append(
+                    {
+                        "sigma": float(sigma),
+                        "base_method": base_method,
+                        "bin_mid": float(x_val),
+                        "throughput_sims_per_s": float(y_val),
+                        "n_replicates": int(stack.shape[0]),
+                    }
+                )
+        ax.set_xlabel("wall-clock time since run start")
+        ax.set_ylabel("throughput (sim/s)")
+        ax.set_title(f"Throughput over time: σ={sigma:g}")
+        ax.legend(frameon=False, fontsize="small")
+
+    if not plotted:
+        return
+
+    fig.tight_layout()
+    summary_df = pd.DataFrame(summary_rows)
+    save_figure(
+        fig,
+        output_dir.plots / "throughput_over_time",
+        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="throughput_over_time",
+            title="Throughput over time by heterogeneity and method",
+            methods=sorted(summary_df["base_method"].dropna().unique().tolist()),
+            summary_plot=True,
+            extra={"facet_by": "sigma"},
+        ),
+    )
 
 
 def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: OutputDir) -> None:
@@ -604,6 +822,10 @@ def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: Out
             }
         )
     mean_df = pd.DataFrame(mean_rows)
+    if mean_df.empty:
+        return
+    for col in ("utilization_loss_fraction", "ci_low", "ci_high"):
+        mean_df[col] = mean_df[col].clip(lower=0.0, upper=1.0)
     for (method, measurement_method), group in summary_df.groupby(["base_method", "measurement_method"], sort=True):
         ax.scatter(
             group["sigma"].to_numpy(dtype=float),
@@ -634,14 +856,20 @@ def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: Out
     ax.set_xlabel("heterogeneity (σ)")
     ax.set_ylabel("utilization loss fraction")
     ax.set_ylim(0, 1)
-    ax.set_title("Utilization loss vs. heterogeneity")
+    ax.set_title("Utilization loss vs. heterogeneity and method")
     ax.legend(frameon=False, fontsize="small")
     fig.tight_layout()
     save_figure(
         fig,
         output_dir.plots / "idle_fraction_comparison",
         data={col: summary_df[col].tolist() for col in summary_df.columns},
-        metadata={"plot_name": "utilization_loss_vs_heterogeneity"},
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="idle_fraction_comparison",
+            title="Utilization loss vs. heterogeneity and method",
+            methods=sorted(summary_df["base_method"].dropna().unique().tolist()),
+            summary_plot=True,
+        ),
     )
 
 
@@ -1403,13 +1631,22 @@ def plot_sensitivity_summary(
                             matrix[f_idx, s_idx, i, j] = float(np.mean(tol_map[key]))
         if not np.isfinite(matrix).any():
             return
-        sensitivity_heatmap(
+        paths = sensitivity_heatmap(
             matrix,
             row_labels=row_labels,
             col_labels=col_labels,
             path_stem=stem,
             facet_row_labels=[str(v) for v in facet_vals],
             facet_col_labels=[str(v) for v in scheduler_vals],
+        )
+        _merge_metadata(
+            paths["meta"],
+            _nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="sensitivity_heatmap",
+                title="Sensitivity heatmap",
+                summary_plot=True,
+            ),
         )
         return
 
@@ -1423,12 +1660,21 @@ def plot_sensitivity_summary(
                         matrix[f_idx, i, j] = float(np.mean(tol_map[key]))
         if not np.isfinite(matrix).any():
             return
-        sensitivity_heatmap(
+        paths = sensitivity_heatmap(
             matrix,
             row_labels=row_labels,
             col_labels=col_labels,
             path_stem=stem,
             facet_labels=[str(v) for v in facet_vals],
+        )
+        _merge_metadata(
+            paths["meta"],
+            _nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="sensitivity_heatmap",
+                title="Sensitivity heatmap",
+                summary_plot=True,
+            ),
         )
         return
 
@@ -1443,7 +1689,16 @@ def plot_sensitivity_summary(
                 matrix[i, j] = float(np.mean(vals))
     if not np.isfinite(matrix).any():
         return
-    sensitivity_heatmap(matrix, row_labels=row_labels, col_labels=col_labels, path_stem=stem)
+    paths = sensitivity_heatmap(matrix, row_labels=row_labels, col_labels=col_labels, path_stem=stem)
+    _merge_metadata(
+        paths["meta"],
+        _nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="sensitivity_heatmap",
+            title="Sensitivity heatmap",
+            summary_plot=True,
+        ),
+    )
 
 
 def plot_ablation_summary(
@@ -1516,7 +1771,17 @@ def plot_ablation_summary(
         "n_observations": n_values,
     }
     stem = output_dir.plots / "ablation_comparison"
-    save_figure(fig, stem, data=data)
+    save_figure(
+        fig,
+        stem,
+        data=data,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="ablation_comparison",
+            title="Ablation comparison",
+            summary_plot=True,
+        ),
+    )
 
 
 def plot_benchmark_diagnostics(
@@ -1689,6 +1954,9 @@ def _runtime_utilization_rows(records: List[ParticleRecord]) -> pd.DataFrame:
     if not barrier_df.empty:
         for row in barrier_df.itertuples(index=False):
             method = str(row.method)
+            base_method = base_method_name(method)
+            if base_method not in {"abc_smc_baseline", "pyabc_smc"}:
+                continue
             if "__sigma" not in method:
                 continue
             try:
@@ -1699,7 +1967,7 @@ def _runtime_utilization_rows(records: List[ParticleRecord]) -> pd.DataFrame:
                 {
                     "sigma": sigma,
                     "method": method,
-                    "base_method": base_method_name(method),
+                    "base_method": base_method,
                     "replicate": int(row.replicate),
                     "measurement_method": "barrier_overhead",
                     "utilization_loss_fraction": float(row.barrier_overhead_fraction),
@@ -1750,7 +2018,13 @@ def plot_generation_timeline(
         fig,
         output_dir.plots / stem_name,
         data={col: spans_df[col].tolist() for col in spans_df.columns},
-        metadata={"plot_name": stem_name, "title": title},
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name=stem_name,
+            title=title,
+            methods=sorted({base_method_name(str(method)) for method in spans_df["method"].dropna().unique().tolist()}),
+            diagnostic_plot=True,
+        ),
     )
 
 

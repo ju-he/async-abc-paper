@@ -9,6 +9,7 @@ import pandas as pd
 from scipy.stats import wasserstein_distance
 
 from ._helpers import records_to_frame
+from .final_state import base_method_name
 
 QUALITY_CURVE_COLUMNS = [
     "method",
@@ -284,7 +285,7 @@ def _observable_quality_rows(
     archive_size: int | None,
     n_projections: int,
 ) -> list[dict[str, object]]:
-    method = str(group["method"].iloc[0])
+    method = base_method_name(str(group["method"].iloc[0]))
     if method == "async_propulate_abc":
         return _async_archive_rows(
             group,
@@ -376,7 +377,12 @@ def _sync_generation_rows(
     axis_kind: str,
     n_projections: int,
 ) -> list[dict[str, object]]:
-    ordered = group.sort_values(["generation", "wall_time", "step"]).reset_index(drop=True).copy()
+    ordered = group.loc[
+        group["record_kind"].isna()
+        | (group["record_kind"] == "population_particle")
+    ].sort_values(["generation", "wall_time", "step"]).reset_index(drop=True).copy()
+    if ordered.empty:
+        return []
     ordered["record_kind"] = ordered["record_kind"].fillna("population_particle")
     ordered["time_semantics"] = ordered["time_semantics"].fillna("generation_end")
     if ordered["generation"].isna().all():

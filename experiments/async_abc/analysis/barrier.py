@@ -22,7 +22,10 @@ def generation_spans(records) -> pd.DataFrame:
             ]
         )
 
-    frame = frame[frame["generation"].notna()].copy()
+    frame = frame[
+        frame["generation"].notna()
+        & frame["record_kind"].fillna("population_particle").isin(["", "population_particle"])
+    ].copy()
     rows = []
     for (method, replicate, generation), group in frame.groupby(
         ["method", "replicate", "generation"],
@@ -62,6 +65,7 @@ def barrier_overhead_fraction(records) -> pd.DataFrame:
         frame["generation"].notna()
         & frame["sim_start_time"].notna()
         & frame["sim_end_time"].notna()
+        & frame["record_kind"].fillna("population_particle").isin(["", "population_particle"])
     ].copy()
 
     rows = []

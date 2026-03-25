@@ -33,6 +33,7 @@ from async_abc.plotting.reporters import (
     plot_sensitivity_summary,
     plot_throughput_over_time,
     plot_worker_gantt,
+    write_runtime_debug_summary,
 )
 from async_abc.utils.logging_utils import configure_logging
 
@@ -87,6 +88,7 @@ def _replot_runtime_heterogeneity(name: str, output_dir: OutputDir, cfg: dict) -
         plot_throughput_over_time(records, output_dir)
     if plots_cfg.get("idle_fraction_comparison"):
         plot_idle_fraction_comparison(records, output_dir)
+    write_runtime_debug_summary(records, output_dir)
 
 
 def _replot_straggler(name: str, output_dir: OutputDir, cfg: dict) -> None:
@@ -104,6 +106,7 @@ def _replot_straggler(name: str, output_dir: OutputDir, cfg: dict) -> None:
     raw_csv = output_dir.data / "raw_results.csv"
     if plots_cfg.get("gantt") and raw_csv.exists():
         records = load_records(raw_csv)
+        write_runtime_debug_summary(records, output_dir)
         slowdown_pattern = re.compile(r"__straggler_slowdown([0-9.eE+-]+)x$")
         tagged = [(r, float(m.group(1))) for r in records if (m := slowdown_pattern.search(r.method))]
         if tagged:

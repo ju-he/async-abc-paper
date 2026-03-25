@@ -9,6 +9,7 @@ import pandas as pd
 
 from ._helpers import records_to_frame
 from .final_state import final_state_results
+from .final_state import base_method_name
 
 FALLBACK_LOSS_THRESHOLD = 1e6
 PATHOLOGICAL_FALLBACK_FRACTION = 0.95
@@ -61,6 +62,8 @@ def benchmark_plot_audit(
     for (method, replicate), group in frame.groupby(["method", "replicate"], sort=True):
         group = group.sort_values(["wall_time", "sim_end_time", "step"], na_position="last").reset_index(drop=True)
         tolerances = group["tolerance"].dropna().to_numpy(dtype=float)
+        if tolerances.size and base_method_name(str(method)) == "async_propulate_abc":
+            tolerances = np.minimum.accumulate(tolerances)
         final_tolerance = float(np.nanmin(tolerances)) if tolerances.size else float("nan")
         tolerance_monotone = bool(np.all(np.diff(tolerances) <= 1e-12)) if tolerances.size > 1 else True
 

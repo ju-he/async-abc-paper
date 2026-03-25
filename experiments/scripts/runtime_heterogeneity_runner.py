@@ -9,9 +9,12 @@ variance level) or a list ``sigma_levels`` (sweep over multiple levels).
 In test mode the sleep is skipped so the pipeline completes quickly.
 """
 import logging
+import multiprocessing
 import os
 import sys
 import time
+from collections import defaultdict
+from hashlib import blake2b
 from pathlib import Path
 
 import numpy as np
@@ -48,10 +51,30 @@ logger = logging.getLogger(__name__)
 def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int,
                                   test_mode: bool = False):
     """Wrap simulate_fn with a LogNormal wall-clock sleep."""
-    rng = np.random.default_rng(seed)
+    worker_attempts = defaultdict(int)
+
+    def _worker_id() -> str:
+        try:
+            from mpi4py import MPI
+
+            return str(MPI.COMM_WORLD.Get_rank())
+        except Exception:
+            pass
+        proc = multiprocessing.current_process()
+        if getattr(proc, "_identity", None):
+            return str(int(proc._identity[0] - 1))
+        return "0"
+
+    def _stable_delay_seed(eval_seed: int, worker_id: str, worker_attempt: int) -> int:
+        payload = f"{seed}|{sigma}|{eval_seed}|{worker_id}|{worker_attempt}".encode("ascii")
+        return int.from_bytes(blake2b(payload, digest_size=8).digest(), "big") % (2**31)
 
     def wrapped(params, seed):
-        delay = float(rng.lognormal(mean=mu, sigma=sigma))
+        worker_id = _worker_id()
+        worker_attempt = worker_attempts[worker_id]
+        worker_attempts[worker_id] += 1
+        delay_rng = np.random.default_rng(_stable_delay_seed(int(seed), worker_id, worker_attempt))
+        delay = float(delay_rng.lognormal(mean=mu, sigma=sigma))
         result = simulate_fn(params, seed=seed)
         if not test_mode:
             time.sleep(delay)
@@ -177,6 +200,9 @@ def main(argv: list[str] | None = None) -> None:
                             sim_start_time=record.sim_start_time,
                             sim_end_time=record.sim_end_time,
                             generation=record.generation,
+                            record_kind=record.record_kind,
+                            time_semantics=record.time_semantics,
+                            attempt_count=record.attempt_count,
                         ),
                     )
                 )
@@ -257,12 +283,15 @@ def main(argv: list[str] | None = None) -> None:
                 weight=record.weight,
                 tolerance=record.tolerance,
                 wall_time=record.wall_time,
-                worker_id=record.worker_id,
-                sim_start_time=record.sim_start_time,
-                sim_end_time=record.sim_end_time,
-                generation=record.generation,
-            ),
-        )
+            worker_id=record.worker_id,
+            sim_start_time=record.sim_start_time,
+            sim_end_time=record.sim_end_time,
+            generation=record.generation,
+            record_kind=record.record_kind,
+            time_semantics=record.time_semantics,
+            attempt_count=record.attempt_count,
+        ),
+    )
         all_records.extend(records)
 
     bm.simulate = original_simulate
@@ -307,6 +336,9 @@ def main(argv: list[str] | None = None) -> None:
 
         plot_idle_fraction_comparison(all_records, output_dir)
     if is_root_rank():
+        from async_abc.plotting.reporters import write_runtime_debug_summary
+
+        write_runtime_debug_summary(all_records, output_dir)
         write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 
 

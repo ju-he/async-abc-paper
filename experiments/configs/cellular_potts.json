@@ -10,7 +10,9 @@
     "output_dir": "experiments/data/cpm_sims",
     "engine_backend": "cis",
     "seed_param_name": "random_seed",
-    "seed_param_path": "Settings.randomseed"
+    "seed_param_path": "Settings.randomseed",
+    "true_division_rate": 0.049905,
+    "true_motility": 0.2
   },
   "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
   "inference": {

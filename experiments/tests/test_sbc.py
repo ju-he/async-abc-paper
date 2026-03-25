@@ -1,9 +1,11 @@
 """Tests for Phase 4: SBC analysis and runner."""
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -58,6 +60,41 @@ def test_empirical_coverage_uniform_posterior():
     row_50 = df[df["coverage_level"] == 0.5]["empirical_coverage"].iloc[0]
     assert abs(row_50 - 0.5) < 0.05
     assert int(df[df["coverage_level"] == 0.5]["n_trials"].iloc[0]) == 500
+
+
+def test_sbc_plot_metadata_is_complete(tmp_path):
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    from async_abc.io.paths import OutputDir
+
+    output_dir = OutputDir(tmp_path, "sbc").ensure()
+    ranks_df = pd.DataFrame(
+        {
+            "method": ["async_propulate_abc", "async_propulate_abc"],
+            "param": ["mu", "mu"],
+            "trial": [0, 1],
+            "rank": [1, 2],
+            "n_samples": [5, 5],
+        }
+    )
+    coverage_df = pd.DataFrame(
+        {
+            "method": ["async_propulate_abc"],
+            "param": ["mu"],
+            "coverage_level": [0.5],
+            "empirical_coverage": [0.6],
+            "n_trials": [2],
+        }
+    )
+    module._plot_rank_histogram(ranks_df, output_dir)
+    module._plot_coverage_table(coverage_df, output_dir)
+    rank_meta = json.loads((output_dir.plots / "rank_histogram_meta.json").read_text())
+    coverage_meta = json.loads((output_dir.plots / "coverage_table_meta.json").read_text())
+    assert rank_meta["plot_name"] == "rank_histogram"
+    assert rank_meta["summary_plot"] is True
+    assert rank_meta["benchmark"] is False
+    assert coverage_meta["plot_name"] == "coverage_table"
+    assert coverage_meta["summary_plot"] is True
+    assert coverage_meta["benchmark"] is False
 
 
 def test_sbc_runner_executes_methods_in_method_major_order(tmp_path, monkeypatch):

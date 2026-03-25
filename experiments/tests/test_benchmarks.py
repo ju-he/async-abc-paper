@@ -13,7 +13,11 @@ from async_abc.benchmarks.gaussian_mean import GaussianMean
 from async_abc.benchmarks.gandk import GandK
 from async_abc.benchmarks.lotka_volterra import LotkaVolterra
 from async_abc.benchmarks import make_benchmark
-from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
+from async_abc.benchmarks.cellular_potts import (
+    _ensure_nastjapy_on_path,
+    denormalize_cpm_params,
+    normalize_cpm_params,
+)
 
 # ---------------------------------------------------------------------------
 # CPM helpers & fixtures
@@ -496,11 +500,11 @@ class TestCellularPotts:
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         lo, hi = bm.limits["division_rate"]
-        assert lo == pytest.approx(0.00006)
-        assert hi == pytest.approx(0.6)
+        assert lo == pytest.approx(0.0)
+        assert hi == pytest.approx(1.0)
         lo2, hi2 = bm.limits["motility"]
         assert lo2 == 0.0
-        assert hi2 == 10000.0
+        assert hi2 == 1.0
 
     def test_missing_required_key_raises(self, cpm_config):
         from async_abc.benchmarks.cellular_potts import CellularPotts
@@ -514,21 +518,21 @@ class TestCellularPotts:
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         mock_sim.build_simulation_config.assert_called_once()
 
     def test_simulate_calls_run_simulation(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         mock_sim.run_simulation.assert_called_once()
 
     def test_simulate_calls_calculate_distance(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         mock_dist.calculate_distance.assert_called_once()
 
     def test_simulate_calls_cleanup(self, cpm_config, cpm_mocks):
@@ -537,7 +541,7 @@ class TestCellularPotts:
         sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         assert sim_dir.exists()
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
 
@@ -553,14 +557,14 @@ class TestCellularPotts:
             lambda: restore_calls.append(True),
         )
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         assert restore_calls == [True]
 
     def test_simulate_returns_float(self, cpm_config, cpm_mocks):
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=42)
+        result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=42)
         assert isinstance(result, float)
         assert result == pytest.approx(2.5)
 
@@ -573,12 +577,30 @@ class TestCellularPotts:
             lambda pl, **kw: captured.append(pl) or "/tmp/cpm_test/eval000001/config.json"
         )
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=99)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=99)
         assert len(captured) == 1
         param_names = [p.name for p in captured[0].parameters]
         assert "random_seed" in param_names
         seed_val = next(p.value for p in captured[0].parameters if p.name == "random_seed")
         assert seed_val == 99
+
+    def test_simulate_denormalizes_public_params_before_building_config(self, cpm_config, cpm_mocks):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        mock_sim, mock_dist = cpm_mocks
+        captured: list = []
+        mock_sim.build_simulation_config.side_effect = (
+            lambda pl, **kw: captured.append(pl) or "/tmp/cpm_test/eval000001/config.json"
+        )
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        public_params = {"division_rate": 0.1, "motility": 0.2}
+        bm.simulate(public_params, seed=11)
+        param_values = {
+            param.name: param.value
+            for param in captured[0].parameters
+            if param.name in public_params
+        }
+        assert param_values == pytest.approx(denormalize_cpm_params(public_params))
 
     def test_simulate_returns_nan_on_simulation_failure(self, cpm_config, cpm_mocks):
         """Simulation runtime error → float('nan'), not re-raised exception."""
@@ -586,7 +608,7 @@ class TestCellularPotts:
         mock_sim, mock_dist = cpm_mocks
         mock_sim.run_simulation.side_effect = RuntimeError("NAStJA crashed")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
         assert math.isnan(result)
 
     def test_simulate_returns_nan_on_distance_failure(self, cpm_config, cpm_mocks):
@@ -596,7 +618,7 @@ class TestCellularPotts:
         sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         mock_dist.calculate_distance.side_effect = ValueError("feature extraction failed")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
         assert math.isnan(result)
         assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
@@ -608,7 +630,7 @@ class TestCellularPotts:
         sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         mock_dist.calculate_distance.side_effect = RuntimeError("boom")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=7)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=7)
         assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
 
@@ -630,7 +652,7 @@ class TestCellularPotts:
         mock_sim.run_simulation.side_effect = RuntimeError("NAStJA crashed")
 
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        result = bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
+        result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
 
         assert math.isnan(result)
         assert len(created_paths) == 1
@@ -641,9 +663,16 @@ class TestCellularPotts:
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
-        bm.simulate({"division_rate": 0.01, "motility": 500.0}, seed=0)
-        bm.simulate({"division_rate": 0.1, "motility": 1000.0}, seed=1)
+        bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
+        bm.simulate({"division_rate": 0.4, "motility": 0.7}, seed=1)
         assert bm._eval_counter == 2
+
+    def test_normalize_and_denormalize_cpm_params_round_trip(self):
+        physical = {"division_rate": 0.03, "motility": 2000.0}
+        normalized = normalize_cpm_params(physical)
+        assert normalized["division_rate"] == pytest.approx(0.0499049904990499)
+        assert normalized["motility"] == pytest.approx(0.2)
+        assert denormalize_cpm_params(normalized) == pytest.approx(physical)
 
 
 # ---------------------------------------------------------------------------

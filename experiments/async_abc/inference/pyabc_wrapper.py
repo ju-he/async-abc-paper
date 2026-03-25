@@ -5,11 +5,13 @@ with installation instructions.  The function is still importable so that the
 method registry can reference it unconditionally.
 """
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ._attempt_trace import attempt_records_from_events, instrument_simulate, load_attempt_events
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
     build_pyabc_sampler,
@@ -74,6 +76,9 @@ def _run_pyabc_smc_with_sampler(
     _distance_cache: Dict = {}
     eval_count = 0
 
+    trace_dir = output_dir.logs / f"pyabc_smc_rep{replicate}_seed{seed}{_db_suffix(checkpoint_tag)}_attempts"
+    timed_simulate = instrument_simulate(simulate_fn, trace_dir)
+
     def pyabc_model(params):
         nonlocal eval_count
         # Derive a stable per-evaluation seed from (run_seed, frozen_params).
@@ -81,7 +86,7 @@ def _run_pyabc_smc_with_sampler(
         # which matters for parallel samplers.
         param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
         sim_seed = abs(hash((seed, param_key))) % (2**31)
-        loss = float(simulate_fn(dict(params), seed=sim_seed))
+        loss = float(timed_simulate(dict(params), seed=sim_seed))
         _distance_cache[param_key] = loss
         eval_count += 1
         if progress is not None:
@@ -122,6 +127,14 @@ def _run_pyabc_smc_with_sampler(
 
     # Collect records from the pyABC history
     records: List[ParticleRecord] = []
+    records.extend(
+        attempt_records_from_events(
+            load_attempt_events(trace_dir, run_start_abs=run_start),
+            method_name="pyabc_smc",
+            replicate=replicate,
+            observable_attempt_counts=observable["attempt_count"].tolist(),
+        )
+    )
     step = 0
     fallback_attempt_count = 0
     for t in range(history.max_t + 1):

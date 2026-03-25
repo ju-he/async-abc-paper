@@ -11,7 +11,7 @@ Example
         --config-template experiments/assets/cellular_potts/sim_config.json \\
         --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
         --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
-        --true-params '{"division_rate": 0.03, "motility": 2000}' \\
+        --true-params '{"division_rate": 0.049905, "motility": 0.2}' \\
         --seed 0
 """
 import argparse
@@ -24,6 +24,7 @@ if str(EXPERIMENTS_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 from async_abc.benchmarks.cellular_potts import (
+    denormalize_cpm_params,
     _ensure_nastjapy_on_path,
     _ensure_reference_alias,
     _normalize_generated_config_paths,
@@ -59,9 +60,15 @@ def main(args=None):
         required=True,
         help=(
             'Ground-truth parameter values as a JSON object, e.g. '
-            '\'{"division_rate": 0.03, "motility": 2000}\'.  '
+            '\'{"division_rate": 0.049905, "motility": 0.2}\'.  '
             "Keys must match entries in --parameter-space."
         ),
+    )
+    parser.add_argument(
+        "--true-params-scale",
+        choices=["normalized", "physical"],
+        default="normalized",
+        help="Interpret --true-params as normalized public parameters or physical simulator units (default: normalized).",
     )
     parser.add_argument(
         "--output-dir",
@@ -147,14 +154,20 @@ def main(args=None):
     if unknown:
         parser.error(f"--true-params contains unknown parameter(s): {sorted(unknown)}")
 
+    physical_true_params = (
+        denormalize_cpm_params(true_params)
+        if args.true_params_scale == "normalized"
+        else {name: float(value) for name, value in true_params.items()}
+    )
+
     # Build ParameterList (true params + seed)
     param_entries = [
         Parameter(
             name=name,
-            value=value,
+            value=physical_true_params[name],
             path=param_space_data[name]["path"],
         )
-        for name, value in true_params.items()
+        for name in true_params
     ]
     param_entries.append(
         Parameter(
@@ -165,7 +178,10 @@ def main(args=None):
     )
     param_list = ParameterList(parameters=param_entries)
 
-    print(f"Running reference simulation with params: {true_params}, seed={args.seed}")
+    print(
+        "Running reference simulation with params "
+        f"(public={true_params}, physical={physical_true_params}), seed={args.seed}"
+    )
     config_path = sim_manager.build_simulation_config(param_list, out_dir_name="reference")
     _normalize_generated_config_paths(config_path)
     sim_manager.run_simulation(config_path)

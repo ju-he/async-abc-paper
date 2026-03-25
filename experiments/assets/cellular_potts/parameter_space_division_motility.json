@@ -2,11 +2,11 @@
   "parameters": {
     "division_rate": {
       "path": "define_functions.division_cond_cancer[1]",
-      "range": [0.00006, 0.6]
+      "range": [0.0, 1.0]
     },
     "motility": {
       "path": "CellsInSilico.orientation.motilityamount[9]",
-      "range": [0, 10000]
+      "range": [0.0, 1.0]
     }
   }
 }

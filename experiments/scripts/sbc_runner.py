@@ -149,7 +149,20 @@ def _plot_rank_histogram(ranks_df: pd.DataFrame, output_dir: OutputDir) -> None:
         ax.set_xlabel("rank")
         ax.set_ylabel("count")
     fig.tight_layout()
-    save_figure(fig, output_dir.plots / "rank_histogram", data={col: ranks_df[col].tolist() for col in ranks_df.columns})
+    save_figure(
+        fig,
+        output_dir.plots / "rank_histogram",
+        data={col: ranks_df[col].tolist() for col in ranks_df.columns},
+        metadata={
+            "plot_name": "rank_histogram",
+            "title": "Rank histogram",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": methods,
+        },
+    )
 
 
 def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> None:
@@ -193,7 +206,20 @@ def _plot_coverage_table(coverage_df: pd.DataFrame, output_dir: OutputDir) -> No
     ax.set_title("SBC empirical coverage")
     ax.legend(frameon=False)
     fig.tight_layout()
-    save_figure(fig, output_dir.plots / "coverage_table", data={col: plot_df[col].tolist() for col in plot_df.columns})
+    save_figure(
+        fig,
+        output_dir.plots / "coverage_table",
+        data={col: plot_df[col].tolist() for col in plot_df.columns},
+        metadata={
+            "plot_name": "coverage_table",
+            "title": "SBC empirical coverage",
+            "summary_plot": True,
+            "diagnostic_plot": False,
+            "experiment_name": output_dir.root.name,
+            "benchmark": False,
+            "methods": sorted(plot_df["method"].dropna().unique().tolist()),
+        },
+    )
 
 
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:

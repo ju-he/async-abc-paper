@@ -23,6 +23,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
 _FE_ALL_EXCEPT = 0x3D
 _FE_PYABC_MASK = 0x01 | 0x04 | 0x08
+_CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
+    "division_rate": (0.00006, 0.6),
+    "motility": (0.0, 10000.0),
+}
 
 try:
     _LIBC = ctypes.CDLL(None)
@@ -309,6 +313,30 @@ def _remove_eval_path(path_like: str | Path) -> None:
         shutil.rmtree(path)
 
 
+def normalize_cpm_param(name: str, value: float) -> float:
+    """Map a CPM parameter from physical simulator units to [0, 1]."""
+    lo, hi = _CPM_PHYSICAL_LIMITS[name]
+    if hi <= lo:
+        raise ValueError(f"Invalid CPM physical range for {name!r}: {(lo, hi)}")
+    return (float(value) - lo) / (hi - lo)
+
+
+def denormalize_cpm_param(name: str, value: float) -> float:
+    """Map a CPM parameter from [0, 1] to physical simulator units."""
+    lo, hi = _CPM_PHYSICAL_LIMITS[name]
+    return lo + float(value) * (hi - lo)
+
+
+def normalize_cpm_params(params: Dict[str, float]) -> Dict[str, float]:
+    """Return CPM params normalized into the public [0, 1] parameter space."""
+    return {name: normalize_cpm_param(name, float(value)) for name, value in params.items()}
+
+
+def denormalize_cpm_params(params: Dict[str, float]) -> Dict[str, float]:
+    """Return CPM params converted from public [0, 1] values to physical units."""
+    return {name: denormalize_cpm_param(name, float(value)) for name, value in params.items()}
+
+
 class CellularPotts:
     """Cellular Potts model benchmark using nastjapy's SimulationManager + DistanceMetric.
 
@@ -380,9 +408,11 @@ class CellularPotts:
 
         self._parameter_space_data: Dict[str, Any] = ps_data["parameters"]
         self._parameter_space = ParameterSpace.model_validate(ps_data)
+        self._physical_limits: Dict[str, Tuple[float, float]] = {
+            name: _CPM_PHYSICAL_LIMITS[name] for name in self._parameter_space_data
+        }
         self.limits: Dict[str, Tuple[float, float]] = {
-            name: (float(p["range"][0]), float(p["range"][1]))
-            for name, p in self._parameter_space_data.items()
+            name: (0.0, 1.0) for name in self._parameter_space_data
         }
         self._seed_param_name: str = config.get("seed_param_name", "random_seed")
         self._seed_param_path: str = config.get("seed_param_path", "Settings.randomseed")
@@ -477,13 +507,14 @@ class CellularPotts:
         sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
         logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
+        physical_params = denormalize_cpm_params(params)
         param_entries = [
             Parameter(
                 name=name,
-                value=value,
+                value=physical_params[name],
                 path=self._parameter_space_data[name]["path"],
             )
-            for name, value in params.items()
+            for name in params
         ]
         param_entries.append(
             Parameter(
