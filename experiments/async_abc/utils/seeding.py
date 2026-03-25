@@ -1,8 +1,38 @@
 """Reproducible seeding utilities."""
+import hashlib
+import json
 import random
-from typing import List
+from typing import Dict, List, Tuple
 
 import numpy as np
+
+
+def stable_seed(*parts: object) -> int:
+    """Return a deterministic 31-bit seed derived from structured inputs."""
+    payload = json.dumps(parts, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    digest = hashlib.blake2b(payload.encode("ascii"), digest_size=8).digest()
+    return int.from_bytes(digest, "big") % (2**31)
+
+
+def canonical_param_key(
+    params: Dict[str, float],
+    *,
+    decimals: int = 10,
+) -> Tuple[Tuple[str, float], ...]:
+    """Return a stable rounded parameter key suitable for hashing and joins."""
+    return tuple(
+        sorted((str(key), round(float(value), decimals)) for key, value in params.items())
+    )
+
+
+def canonical_param_key_json(
+    params: Dict[str, float],
+    *,
+    decimals: int = 10,
+) -> str:
+    """Return a JSON-serialized canonical parameter key."""
+    key = canonical_param_key(params, decimals=decimals)
+    return json.dumps(key, separators=(",", ":"), ensure_ascii=True)
 
 
 def make_seeds(n: int, base: int) -> List[int]:

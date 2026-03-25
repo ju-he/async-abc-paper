@@ -11,6 +11,7 @@ from typing import Callable, Dict, List
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
+from ..utils.seeding import canonical_param_key, canonical_param_key_json, stable_seed
 from ._attempt_trace import attempt_records_from_events, instrument_simulate, load_attempt_events
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
@@ -70,9 +71,6 @@ def _run_pyabc_smc_with_sampler(
         }
     )
 
-    # Per-call distance cache: maps frozen param key -> actual loss.
-    # Must be local to avoid cross-replicate contamination.
-    # Note: not populated for MPI backend (workers run in separate processes).
     _distance_cache: Dict = {}
     eval_count = 0
 
@@ -81,11 +79,8 @@ def _run_pyabc_smc_with_sampler(
 
     def pyabc_model(params):
         nonlocal eval_count
-        # Derive a stable per-evaluation seed from (run_seed, frozen_params).
-        # Using a param hash is deterministic regardless of evaluation order,
-        # which matters for parallel samplers.
-        param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
-        sim_seed = abs(hash((seed, param_key))) % (2**31)
+        param_key = canonical_param_key(params)
+        sim_seed = stable_seed(seed, param_key)
         loss = float(timed_simulate(dict(params), seed=sim_seed))
         _distance_cache[param_key] = loss
         eval_count += 1
@@ -126,10 +121,16 @@ def _run_pyabc_smc_with_sampler(
     observable = history_observable_frame(history, run_start)
 
     # Collect records from the pyABC history
+    attempt_events = load_attempt_events(trace_dir, run_start_abs=run_start)
+    loss_by_param_key = {
+        str(event["param_key"]): float(event["loss"])
+        for event in attempt_events
+    }
+
     records: List[ParticleRecord] = []
     records.extend(
         attempt_records_from_events(
-            load_attempt_events(trace_dir, run_start_abs=run_start),
+            attempt_events,
             method_name="pyabc_smc",
             replicate=replicate,
             observable_attempt_counts=observable["attempt_count"].tolist(),
@@ -160,8 +161,15 @@ def _run_pyabc_smc_with_sampler(
         for pos, (idx, row) in enumerate(df.iterrows()):
             step += 1
             params = {col: float(row[col]) for col in limits}
-            param_key = tuple(sorted((k_, round(v, 10)) for k_, v in params.items()))
-            actual_loss = _distance_cache.get(param_key, float("nan"))
+            param_key = canonical_param_key(params)
+            actual_loss = _distance_cache.get(param_key)
+            if actual_loss is None:
+                actual_loss = loss_by_param_key.get(canonical_param_key_json(params))
+            if actual_loss is None:
+                raise RuntimeError(
+                    "Could not match pyABC population particle to any traced simulation attempt. "
+                    "This indicates incomplete attempt tracing or parameter-key mismatch."
+                )
             weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None
             records.append(ParticleRecord(
                 method="pyabc_smc",

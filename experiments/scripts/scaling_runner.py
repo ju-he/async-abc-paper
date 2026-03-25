@@ -50,6 +50,22 @@ def _interp_time(w: int, measured: dict) -> float:
     return math.exp(math.log(t_lo) + frac * (math.log(t_hi) - math.log(t_lo)))
 
 
+def _simulation_count(records) -> int:
+    """Return a method-agnostic simulation-attempt count for throughput summaries."""
+    attempt_records = [record for record in records if record.record_kind == "simulation_attempt"]
+    if attempt_records:
+        return len(attempt_records)
+
+    attempt_counts = [
+        int(record.attempt_count)
+        for record in records
+        if record.attempt_count is not None
+    ]
+    if attempt_counts:
+        return max(attempt_counts)
+    return len(records)
+
+
 def main(argv: list[str] | None = None) -> None:
     configure_logging()
     parser = make_arg_parser("Scaling experiment.")
@@ -113,7 +129,7 @@ def main(argv: list[str] | None = None) -> None:
                 )
                 elapsed = time.time() - t0
                 if is_root_rank():
-                    n_sims = len(records)
+                    n_sims = _simulation_count(records)
                     throughput = n_sims / elapsed if elapsed > 0 else float("inf")
                     throughput_rows.append({
                         "n_workers": n_workers,

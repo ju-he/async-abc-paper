@@ -527,6 +527,12 @@ def finalize_sbc_experiment(
     statuses: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     tmp_output = _temp_output_dir(layout)
+    existing_trials_path = layout.final_output_dir.data / "sbc_trials.jsonl"
+
+    if _is_extension_batch(layout) and layout.final_output_dir.root.exists() and not existing_trials_path.exists():
+        raise ValueError(
+            f"Cannot extend {cfg['experiment_name']}: existing finalized output is missing sbc_trials.jsonl"
+        )
 
     def _load_jsonl_trials(path: Path) -> List[Dict[str, Any]]:
         result = []
@@ -542,10 +548,21 @@ def finalize_sbc_experiment(
                 result.append(payload)
         return result
 
+    def _write_jsonl_trials(path: Path, rows: List[Dict[str, Any]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            for row in rows:
+                payload = dict(row)
+                payload["posterior_samples"] = [
+                    float(value) for value in np.asarray(payload["posterior_samples"], dtype=float)
+                ]
+                f.write(json.dumps(payload) + "\n")
+
     trial_sources = _merge_sources(layout, shard_dirs, "sbc_trials.jsonl")
     trial_records: List[Dict[str, Any]] = []
     for path in trial_sources:
         trial_records.extend(_load_jsonl_trials(path))
+    _write_jsonl_trials(tmp_output.data / "sbc_trials.jsonl", trial_records)
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, cfg["sbc"]["coverage_levels"])
     ranks_df.to_csv(tmp_output.data / "sbc_ranks.csv", index=False)

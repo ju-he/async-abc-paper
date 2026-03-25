@@ -117,9 +117,88 @@ class TestShardedSbcRunner:
         )
 
         data_dir = tmp_path / "sbc" / "data"
+        assert (data_dir / "sbc_trials.jsonl").exists()
         assert (data_dir / "sbc_ranks.csv").exists()
         assert (data_dir / "coverage.csv").exists()
         assert (data_dir / "timing.csv").exists()
+
+
+class TestShardedSbcFinalizer:
+    def test_extend_merges_existing_and_new_trial_records(self, tmp_path, sbc_config_file):
+        from async_abc.io.config import load_config
+        from async_abc.utils.shard_finalizers import finalize_sbc_experiment
+        from async_abc.utils.sharding import ShardLayout
+
+        cfg = load_config(sbc_config_file)
+        layout = ShardLayout(tmp_path, "sbc", "extend-run", 0)
+        layout.final_output_dir.ensure()
+        (layout.final_output_dir.data / "sbc_trials.jsonl").write_text(
+            json.dumps(
+                {
+                    "trial": 0,
+                    "method": "rejection_abc",
+                    "param": "mu",
+                    "true_value": 0.0,
+                    "posterior_samples": [0.1, 0.2],
+                }
+            )
+            + "\n"
+        )
+
+        plan_path = layout.plan_path
+        plan_path.parent.mkdir(parents=True, exist_ok=True)
+        plan_path.write_text(json.dumps({"extend": True}))
+
+        shard_layout = ShardLayout(tmp_path, "sbc", "extend-run", 0)
+        shard_layout.shard_output_dir.ensure()
+        (shard_layout.shard_output_dir.data / "sbc_trials.jsonl").write_text(
+            json.dumps(
+                {
+                    "trial": 1,
+                    "method": "rejection_abc",
+                    "param": "mu",
+                    "true_value": 1.0,
+                    "posterior_samples": [0.3, 0.4],
+                }
+            )
+            + "\n"
+        )
+
+        finalize_sbc_experiment(cfg, layout, [shard_layout.shard_output_dir], [{"state": "completed"}])
+
+        merged_path = tmp_path / "sbc" / "data" / "sbc_trials.jsonl"
+        merged_lines = [json.loads(line) for line in merged_path.read_text().splitlines() if line.strip()]
+        assert len(merged_lines) == 2
+        assert {row["trial"] for row in merged_lines} == {0, 1}
+
+    def test_extend_fails_when_existing_finalized_output_lacks_trial_corpus(self, tmp_path, sbc_config_file):
+        from async_abc.io.config import load_config
+        from async_abc.utils.shard_finalizers import finalize_sbc_experiment
+        from async_abc.utils.sharding import ShardLayout
+
+        cfg = load_config(sbc_config_file)
+        layout = ShardLayout(tmp_path, "sbc", "legacy-run", 0)
+        layout.final_output_dir.ensure()
+        layout.plan_path.parent.mkdir(parents=True, exist_ok=True)
+        layout.plan_path.write_text(json.dumps({"extend": True}))
+
+        shard_layout = ShardLayout(tmp_path, "sbc", "legacy-run", 0)
+        shard_layout.shard_output_dir.ensure()
+        (shard_layout.shard_output_dir.data / "sbc_trials.jsonl").write_text(
+            json.dumps(
+                {
+                    "trial": 1,
+                    "method": "rejection_abc",
+                    "param": "mu",
+                    "true_value": 1.0,
+                    "posterior_samples": [0.3, 0.4],
+                }
+            )
+            + "\n"
+        )
+
+        with pytest.raises(ValueError, match="missing sbc_trials.jsonl"):
+            finalize_sbc_experiment(cfg, layout, [shard_layout.shard_output_dir], [{"state": "completed"}])
 
 
 class TestShardedStragglerRunner:

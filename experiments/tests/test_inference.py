@@ -2,6 +2,7 @@
 import json
 import logging
 import math
+import os
 import shutil
 import subprocess
 import sys
@@ -733,6 +734,20 @@ class TestPyabcWrapperFixes:
         r2 = run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od2, replicate=0, seed=42)
         assert r1[0].params == r2[0].params
 
+    def test_seed_derivation_is_stable_across_subprocesses(self):
+        code = "\n".join(
+            [
+                "from async_abc.utils.seeding import canonical_param_key, stable_seed",
+                "params = {'mu': 1.23456789}",
+                "print(stable_seed(42, canonical_param_key(params)))",
+            ]
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(Path(__file__).parent.parent) + os.pathsep + env.get("PYTHONPATH", "")
+        first = subprocess.check_output([sys.executable, "-c", code], text=True, env=env).strip()
+        second = subprocess.check_output([sys.executable, "-c", code], text=True, env=env).strip()
+        assert first == second
+
     def test_epsilon_extraction_robust(self, pyabc_records_default):
         population_records = _population_records(pyabc_records_default)
         assert population_records
@@ -757,6 +772,24 @@ class TestPyabcWrapperFixes:
             assert record.time_semantics == "generation_end"
             assert record.generation is not None
             assert record.attempt_count is not None and record.attempt_count >= 0
+
+    def test_multicore_parallel_population_losses_are_finite(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "pyabc_parallel").ensure()
+        records = run_pyabc_smc(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "max_simulations": 20, "n_workers": 2, "parallel_backend": "multicore"},
+            od,
+            replicate=0,
+            seed=42,
+        )
+        population_records = _population_records(records)
+        assert population_records
+        assert all(math.isfinite(record.loss) for record in population_records)
 
 
 class TestRejectionAbc:
@@ -855,6 +888,30 @@ class TestAbcSmcBaseline:
         ]
         assert timed
         assert all(record.sim_end_time >= record.sim_start_time for record in timed)
+
+    def test_multicore_parallel_population_losses_are_finite(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc_parallel").ensure()
+        records = run_abc_smc_baseline(
+            bm.simulate,
+            bm.limits,
+            {
+                **_test_inference_cfg(),
+                "max_simulations": 20,
+                "n_generations": 2,
+                "n_workers": 2,
+                "parallel_backend": "multicore",
+            },
+            od,
+            replicate=0,
+            seed=42,
+        )
+        population_records = _population_records(records)
+        assert population_records
+        assert all(math.isfinite(record.loss) for record in population_records)
 
 
 class TestBuildPyabcSampler:

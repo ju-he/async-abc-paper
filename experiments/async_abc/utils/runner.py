@@ -226,7 +226,7 @@ def write_timing_comparison_csv(output_root: Union[str, Path]) -> None:
     """Regenerate timing_comparison.csv from all per-experiment timing.csv files.
 
     Reads ``<output_root>/*/data/timing.csv``, pairs each experiment's latest
-    test/small-mode estimate with its latest full-run actual, and writes a
+    estimated run (``test``, ``small``, or ``small_test``) with its latest full-run actual, and writes a
     summary to ``<output_root>/timing_comparison.csv``.  Safe to call even when
     only test runs or only full runs exist yet.
     """
@@ -250,7 +250,7 @@ def write_timing_comparison_csv(output_root: Union[str, Path]) -> None:
     for exp_name, rows in sorted(rows_by_experiment.items()):
         test_rows = [
             r for r in rows
-            if r.get("test_mode", "").lower() in ("true", "1")
+            if r.get("run_mode", "") in {"test", "small", "small_test"}
             and r.get("estimated_full_s", "")
         ]
         full_rows = [

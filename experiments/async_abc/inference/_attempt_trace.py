@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List
 
 from ..io.records import ParticleRecord
+from ..utils.seeding import canonical_param_key_json
 
 
 def _current_worker_id() -> str:
@@ -45,6 +46,7 @@ def instrument_simulate(
         end_abs = time.time()
         payload = {
             "params": {key: float(value) for key, value in params.items()},
+            "param_key": canonical_param_key_json(params),
             "seed": int(seed),
             "loss": loss,
             "start_abs": float(start_abs),
@@ -78,6 +80,7 @@ def load_attempt_events(trace_dir: Path, *, run_start_abs: float) -> List[Dict[s
                 events.append(
                     {
                         "params": {key: float(value) for key, value in raw.get("params", {}).items()},
+                        "param_key": str(raw.get("param_key") or canonical_param_key_json(raw.get("params", {}))),
                         "seed": int(raw["seed"]),
                         "loss": float(raw["loss"]),
                         "sim_start_time": start_abs - float(run_start_abs),

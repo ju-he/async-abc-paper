@@ -313,6 +313,130 @@ class TestScalingRunner:
         rows = _rows(csv_path)
         assert {int(row["n_workers"]) for row in rows} == {1, 4}
 
+    def test_simulation_count_uses_attempts_before_raw_record_count(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+
+        attempt_records = [
+            test_helpers.ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"mu": 0.0},
+                loss=0.1,
+                wall_time=0.1,
+                record_kind="simulation_attempt",
+                attempt_count=1,
+            ),
+            test_helpers.ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=2,
+                params={"mu": 0.1},
+                loss=0.2,
+                wall_time=0.2,
+                record_kind="simulation_attempt",
+                attempt_count=2,
+            ),
+            test_helpers.ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"mu": 0.1},
+                loss=0.2,
+                wall_time=0.2,
+                record_kind="population_particle",
+                attempt_count=2,
+            ),
+        ]
+        accepted_only_records = [
+            test_helpers.ParticleRecord(
+                method="rejection_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"mu": 0.0},
+                loss=0.1,
+                wall_time=0.1,
+                record_kind="accepted_particle",
+                attempt_count=4,
+            ),
+            test_helpers.ParticleRecord(
+                method="rejection_abc",
+                replicate=0,
+                seed=1,
+                step=2,
+                params={"mu": 0.2},
+                loss=0.2,
+                wall_time=0.2,
+                record_kind="accepted_particle",
+                attempt_count=9,
+            ),
+        ]
+
+        assert module._simulation_count(attempt_records) == 2
+        assert module._simulation_count(accepted_only_records) == 9
+
+
+class TestTimingComparison:
+    def test_small_mode_estimate_is_included_in_comparison(self, tmp_path):
+        from async_abc.utils.runner import write_timing_comparison_csv
+
+        exp_dir = tmp_path / "gaussian_mean" / "data"
+        exp_dir.mkdir(parents=True)
+        with open(exp_dir / "timing.csv", "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "experiment_name",
+                    "elapsed_s",
+                    "estimated_full_s",
+                    "estimated_full_unsharded_s",
+                    "estimated_full_sharded_wall_s",
+                    "aggregate_compute_s",
+                    "test_mode",
+                    "run_mode",
+                    "timestamp",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "experiment_name": "gaussian_mean",
+                    "elapsed_s": "10.0",
+                    "estimated_full_s": "100.0",
+                    "estimated_full_unsharded_s": "100.0",
+                    "estimated_full_sharded_wall_s": "",
+                    "aggregate_compute_s": "10.0",
+                    "test_mode": "False",
+                    "run_mode": "small",
+                    "timestamp": "2026-03-25T10:00:00",
+                }
+            )
+            writer.writerow(
+                {
+                    "experiment_name": "gaussian_mean",
+                    "elapsed_s": "95.0",
+                    "estimated_full_s": "",
+                    "estimated_full_unsharded_s": "",
+                    "estimated_full_sharded_wall_s": "",
+                    "aggregate_compute_s": "95.0",
+                    "test_mode": "False",
+                    "run_mode": "full",
+                    "timestamp": "2026-03-25T11:00:00",
+                }
+            )
+
+        write_timing_comparison_csv(tmp_path)
+
+        rows = _rows(tmp_path / "timing_comparison.csv")
+        assert rows
+        assert rows[0]["test_run_mode"] == "small"
+        assert rows[0]["estimated_full_s"] == "100.0"
+        assert rows[0]["actual_elapsed_s"] == "95.0"
+
 
 class TestRuntimeHeterogeneityRunner:
     def test_creates_gantt_plot(self, runtime_heterogeneity_runner_artifact):
