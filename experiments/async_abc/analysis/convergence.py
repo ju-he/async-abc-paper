@@ -54,6 +54,8 @@ def _wasserstein_to_true_params(
     true_params: dict[str, float],
     n_projections: int,
 ) -> float:
+    if len(frame) == 0:
+        return float("nan")
     param_names = list(true_params.keys())
     samples = frame[param_names].to_numpy(dtype=float)
     target = np.tile(

@@ -41,6 +41,14 @@ def _gaussian_bm():
     )
 
 
+def _population_records(records):
+    return [
+        record
+        for record in records
+        if record.record_kind in (None, "", "population_particle")
+    ]
+
+
 def _install_fake_mpi_executor(monkeypatch, *, executor):
     fake_mpi = types.ModuleType("mpi4py")
     fake_mpi.MPI = types.SimpleNamespace(COMM_WORLD=object())
@@ -673,11 +681,14 @@ class TestPyabcWrapperFixes:
         pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
 
     def test_particle_loss_is_actual_distance(self, pyabc_records_default):
-        first_gen_losses = [record.loss for record in pyabc_records_default[:10] if record.loss is not None]
+        population_records = _population_records(pyabc_records_default)
+        first_gen_losses = [record.loss for record in population_records[:10] if record.loss is not None]
         assert len(set(round(loss, 8) for loss in first_gen_losses)) > 1
 
     def test_tolerance_field_is_generation_epsilon(self, pyabc_records_default):
-        assert all(record.tolerance is not None and record.tolerance >= 0.0 for record in pyabc_records_default)
+        population_records = _population_records(pyabc_records_default)
+        assert population_records
+        assert all(record.tolerance is not None and record.tolerance >= 0.0 for record in population_records)
 
     def test_singlecore_sampler_when_n_workers_1(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
@@ -723,13 +734,19 @@ class TestPyabcWrapperFixes:
         assert r1[0].params == r2[0].params
 
     def test_epsilon_extraction_robust(self, pyabc_records_default):
-        assert all(record.tolerance is not None for record in pyabc_records_default)
+        population_records = _population_records(pyabc_records_default)
+        assert population_records
+        assert all(record.tolerance is not None for record in population_records)
 
     def test_wall_time_uses_observable_generation_snapshots(self, pyabc_records_default):
-        assert len({round(record.wall_time, 8) for record in pyabc_records_default}) > 1
+        population_records = _population_records(pyabc_records_default)
+        assert population_records
+        assert len({round(record.wall_time, 8) for record in population_records}) > 1
 
     def test_all_records_complete_schema(self, pyabc_records_default):
-        for record in pyabc_records_default:
+        population_records = _population_records(pyabc_records_default)
+        assert population_records
+        for record in population_records:
             assert record.method == "pyabc_smc"
             assert isinstance(record.step, int) and record.step >= 1
             assert math.isfinite(record.loss) and record.loss >= 0.0
@@ -798,16 +815,20 @@ class TestAbcSmcBaseline:
         assert all(record.method == "abc_smc_baseline" for record in abc_smc_baseline_records_default)
 
     def test_tolerance_non_increasing(self, abc_smc_baseline_records_tolerance):
-        tolerances = [record.tolerance for record in abc_smc_baseline_records_tolerance if record.tolerance is not None]
+        tolerances = [
+            record.tolerance
+            for record in _population_records(abc_smc_baseline_records_tolerance)
+            if record.tolerance is not None
+        ]
         assert tolerances == sorted(tolerances, reverse=True)
 
     def test_loss_is_actual_distance(self, abc_smc_baseline_records_loss):
-        first_gen = abc_smc_baseline_records_loss[:10]
+        first_gen = _population_records(abc_smc_baseline_records_loss)[:10]
         if len(first_gen) > 1:
             assert len(set(round(record.loss, 8) for record in first_gen)) > 1
 
     def test_steps_monotone(self, abc_smc_baseline_records_default):
-        steps = [record.step for record in abc_smc_baseline_records_default]
+        steps = [record.step for record in _population_records(abc_smc_baseline_records_default)]
         assert steps == sorted(steps)
 
     def test_n_generations_respected(self, abc_smc_baseline_records_generation):
@@ -823,11 +844,15 @@ class TestAbcSmcBaseline:
         assert isinstance(records, list)
 
     def test_records_have_generation(self, abc_smc_baseline_records_generation):
-        generations = sorted({record.generation for record in abc_smc_baseline_records_generation})
+        generations = sorted({record.generation for record in _population_records(abc_smc_baseline_records_generation)})
         assert generations == list(range(len(generations)))
 
     def test_records_have_generation_timing(self, abc_smc_baseline_records_default):
-        timed = [record for record in abc_smc_baseline_records_default if record.sim_start_time is not None and record.sim_end_time is not None]
+        timed = [
+            record
+            for record in _population_records(abc_smc_baseline_records_default)
+            if record.sim_start_time is not None and record.sim_end_time is not None
+        ]
         assert timed
         assert all(record.sim_end_time >= record.sim_start_time for record in timed)
 

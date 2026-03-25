@@ -19,7 +19,7 @@ def _get_comm():
         from mpi4py import MPI
 
         return MPI.COMM_WORLD
-    except Exception:
+    except ImportError:
         return None
 
 

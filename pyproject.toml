@@ -9,15 +9,16 @@ description = "Experiment library for the async-ABC paper."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "matplotlib",
-    "numpy",
-    "pandas",
-    "POT",
-    "scipy",
+    "matplotlib>=3.6",
+    "numpy>=1.24,<3",
+    "pandas>=1.5",
+    "POT>=0.8",
+    "scipy>=1.10",
 ]
 
 [project.optional-dependencies]
 pyabc = ["pyabc"]
+propulate = ["propulate"]
 mpi = ["mpi4py"]
 test = ["pytest", "pyabc"]
 

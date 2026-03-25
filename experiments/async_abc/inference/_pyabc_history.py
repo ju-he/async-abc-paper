@@ -70,6 +70,15 @@ def _seconds_since(run_start: float | datetime, value: Any) -> float | None:
             return float((parsed - run_start).total_seconds())
         return None
 
+    if isinstance(value, datetime):
+        return float(value.timestamp()) - float(run_start)
+    if isinstance(value, str):
+        try:
+            parsed = pd.Timestamp(value).to_pydatetime()
+        except Exception:
+            return None
+        return float(parsed.timestamp()) - float(run_start)
+
     try:
         return float(value) - float(run_start)
     except Exception:

@@ -112,7 +112,7 @@ def _stable_seed(*parts: object) -> int:
 
 def _param_key(params: Dict[str, float]) -> tuple[tuple[str, float], ...]:
     """Return a stable, rounded parameter key for deterministic seeding."""
-    return tuple(sorted((key, round(float(value), 10)) for key, value in params.items()))
+    return tuple(sorted((key, round(float(value), 15)) for key, value in params.items()))
 
 
 def _eval_seed(

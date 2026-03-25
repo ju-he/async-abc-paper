@@ -21,8 +21,13 @@ logger = logging.getLogger(__name__)
 _NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
-_FE_ALL_EXCEPT = 0x3D
-_FE_PYABC_MASK = 0x01 | 0x04 | 0x08
+# x86/x86-64 fenv.h constants. These values are architecture-specific (ARM
+# uses different bit positions, e.g. FE_ALL_EXCEPT = 0x9F800000). This code
+# is only expected to run on x86 HPC nodes; the values are intentionally
+# hardcoded here rather than resolved at runtime because ctypes does not
+# expose symbolic fenv constants.
+_FE_ALL_EXCEPT = 0x3D   # FE_INVALID|FE_DENORMAL|FE_DIVBYZERO|FE_OVERFLOW|FE_UNDERFLOW|FE_INEXACT (x86)
+_FE_PYABC_MASK = 0x01 | 0x04 | 0x08  # FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW (x86)
 _CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
     "division_rate": (0.00006, 0.6),
     "motility": (0.0, 10000.0),
