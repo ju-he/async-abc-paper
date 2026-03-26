@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from ..analysis import base_method_name
 from ..analysis.sbc import empirical_coverage, sbc_ranks
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, load_records
@@ -261,6 +262,7 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
         "slowdown_factor": [row["slowdown_factor"] for row in throughput_rows],
         "base_method": [row["base_method"] for row in throughput_rows],
         "replicate": [row["replicate"] for row in throughput_rows],
+        "effective_straggler_worker_id": [row.get("effective_straggler_worker_id", "") for row in throughput_rows],
         "throughput_sims_per_s": [row["throughput_sims_per_s"] for row in throughput_rows],
         "active_wall_time_s": [row.get("active_wall_time_s", row.get("wall_time_s")) for row in throughput_rows],
         "elapsed_wall_time_s": [row.get("elapsed_wall_time_s", row.get("wall_time_s")) for row in throughput_rows],
@@ -385,12 +387,19 @@ def finalize_straggler_experiment(
             worst_records = [record for record, factor in tagged_records if factor == worst]
             async_worst_records = [
                 record for record in worst_records
-                if record.worker_id is not None and record.sim_start_time is not None and record.sim_end_time is not None
+                if base_method_name(record.method) == "async_propulate_abc"
+                and record.record_kind == "simulation_attempt"
+                and record.worker_id is not None
+                and record.sim_start_time is not None
+                and record.sim_end_time is not None
             ]
             sync_worst_records = [
                 record for record in worst_records
-                if record.generation is not None and record.sim_start_time is not None and record.sim_end_time is not None
-                and record.worker_id is None
+                if base_method_name(record.method) in {"abc_smc_baseline", "pyabc_smc"}
+                and record.record_kind == "population_particle"
+                and record.generation is not None
+                and record.sim_start_time is not None
+                and record.sim_end_time is not None
             ]
             if async_worst_records:
                 plot_worker_gantt(async_worst_records, tmp_output)

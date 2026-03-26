@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import pandas as pd
 
+from async_abc.analysis import base_method_name
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import load_records, ParticleRecord
 from async_abc.plotting.reporters import (
@@ -112,7 +113,16 @@ def _replot_straggler(name: str, output_dir: OutputDir, cfg: dict) -> None:
         if tagged:
             worst = max(f for _, f in tagged)
             worst_records = [r for r, f in tagged if f == worst]
-            plot_worker_gantt(worst_records, output_dir)
+            async_worst_records = [
+                record for record in worst_records
+                if base_method_name(record.method) == "async_propulate_abc"
+                and record.record_kind == "simulation_attempt"
+                and record.worker_id is not None
+                and record.sim_start_time is not None
+                and record.sim_end_time is not None
+            ]
+            if async_worst_records:
+                plot_worker_gantt(async_worst_records, output_dir)
 
 
 def _replot_sensitivity(name: str, output_dir: OutputDir, cfg: dict) -> None:

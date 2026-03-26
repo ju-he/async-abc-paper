@@ -223,6 +223,7 @@ def _step_curve_summary(
     y_col: str,
     ci_level: float,
     log_y: bool = False,
+    lower_bound: float | None = None,
 ) -> pd.DataFrame:
     """Aggregate per-replicate step curves to a mean + CI summary."""
     rows: list[dict[str, object]] = []
@@ -261,6 +262,12 @@ def _step_curve_summary(
                 mean = 10 ** mean
                 ci_low = 10 ** ci_low if np.isfinite(ci_low) else float("nan")
                 ci_high = 10 ** ci_high if np.isfinite(ci_high) else float("nan")
+            if lower_bound is not None:
+                mean = max(float(lower_bound), float(mean))
+                if np.isfinite(ci_low):
+                    ci_low = max(float(lower_bound), float(ci_low))
+                if np.isfinite(ci_high):
+                    ci_high = max(float(lower_bound), float(ci_high))
             rows.append(
                 {
                     "method": method,
@@ -497,34 +504,67 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
     if not timed:
         return
 
+    def _condition_name(method: str) -> str:
+        return method.split("__", 1)[1] if "__" in method else "all"
+
     included_methods = sorted({r.method for r in timed})
-    conditions = sorted({r.method.split("__", 1)[1] if "__" in r.method else "all" for r in timed})
-    title = "Worker timeline by condition" if len(conditions) > 1 else "Worker timeline"
-    if len(conditions) <= 1:
+    base_methods = sorted({base_method_name(r.method) for r in timed})
+    conditions = sorted({_condition_name(r.method) for r in timed})
+    show_base_methods = len(base_methods) > 1
+    show_conditions = len(conditions) > 1
+    if show_base_methods and show_conditions:
+        title = "Worker timeline by method and condition"
+    elif show_base_methods:
+        title = "Worker timeline by method"
+    elif show_conditions:
+        title = "Worker timeline by condition"
+    else:
+        title = "Worker timeline"
+
+    if len(base_methods) <= 1 and len(conditions) <= 1:
         fig = gantt_plot(timed)
         if fig.axes:
             fig.axes[0].set_title(title)
     else:
         fig, axes = plt.subplots(
+            len(base_methods),
             len(conditions),
-            1,
-            figsize=(7.5, max(3.5, 2.8 * len(conditions))),
+            figsize=(max(7.5, 5.2 * len(conditions)), max(3.5, 2.8 * len(base_methods))),
             squeeze=False,
         )
-        for idx, condition in enumerate(conditions):
-            condition_records = [
-                r for r in timed
-                if (r.method.split("__", 1)[1] if "__" in r.method else "all") == condition
-            ]
-            gantt_plot(condition_records, ax=axes[idx, 0])
-            axes[idx, 0].set_title("all conditions" if condition == "all" else condition.replace("_", " "))
-            axes[idx, 0].legend([], [], frameon=False)
+        for row_idx, base_method in enumerate(base_methods):
+            for col_idx, condition in enumerate(conditions):
+                ax = axes[row_idx, col_idx]
+                panel_records = [
+                    r for r in timed
+                    if base_method_name(r.method) == base_method and _condition_name(r.method) == condition
+                ]
+                if not panel_records:
+                    ax.set_axis_off()
+                    continue
+                gantt_plot(panel_records, ax=ax)
+                legend = ax.get_legend()
+                if legend is not None and len({r.method for r in panel_records}) <= 1:
+                    legend.remove()
+                title_parts = []
+                if show_base_methods:
+                    title_parts.append(base_method)
+                if show_conditions:
+                    title_parts.append("all conditions" if condition == "all" else condition.replace("_", " "))
+                ax.set_title(" | ".join(title_parts) if title_parts else title)
         fig.tight_layout()
     omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})
+    show_replicate = len({int(r.replicate) for r in timed}) > 1
     data = {
         "method": [r.method for r in timed],
+        "base_method": [base_method_name(r.method) for r in timed],
+        "condition": [_condition_name(r.method) for r in timed],
         "replicate": [r.replicate for r in timed],
         "worker_id": [r.worker_id for r in timed],
+        "lane_label": [
+            f"rep {int(r.replicate)} | worker {r.worker_id}" if show_replicate else f"worker {r.worker_id}"
+            for r in timed
+        ],
         "sim_start_time": [r.sim_start_time for r in timed],
         "sim_end_time": [r.sim_end_time for r in timed],
         "generation": [r.generation for r in timed],
@@ -542,6 +582,7 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
             extra={
                 "included_methods": included_methods,
                 "omitted_methods": omitted_methods,
+                "base_methods": base_methods,
                 "conditions": conditions,
             },
         ),
@@ -2063,6 +2104,7 @@ def _save_quality_summary_artifact(
         y_col="wasserstein",
         ci_level=ci_level,
         log_y=False,
+        lower_bound=0.0,
     )
     if summary_df.empty:
         write_plot_metadata(stem, metadata={**metadata, "skip_reason": "empty_summary"})

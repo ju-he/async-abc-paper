@@ -373,11 +373,10 @@ def gantt_plot(records, ax=None):
         and record.sim_start_time is not None
         and record.sim_end_time is not None
     ]
-    workers = sorted({str(record.worker_id) for record in timed})
-
     created_fig = ax is None
     if ax is None:
-        fig_height = min(10.0, max(3.5, 0.6 * max(1, len(workers))))
+        lane_count = len({(int(record.replicate), str(record.worker_id)) for record in timed})
+        fig_height = min(10.0, max(3.5, 0.6 * max(1, lane_count)))
         fig, ax = plt.subplots(figsize=(7, fig_height))
     else:
         fig = ax.figure
@@ -388,14 +387,27 @@ def gantt_plot(records, ax=None):
         ax.set_ylabel("worker")
         return fig
 
-    worker_to_y = {worker: idx for idx, worker in enumerate(workers)}
+    def _worker_sort_key(value):
+        try:
+            return (0, int(str(value)))
+        except (TypeError, ValueError):
+            return (1, str(value))
+
+    replicates = sorted({int(record.replicate) for record in timed})
+    show_replicate = len(replicates) > 1
+    lanes = sorted(
+        {(int(record.replicate), str(record.worker_id)) for record in timed},
+        key=lambda item: (item[0], _worker_sort_key(item[1])),
+    )
+    worker_to_y = {lane: idx for idx, lane in enumerate(lanes)}
     methods = sorted({record.method for record in timed})
     cmap = plt.get_cmap("tab10")
     method_colors = {method: cmap(i % 10) for i, method in enumerate(methods)}
 
     for record in timed:
+        lane = (int(record.replicate), str(record.worker_id))
         ax.barh(
-            worker_to_y[str(record.worker_id)],
+            worker_to_y[lane],
             float(record.sim_end_time) - float(record.sim_start_time),
             left=float(record.sim_start_time),
             height=0.7,
@@ -404,14 +416,17 @@ def gantt_plot(records, ax=None):
         )
 
     worker_ticks = list(worker_to_y.values())
-    worker_labels = list(worker_to_y.keys())
+    worker_labels = [
+        f"rep {replicate} | worker {worker_id}" if show_replicate else f"worker {worker_id}"
+        for replicate, worker_id in worker_to_y.keys()
+    ]
     if len(worker_labels) > 20:
         step = max(1, int(np.ceil(len(worker_labels) / 20.0)))
         worker_labels = [label if idx % step == 0 else "" for idx, label in enumerate(worker_labels)]
     ax.set_yticks(worker_ticks)
     ax.set_yticklabels(worker_labels)
     ax.set_xlabel("wall-clock time")
-    ax.set_ylabel("worker")
+    ax.set_ylabel("replicate | worker" if show_replicate else "worker")
     ax.set_title("Worker timeline")
 
     handles = [

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 # Make async_abc importable
@@ -15,6 +16,7 @@ matplotlib.use("Agg")  # non-interactive backend
 from matplotlib.figure import Figure
 
 from async_abc.analysis import final_state_results, posterior_quality_curve, tolerance_over_wall_time
+import async_abc.analysis as analysis_mod
 from async_abc.inference.abc_smc_baseline import _prepare_db_path as prepare_abc_db_path
 from async_abc.inference.pyabc_wrapper import _prepare_db_path as prepare_pyabc_db_path
 from async_abc.io.paths import OutputDir
@@ -48,6 +50,7 @@ from async_abc.plotting.reporters import (
     plot_quality_vs_attempt_budget,
     plot_quality_vs_posterior_samples,
     plot_quality_vs_time,
+    plot_quality_vs_wall_time,
     plot_quality_vs_wall_time_diagnostic,
     plot_sensitivity_summary,
     plot_throughput_over_time,
@@ -323,6 +326,76 @@ class TestPhase3Reporters:
         assert meta["benchmark"] is False
         assert "methods" in meta
 
+    def test_plot_worker_gantt_separates_base_methods_and_replicate_worker_lanes(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        records = [
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"mu": 0.1},
+                loss=0.1,
+                wall_time=0.1,
+                worker_id="0",
+                sim_start_time=0.0,
+                sim_end_time=0.1,
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+            ),
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=1,
+                seed=2,
+                step=1,
+                params={"mu": 0.2},
+                loss=0.2,
+                wall_time=0.2,
+                worker_id="0",
+                sim_start_time=0.1,
+                sim_end_time=0.2,
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+            ),
+            ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=3,
+                step=1,
+                params={"mu": -0.1},
+                loss=0.3,
+                wall_time=0.3,
+                worker_id="0",
+                sim_start_time=0.0,
+                sim_end_time=0.3,
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+            ),
+            ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=1,
+                seed=4,
+                step=1,
+                params={"mu": -0.2},
+                loss=0.4,
+                wall_time=0.4,
+                worker_id="0",
+                sim_start_time=0.1,
+                sim_end_time=0.4,
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+            ),
+        ]
+        plot_worker_gantt(records, output_dir)
+        meta = json.loads((output_dir.plots / "worker_gantt_meta.json").read_text())
+        rows = _read_csv(output_dir.plots / "worker_gantt_data.csv")
+
+        assert meta["base_methods"] == ["abc_smc_baseline", "async_propulate_abc"]
+        async_lanes = {row["lane_label"] for row in rows if row["base_method"] == "async_propulate_abc"}
+        sync_lanes = {row["lane_label"] for row in rows if row["base_method"] == "abc_smc_baseline"}
+        assert async_lanes == {"rep 0 | worker 0", "rep 1 | worker 0"}
+        assert sync_lanes == {"rep 0 | worker 0", "rep 1 | worker 0"}
+
     def test_plot_quality_vs_time_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
         plot_quality_vs_time(sample_records, {"mu": 0.0}, [10, 50], output_dir, archive_size=20)
@@ -465,6 +538,32 @@ class TestPhase3Reporters:
         output_dir = OutputDir(tmp_path, "plots").ensure()
         plot_quality_vs_attempt_budget(sample_records, {"mu": 0.0}, output_dir, archive_size=20)
         assert (output_dir.plots / "quality_vs_attempt_budget.pdf").exists()
+
+    def test_quality_summary_exports_clamp_wasserstein_ci_low_to_zero(self, tmp_path, monkeypatch):
+        quality_df = pd.DataFrame(
+            [
+                {"method": "async_propulate_abc", "replicate": 0, "axis_value": 1.0, "wasserstein": 0.1},
+                {"method": "async_propulate_abc", "replicate": 1, "axis_value": 1.0, "wasserstein": 4.0},
+                {"method": "async_propulate_abc", "replicate": 0, "axis_value": 2.0, "wasserstein": 0.2},
+                {"method": "async_propulate_abc", "replicate": 1, "axis_value": 2.0, "wasserstein": 5.0},
+            ]
+        )
+        monkeypatch.setattr(analysis_mod, "posterior_quality_curve", lambda *args, **kwargs: quality_df.copy())
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+
+        plot_quality_vs_wall_time([], {"mu": 0.0}, output_dir, archive_size=20)
+        plot_quality_vs_posterior_samples([], {"mu": 0.0}, output_dir, archive_size=20)
+        plot_quality_vs_attempt_budget([], {"mu": 0.0}, output_dir, archive_size=20)
+
+        for stem in (
+            "quality_vs_wall_time_data.csv",
+            "quality_vs_posterior_samples_data.csv",
+            "quality_vs_attempt_budget_data.csv",
+        ):
+            rows = _read_csv(output_dir.plots / stem)
+            lows = [float(row["wasserstein_ci_low"]) for row in rows if row["wasserstein_ci_low"] and row["wasserstein_ci_low"].lower() != "nan"]
+            assert lows
+            assert all(low >= 0.0 for low in lows)
 
     def test_plot_time_to_target_summary_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()

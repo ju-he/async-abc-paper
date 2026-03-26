@@ -4,24 +4,29 @@
 Worker counts are read directly from scaling.json so the script stays in sync
 with any config changes.
 
-Wall-time limits are derived from a previous test run's timing output:
+Wall-time limits are derived from a previous matching-mode timing output:
 
-    base_time(N=1) = test_elapsed × (full_sims × full_reps) / (test_sims × test_reps)
+    base_time(N=1) = active_elapsed × (full_sims × full_reps) / (active_sims × active_reps)
     time_limit(N)  = clamp(base_time(N=1) / N × safety, min=15 min, max=24 h)
 
 This means larger N (more workers) automatically get shorter time limits.
 
 Usage
 -----
-After running test_all.sh, use its timing CSV to set wall times automatically::
+After running a mode-matched timing run, use its timing CSV to set wall times automatically::
 
     python submit_scaling.py /path/to/output \\
-        --timing-csv /path/to/test_output/timing_summary.csv
+        --timing-csv /path/to/test_output/timing_summary_test.csv
+
+Small-tier dry run based on small-test timings::
+
+    python submit_scaling.py /path/to/output --small --test --dry-run \\
+        --timing-csv /path/to/test_output/timing_summary_small_test.csv
 
 Dry run to preview without submitting::
 
     python submit_scaling.py /path/to/output --dry-run \\
-        --timing-csv /path/to/test_output/timing_summary.csv
+        --timing-csv /path/to/test_output/timing_summary_test.csv
 
 Manual fallback (no test run yet)::
 
@@ -39,7 +44,7 @@ SCRIPT_DIR = Path(__file__).parent
 EXPERIMENTS_DIR = SCRIPT_DIR.parent
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
-from async_abc.io.config import load_config  # noqa: E402
+from async_abc.io.config import compose_run_mode, load_config  # noqa: E402
 
 
 def _format_time(hours: float) -> str:
@@ -48,16 +53,27 @@ def _format_time(hours: float) -> str:
     return f"{h:02d}:{m:02d}:00"
 
 
-def _read_test_elapsed(timing_csv: Path, experiment_name: str = "scaling") -> float | None:
-    """Return elapsed_s from the most recent test-mode row for experiment_name."""
+def _read_timing_elapsed(
+    timing_csv: Path,
+    *,
+    experiment_name: str = "scaling",
+    run_mode: str,
+) -> float | None:
+    """Return elapsed_s from the most recent timing row matching experiment_name and run_mode."""
     if not timing_csv.exists():
         return None
-    rows = []
+    latest_elapsed = None
     with open(timing_csv) as f:
         for row in csv.DictReader(f):
-            if row["experiment_name"] == experiment_name and row["test_mode"] == "True":
-                rows.append(row)
-    return float(rows[-1]["elapsed_s"]) if rows else None  # most recent
+            if row.get("experiment_name") != experiment_name:
+                continue
+            if row.get("run_mode") != run_mode:
+                continue
+            elapsed_s = row.get("elapsed_s", "").strip()
+            if not elapsed_s:
+                continue
+            latest_elapsed = float(elapsed_s)
+    return latest_elapsed
 
 
 def main() -> None:
@@ -75,12 +91,22 @@ def main() -> None:
         help="Path to scaling.json (default: experiments/configs/scaling.json).",
     )
     parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Use test-mode worker counts and timing rows.",
+    )
+    parser.add_argument(
+        "--small",
+        action="store_true",
+        help="Use the small-tier config while still estimating full production wall times.",
+    )
+    parser.add_argument(
         "--timing-csv",
         dest="timing_csv",
         metavar="PATH",
         help=(
-            "Path to timing_summary.csv from a previous test run. "
-            "Used to derive per-N wall-time limits from the measured test elapsed time."
+            "Path to a timing_summary_<run_mode>.csv from a previous matching-mode run. "
+            "Used to derive per-N wall-time limits from the measured elapsed time."
         ),
     )
     parser.add_argument(
@@ -129,32 +155,38 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    config_path = Path(args.config)
-    full_cfg = load_config(config_path, test_mode=False)
-    test_cfg = load_config(config_path, test_mode=True)
+    run_mode = compose_run_mode("small" if args.small else "full", args.test)
+    config_path = Path(args.config).resolve()
+    full_cfg = load_config(config_path, test_mode=False, small_mode=False)
+    active_cfg = load_config(config_path, test_mode=args.test, small_mode=args.small)
 
-    worker_counts: list[int] = full_cfg["scaling"]["worker_counts"]
+    scaling_cfg = active_cfg["scaling"]
+    worker_counts: list[int]
+    if args.test:
+        worker_counts = scaling_cfg.get("test_worker_counts", [1])
+    else:
+        worker_counts = scaling_cfg["worker_counts"]
     full_sims = full_cfg["inference"]["max_simulations"]
     full_reps = full_cfg["execution"]["n_replicates"]
-    test_sims = test_cfg["inference"]["max_simulations"]
-    test_reps = test_cfg["execution"]["n_replicates"]
+    active_sims = active_cfg["inference"]["max_simulations"]
+    active_reps = active_cfg["execution"]["n_replicates"]
 
     # --- Determine base wall time for N=1 production (in seconds) ---
     base_time_s: float
     timing_source: str
 
     if args.timing_csv:
-        test_elapsed = _read_test_elapsed(Path(args.timing_csv))
-        if test_elapsed is not None:
-            ratio = (full_sims * full_reps) / (test_sims * test_reps)
-            base_time_s = test_elapsed * ratio
+        active_elapsed = _read_timing_elapsed(Path(args.timing_csv), run_mode=run_mode)
+        if active_elapsed is not None:
+            ratio = (full_sims * full_reps) / (active_sims * active_reps)
+            base_time_s = active_elapsed * ratio
             timing_source = (
-                f"timing CSV: {test_elapsed:.1f} s (test) × {ratio:.1f} "
+                f"timing CSV ({run_mode}): {active_elapsed:.1f} s × {ratio:.1f} "
                 f"= {base_time_s / 3600:.2f} h estimated for N=1"
             )
         else:
             print(
-                f"Warning: no scaling test-mode row found in {args.timing_csv}. "
+                f"Warning: no scaling row with run_mode={run_mode!r} found in {args.timing_csv}. "
                 "Falling back to --base-time."
             )
             base_time_s = (args.base_time or 4.0) * 3600
@@ -169,6 +201,7 @@ def main() -> None:
 
     print(
         f"Config:    {config_path}\n"
+        f"Mode:      {run_mode}\n"
         f"Workers:   {worker_counts}\n"
         f"Base time: {timing_source}\n"
         f"Safety:    {args.safety}×  (min={args.min_time} h, max={args.max_time} h)\n"
@@ -190,6 +223,10 @@ def main() -> None:
             f"--output={output_dir}/abc_scaling_{n}-%j.out",
             str(scaling_script),
             str(output_dir),
+            "--config",
+            str(config_path),
+            *(["--test"] if args.test else []),
+            *(["--small"] if args.small else []),
             *(["--extend"] if args.extend else []),
         ]
 

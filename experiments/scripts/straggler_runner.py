@@ -17,6 +17,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from async_abc.analysis import base_method_name
 from async_abc.benchmarks import make_benchmark
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
@@ -24,7 +25,7 @@ from async_abc.io.records import RecordWriter
 from async_abc.plotting.export import save_figure
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
-from async_abc.utils.mpi import is_root_rank
+from async_abc.utils.mpi import get_world_size, is_root_rank
 from async_abc.utils.shard_finalizers import finalize_experiment_by_name
 from async_abc.utils.sharding import (
     ShardLayout,
@@ -68,7 +69,7 @@ def _current_worker_rank() -> int:
 
 def _make_straggler_simulate(
     simulate_fn,
-    straggler_rank: int,
+    effective_worker_id: str,
     slowdown_factor: float,
     base_sleep_s: float,
     test_mode: bool = False,
@@ -77,11 +78,61 @@ def _make_straggler_simulate(
 
     def wrapped(params, seed):
         result = simulate_fn(params, seed=seed)
-        if not test_mode and _current_worker_rank() == straggler_rank:
+        if not test_mode and str(_current_worker_rank()) == str(effective_worker_id):
             time.sleep(float(slowdown_factor) * float(base_sleep_s))
         return result
 
     return wrapped
+
+
+def _resolve_effective_straggler_worker_id(
+    method_name: str,
+    straggler_slot: int,
+    *,
+    world_size: int | None = None,
+) -> str:
+    """Map a logical simulation-worker slot to the backend-specific worker id."""
+    slot = int(straggler_slot)
+    active_world_size = int(get_world_size() if world_size is None else world_size)
+    if active_world_size <= 1:
+        if slot != 0:
+            raise ValueError(
+                f"Single-process runs only support straggler_rank=0; got {slot}."
+            )
+        return "0"
+
+    base_method = base_method_name(method_name)
+    effective = slot + 1 if base_method in {"abc_smc_baseline", "pyabc_smc"} else slot
+    if effective < 0 or effective >= active_world_size:
+        raise ValueError(
+            f"Configured straggler_rank={slot} is out of range for method "
+            f"{method_name!r} with world_size={active_world_size}."
+        )
+    return str(effective)
+
+
+def _validate_straggler_worker_presence(
+    records,
+    *,
+    method_name: str,
+    replicate: int,
+    effective_worker_id: str,
+) -> None:
+    """Fail fast when the configured straggler worker never appears in attempt traces."""
+    observed_worker_ids = {
+        str(record.worker_id)
+        for record in _attempt_records(records)
+        if record.worker_id is not None
+    }
+    if not observed_worker_ids:
+        return
+    if str(effective_worker_id) not in observed_worker_ids:
+        raise RuntimeError(
+            "Configured straggler worker was never observed in the recorded attempts: "
+            f"method={method_name}, replicate={replicate}, "
+            f"effective_worker_id={effective_worker_id}, "
+            f"observed_worker_ids={sorted(observed_worker_ids)}"
+        )
 
 
 def _active_wall_time(records) -> float:
@@ -145,6 +196,7 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
         "slowdown_factor": [row["slowdown_factor"] for row in throughput_rows],
         "base_method": [row["base_method"] for row in throughput_rows],
         "replicate": [row["replicate"] for row in throughput_rows],
+        "effective_straggler_worker_id": [row.get("effective_straggler_worker_id", "") for row in throughput_rows],
         "throughput_sims_per_s": [row["throughput_sims_per_s"] for row in throughput_rows],
         "active_wall_time_s": [row["active_wall_time_s"] for row in throughput_rows],
         "elapsed_wall_time_s": [row["elapsed_wall_time_s"] for row in throughput_rows],
@@ -264,17 +316,21 @@ def main(argv: list[str] | None = None) -> None:
     experiment_start = time.time()
     try:
         for slowdown_factor in slowdown_factors:
-            bm.simulate = _make_straggler_simulate(
-                original_simulate,
-                straggler_rank=straggler_rank,
-                slowdown_factor=slowdown_factor,
-                base_sleep_s=base_sleep_s,
-                test_mode=test_mode,
-            )
             factor_records = []
             use_extend = args.extend and not is_shard_mode(args)
             done = find_completed_combinations(csv_path, ["method", "replicate"]) if use_extend else set()
             for method in cfg["methods"]:
+                effective_worker_id = _resolve_effective_straggler_worker_id(
+                    method,
+                    straggler_rank,
+                )
+                bm.simulate = _make_straggler_simulate(
+                    original_simulate,
+                    effective_worker_id=effective_worker_id,
+                    slowdown_factor=slowdown_factor,
+                    base_sleep_s=base_sleep_s,
+                    test_mode=test_mode,
+                )
                 tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
                 skip_method = False
                 for replicate in selected_replicates:
@@ -309,6 +365,12 @@ def main(argv: list[str] | None = None) -> None:
                         )
                         skip_method = True
                         break
+                    _validate_straggler_worker_presence(
+                        records,
+                        method_name=method,
+                        replicate=replicate,
+                        effective_worker_id=effective_worker_id,
+                    )
                     elapsed = time.time() - t0
                     attempt_rows = _attempt_records(records)
                     active_wall_time = _active_wall_time(attempt_rows)
@@ -327,6 +389,7 @@ def main(argv: list[str] | None = None) -> None:
                                 "replicate": replicate,
                                 "seed": seed,
                                 "n_simulations": len(attempt_rows),
+                                "effective_straggler_worker_id": effective_worker_id,
                                 "active_wall_time_s": throughput_wall_time,
                                 "elapsed_wall_time_s": elapsed,
                                 "throughput_sims_per_s": len(attempt_rows) / throughput_wall_time if throughput_wall_time > 0 else float("nan"),
@@ -423,12 +486,19 @@ def main(argv: list[str] | None = None) -> None:
 
         async_worst_records = [
             record for record in worst_records
-            if record.worker_id is not None and record.sim_start_time is not None and record.sim_end_time is not None
+            if base_method_name(record.method) == "async_propulate_abc"
+            and record.record_kind == "simulation_attempt"
+            and record.worker_id is not None
+            and record.sim_start_time is not None
+            and record.sim_end_time is not None
         ]
         sync_worst_records = [
             record for record in worst_records
-            if record.generation is not None and record.sim_start_time is not None and record.sim_end_time is not None
-            and record.worker_id is None
+            if base_method_name(record.method) in {"abc_smc_baseline", "pyabc_smc"}
+            and record.record_kind == "population_particle"
+            and record.generation is not None
+            and record.sim_start_time is not None
+            and record.sim_end_time is not None
         ]
         if async_worst_records:
             plot_worker_gantt(async_worst_records, output_dir)
@@ -449,6 +519,7 @@ def main(argv: list[str] | None = None) -> None:
         extra={
             "slowdown_factors": slowdown_factors,
             "straggler_rank": straggler_rank,
+            "straggler_rank_semantics": "active_simulation_worker_slot",
             "base_sleep_s": base_sleep_s,
         },
     )

@@ -178,6 +178,24 @@ python experiments/jobs/submit_scaling.py /path/to/results \
   --timing-csv /path/to/test_run/timing_summary_test.csv
 ```
 
+Preview the small-tier scaling sweep:
+
+```bash
+python experiments/jobs/submit_scaling.py /path/to/results \
+  --small \
+  --timing-csv /path/to/test_run/timing_summary_small.csv \
+  --dry-run
+```
+
+Preview the small test-mode scaling sweep:
+
+```bash
+python experiments/jobs/submit_scaling.py /path/to/results \
+  --small --test \
+  --timing-csv /path/to/test_run/timing_summary_small_test.csv \
+  --dry-run
+```
+
 Preview replicate-based sharded submissions:
 
 ```bash

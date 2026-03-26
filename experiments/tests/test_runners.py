@@ -460,6 +460,81 @@ class TestRuntimeHeterogeneityRunner:
 
 
 class TestStragglerRunner:
+    def test_resolves_effective_straggler_worker_id_by_backend(self):
+        module = test_helpers.import_runner_module("straggler_runner.py")
+
+        assert module._resolve_effective_straggler_worker_id(
+            "async_propulate_abc",
+            0,
+            world_size=16,
+        ) == "0"
+        assert module._resolve_effective_straggler_worker_id(
+            "abc_smc_baseline",
+            0,
+            world_size=16,
+        ) == "1"
+        assert module._resolve_effective_straggler_worker_id(
+            "pyabc_smc",
+            2,
+            world_size=16,
+        ) == "3"
+        assert module._resolve_effective_straggler_worker_id(
+            "async_propulate_abc",
+            0,
+            world_size=1,
+        ) == "0"
+
+    def test_straggler_runner_fails_when_resolved_worker_is_missing(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("straggler_runner.py")
+        cfg = {
+            "experiment_name": "straggler",
+            "benchmark": {
+                "name": "gaussian_mean",
+                "observed_data_seed": 42,
+                "n_obs": 20,
+                "true_mu": 0.0,
+                "sigma_obs": 1.0,
+                "prior_low": -5.0,
+                "prior_high": 5.0,
+            },
+            "methods": ["timed_fake"],
+            "inference": {
+                "max_simulations": 10,
+                "n_workers": 1,
+                "k": 5,
+                "tol_init": 5.0,
+                "n_generations": 2,
+                "scheduler_type": "acceptance_rate",
+                "perturbation_scale": 0.8,
+            },
+            "execution": {
+                "n_replicates": 1,
+                "base_seed": 1,
+            },
+            "straggler": {
+                "straggler_rank": 0,
+                "base_sleep_s": 0.1,
+                "slowdown_factor": [1],
+            },
+            "plots": {
+                "throughput_vs_slowdown": False,
+                "gantt": False,
+            },
+        }
+        config_path = test_helpers.write_config(tmp_path, "straggler_missing_worker.json", cfg)
+        monkeypatch.setattr(module, "_resolve_effective_straggler_worker_id", lambda *args, **kwargs: "9")
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            with pytest.raises(RuntimeError, match="never observed"):
+                module.main(
+                    [
+                        "--config",
+                        str(config_path),
+                        "--output-dir",
+                        str(tmp_path),
+                    ]
+                )
+
     def test_tags_records_with_slowdown(self, straggler_runner_artifact):
         csv_path = straggler_runner_artifact["root"] / "straggler" / "data" / "raw_results.csv"
         methods = {row["method"] for row in _rows(csv_path)}
@@ -490,6 +565,7 @@ class TestStragglerRunner:
         assert rows
         assert "active_wall_time_s" in rows[0]
         assert "elapsed_wall_time_s" in rows[0]
+        assert "effective_straggler_worker_id" in rows[0]
 
     def test_throughput_plot_metadata_is_complete(self, straggler_runner_artifact):
         meta_path = (

@@ -791,6 +791,134 @@ class TestShardSubmitter:
         assert plan["run_mode"] == "small"
 
 
+class TestScalingSubmitter:
+    def test_submit_scaling_test_uses_test_worker_counts_and_forwards_flag(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_scaling.py",
+                str(tmp_path),
+                "--test",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert "Mode:      test" in out
+        assert "Workers:   [1, 4, 48]" in out
+        assert out.count("sbatch --ntasks=") == 3
+        assert "--test" in out
+
+    def test_submit_scaling_small_uses_small_tier_worker_counts(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_scaling.py",
+                str(tmp_path),
+                "--small",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert "Mode:      small" in out
+        assert "Workers:   [1, 16, 48, 96]" in out
+        assert out.count("sbatch --ntasks=") == 4
+        assert "--small" in out
+        assert "abc_scaling_96" in out
+        assert "abc_scaling_256" not in out
+
+    def test_submit_scaling_small_test_uses_small_test_run_mode(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_scaling.py",
+                str(tmp_path),
+                "--small",
+                "--test",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert "Mode:      small_test" in out
+        assert "Workers:   [1, 4, 48]" in out
+        assert out.count("sbatch --ntasks=") == 3
+        assert "--small" in out
+        assert "--test" in out
+
+    def test_submit_scaling_forwards_custom_config_path(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
+        cfg = test_helpers.load_base_config("scaling.json")
+        cfg["scaling"]["worker_counts"] = [2]
+        cfg["scaling"]["test_worker_counts"] = [2]
+        config_path = test_helpers.write_config(tmp_path, "custom_scaling.json", cfg)
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_scaling.py",
+                str(tmp_path / "results"),
+                "--config",
+                str(config_path),
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert f"Config:    {config_path.resolve()}" in out
+        assert "Workers:   [2]" in out
+        assert f"--config {config_path.resolve()}" in out
+        assert out.count("sbatch --ntasks=") == 1
+
+    def test_submit_scaling_warns_and_falls_back_when_timing_run_mode_mismatches(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
+        timing_csv = tmp_path / "timing_summary_test.csv"
+        with open(timing_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["experiment_name", "elapsed_s", "run_mode"])
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "experiment_name": "scaling",
+                    "elapsed_s": "12.0",
+                    "run_mode": "test",
+                }
+            )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_scaling.py",
+                str(tmp_path / "results"),
+                "--timing-csv",
+                str(timing_csv),
+                "--base-time",
+                "1.5",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert "Warning: no scaling row with run_mode='full' found" in out
+        assert "Base time: --base-time fallback: 1.5 h" in out
+
+
 class TestShardSmokeScript:
     def test_local_sharded_smoke_script(self, tmp_path):
         script = Path(__file__).resolve().parents[1] / "jobs" / "test_sharded.sh"
@@ -808,6 +936,16 @@ class TestShardSmokeScript:
 
     def test_slurm_sharded_smoke_script_has_valid_bash_syntax(self):
         script = Path(__file__).resolve().parents[1] / "jobs" / "test_sharded_slurm.sh"
+        result = subprocess.run(
+            ["bash", "-n", str(script)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_scaling_single_wrapper_has_valid_bash_syntax(self):
+        script = Path(__file__).resolve().parents[1] / "jobs" / "scaling_single.sh"
         result = subprocess.run(
             ["bash", "-n", str(script)],
             capture_output=True,
