@@ -459,7 +459,7 @@ def make_arg_parser(description: str = "") -> argparse.ArgumentParser:
     p.add_argument("--test", action="store_true",
                    help="Test mode: small budget, local max 8 workers, SLURM max 48.")
     p.add_argument("--small", action="store_true",
-                   help="Small mode: reduced ~10% compute config tier, stackable with --test.")
+                   help="Small mode: reduced ~10%% compute config tier, stackable with --test.")
     p.add_argument("--extend", action="store_true",
                    help="Skip parameter combinations already present in existing CSVs.")
     p.add_argument("--shard-index", type=int, default=None,
