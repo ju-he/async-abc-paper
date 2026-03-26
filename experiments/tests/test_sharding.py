@@ -646,6 +646,19 @@ class TestShardSubmitter:
             writer.writeheader()
             writer.writerow(
                 {
+                    "experiment_name": "runtime_heterogeneity",
+                    "elapsed_s": "1.0",
+                    "estimated_full_s": "1.0",
+                    "estimated_full_unsharded_s": "1.0",
+                    "estimated_full_sharded_wall_s": "72055.0",
+                    "aggregate_compute_s": "1.0",
+                    "test_mode": "True",
+                    "run_mode": "test",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+            writer.writerow(
+                {
                     "experiment_name": "gaussian_mean",
                     "elapsed_s": "1.0",
                     "estimated_full_s": "1.0",

@@ -61,6 +61,8 @@ def _read_sharded_estimate(
         with open(timing_csv, newline="") as f:
             rows = list(csv.DictReader(f))
         for row in reversed(rows):
+            if row.get("experiment_name") != experiment_name:
+                continue
             row_run_mode = row.get("run_mode", "")
             if run_mode is None:
                 if row.get("test_mode", "").lower() not in ("true", "1"):
