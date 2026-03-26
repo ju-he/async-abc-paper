@@ -50,12 +50,11 @@ def _resolve_experiments(requested: list[str]) -> list[str]:
 
 
 def _read_sharded_estimate(
-    output_dir: Path,
+    timing_csv: Path,
     experiment_name: str,
     run_mode: str | None = None,
 ) -> float | None:
     """Return the most recent estimated_full_sharded_wall_s for the requested run mode."""
-    timing_csv = output_dir / experiment_name / "data" / "timing.csv"
     if not timing_csv.exists() or timing_csv.stat().st_size == 0:
         return None
     try:
@@ -193,6 +192,15 @@ def main() -> None:
         help="Treat config execution.n_replicates as an additional replicate count and submit only missing replicates.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Write scripts and print sbatch commands without submitting.")
+    parser.add_argument(
+        "--timing-csv",
+        dest="timing_csv",
+        metavar="PATH",
+        help=(
+            "Optional timing CSV to use for wall-time estimates instead of "
+            "<output_dir>/<experiment>/data/timing.csv."
+        ),
+    )
     parser.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"SLURM account (default: {DEFAULT_ACCOUNT}).")
     parser.add_argument("--partition", default=DEFAULT_PARTITION, help=f"SLURM partition (default: {DEFAULT_PARTITION}).")
     parser.add_argument("--time", dest="time_limit", default=DEFAULT_TIME, help=f"SLURM wall time (default: {DEFAULT_TIME}).")
@@ -304,7 +312,13 @@ def main() -> None:
         _TIMING_MARGIN = 1.5
         _MIN_WALL_S = 30 * 60  # 30 minutes floor
         _MAX_WALL_S = _parse_slurm_time(args.max_time_limit)
-        estimated_s = _read_sharded_estimate(output_dir, experiment_name, run_mode if (args.test or args.small) else None)
+        timing_csv = (
+            Path(args.timing_csv)
+            if args.timing_csv
+            else output_dir / experiment_name / "data" / "timing.csv"
+        )
+        estimate_run_mode = run_mode if (args.test or args.small) else None
+        estimated_s = _read_sharded_estimate(timing_csv, experiment_name, estimate_run_mode)
         if estimated_s is not None:
             unclamped_s = max(_MIN_WALL_S, estimated_s * _TIMING_MARGIN)
             clamped_s = min(_MAX_WALL_S, unclamped_s)
@@ -317,6 +331,11 @@ def main() -> None:
             else:
                 print(f"{experiment_name}: using estimated wall time {time_limit} (estimate={estimated_s:.0f}s × {_TIMING_MARGIN})")
         else:
+            if args.timing_csv:
+                print(
+                    f"{experiment_name}: no matching wall-time estimate found in {timing_csv}; "
+                    f"falling back to --time={args.time_limit}"
+                )
             time_limit = args.time_limit
 
         for shard_index in range(actual_num_shards):

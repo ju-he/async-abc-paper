@@ -202,6 +202,7 @@ Preview replicate-based sharded submissions:
 python experiments/jobs/submit_replicate_shards.py /path/to/results \
   --experiments gaussian_mean gandk sbc \
   --jobs-per-experiment 4 \
+  --timing-csv /path/to/test_run/timing_summary_test.csv \
   --dry-run
 ```
 

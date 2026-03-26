@@ -619,6 +619,133 @@ class TestShardSubmitter:
         script_text = scripts[0].read_text()
         assert "#SBATCH --time=24:00:00" in script_text
 
+    def test_submit_replicate_shards_uses_explicit_timing_csv(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+
+        timing_csv = tmp_path / "timing_summary_test.csv"
+        with open(timing_csv, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "experiment_name",
+                    "elapsed_s",
+                    "estimated_full_s",
+                    "estimated_full_unsharded_s",
+                    "estimated_full_sharded_wall_s",
+                    "aggregate_compute_s",
+                    "test_mode",
+                    "run_mode",
+                    "timestamp",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "experiment_name": "gaussian_mean",
+                    "elapsed_s": "1.0",
+                    "estimated_full_s": "1.0",
+                    "estimated_full_unsharded_s": "1.0",
+                    "estimated_full_sharded_wall_s": "3600.0",
+                    "aggregate_compute_s": "1.0",
+                    "test_mode": "True",
+                    "run_mode": "test",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--jobs-per-experiment",
+                "4",
+                "--test",
+                "--timing-csv",
+                str(timing_csv),
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*/*.sbatch"))
+        assert len(scripts) == 1
+        script_text = scripts[0].read_text()
+        assert "#SBATCH --time=01:30:00" in script_text
+
+    def test_submit_replicate_shards_warns_when_explicit_timing_csv_has_no_matching_row(self, tmp_path, monkeypatch, capsys):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json")},
+        )
+
+        timing_csv = tmp_path / "timing_summary_small.csv"
+        with open(timing_csv, "w", newline="") as f:
+            writer = csv.DictWriter(
+                f,
+                fieldnames=[
+                    "experiment_name",
+                    "elapsed_s",
+                    "estimated_full_s",
+                    "estimated_full_unsharded_s",
+                    "estimated_full_sharded_wall_s",
+                    "aggregate_compute_s",
+                    "test_mode",
+                    "run_mode",
+                    "timestamp",
+                ],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "experiment_name": "gaussian_mean",
+                    "elapsed_s": "1.0",
+                    "estimated_full_s": "1.0",
+                    "estimated_full_unsharded_s": "1.0",
+                    "estimated_full_sharded_wall_s": "1800.0",
+                    "aggregate_compute_s": "1.0",
+                    "test_mode": "False",
+                    "run_mode": "small",
+                    "timestamp": "2026-01-01T00:00:00",
+                }
+            )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "gaussian_mean",
+                "--test",
+                "--timing-csv",
+                str(timing_csv),
+                "--time",
+                "05:00:00",
+                "--dry-run",
+            ],
+        )
+        submitter.main()
+
+        out = capsys.readouterr().out
+        assert f"gaussian_mean: no matching wall-time estimate found in {timing_csv}" in out
+
+        scripts = list((tmp_path / "_jobs" / "gaussian_mean").glob("*/*.sbatch"))
+        assert len(scripts) == 1
+        script_text = scripts[0].read_text()
+        assert "#SBATCH --time=05:00:00" in script_text
+
     def test_submit_replicate_shards_surfaces_sbatch_stderr(self, tmp_path, monkeypatch):
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
         monkeypatch.setattr(
