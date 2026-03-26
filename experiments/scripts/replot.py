@@ -31,6 +31,7 @@ from async_abc.plotting.reporters import (
     plot_benchmark_diagnostics,
     plot_idle_fraction,
     plot_idle_fraction_comparison,
+    plot_scaling_grid,
     plot_sensitivity_summary,
     plot_throughput_over_time,
     plot_worker_gantt,
@@ -137,6 +138,23 @@ def _replot_ablation(name: str, output_dir: OutputDir, cfg: dict) -> None:
         plot_ablation_summary(output_dir.data, cfg.get("ablation_variants", []), output_dir)
 
 
+def _replot_scaling(name: str, output_dir: OutputDir, cfg: dict) -> None:
+    """Scaling: regenerate all scaling plots from aggregate throughput/budget CSVs."""
+    def _load(path: Path) -> list:
+        if not path.exists():
+            return []
+        with open(path, newline="") as f:
+            return list(csv.DictReader(f))
+
+    throughput_rows = _load(output_dir.data / "throughput_summary.csv")
+    budget_rows = _load(output_dir.data / "budget_summary.csv")
+    if not throughput_rows:
+        logger.warning("[%s] No throughput_summary.csv in %s — skipping", name, output_dir.data)
+        return
+    logger.info("[%s] Loaded %d throughput rows, %d budget rows", name, len(throughput_rows), len(budget_rows))
+    plot_scaling_grid(throughput_rows=throughput_rows, budget_rows=budget_rows, output_dir=output_dir)
+
+
 def _replot_sbc(name: str, output_dir: OutputDir, cfg: dict) -> None:
     """SBC: regenerate rank histogram and coverage table from saved CSVs."""
     from async_abc.utils.shard_finalizers import _plot_coverage_table, _plot_rank_histogram
@@ -160,6 +178,7 @@ _REPLOT_DISPATCH = {
     "sensitivity": _replot_sensitivity,
     "ablation": _replot_ablation,
     "sbc": _replot_sbc,
+    "scaling": _replot_scaling,
 }
 
 ALL_EXPERIMENTS = list(_REPLOT_DISPATCH.keys())

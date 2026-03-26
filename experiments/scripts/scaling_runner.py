@@ -66,6 +66,7 @@ _THROUGHPUT_FIELDNAMES = [
     "final_n_particles",
     "final_tolerance",
     "state_kind",
+    "worker_utilization",
     "test_mode",
 ]
 
@@ -122,6 +123,11 @@ def _simulation_count(records: Iterable[ParticleRecord]) -> int:
     ]
     if attempt_counts:
         return max(attempt_counts)
+    logger.warning(
+        "_simulation_count: no simulation_attempt records or attempt_count field found; "
+        "using len(records)=%d which may undercount throughput for async methods",
+        len(records),
+    )
     return len(records)
 
 
@@ -409,6 +415,19 @@ def _final_summary_row(
         if final_n_particles == 0:
             final_n_particles = int(quality_df.iloc[-1]["posterior_samples"])
 
+    sim_intervals = [
+        (float(r.sim_start_time), float(r.sim_end_time))
+        for r in records
+        if r.sim_start_time is not None
+        and r.sim_end_time is not None
+        and float(r.sim_end_time) > float(r.sim_start_time)
+    ]
+    if sim_intervals and elapsed > 0 and n_workers > 0:
+        active_time = sum(end - start for start, end in sim_intervals)
+        worker_utilization = active_time / (elapsed * n_workers)
+    else:
+        worker_utilization = float("nan")
+
     return {
         "base_method": base_method,
         "method_variant": method_variant,
@@ -426,6 +445,7 @@ def _final_summary_row(
         "final_n_particles": int(final_n_particles),
         "final_tolerance": float(final_tolerance) if math.isfinite(float(final_tolerance)) else "",
         "state_kind": str(state_kind),
+        "worker_utilization": float(worker_utilization),
         "test_mode": bool(test_mode),
     }
 

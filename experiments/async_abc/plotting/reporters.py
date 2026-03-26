@@ -1667,23 +1667,38 @@ def _plot_workers_lines(
     title: str,
     stem: Path,
     metadata: Dict[str, Any],
+    yerr_col: Optional[str] = None,
+    log_x: bool = False,
+    hline: Optional[float] = None,
+    ideal_y_col: Optional[str] = None,
 ) -> None:
     if frame.empty:
         return
     import matplotlib
+    import matplotlib.ticker
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    ideal_drawn = False
     for series_value, group in frame.groupby(series_col, sort=True):
         group = group.sort_values(x_col)
-        ax.plot(
-            group[x_col].to_numpy(dtype=float),
-            group[y_col].to_numpy(dtype=float),
-            marker="o",
-            linewidth=1.8,
-            label=str(series_value),
+        x_vals = group[x_col].to_numpy(dtype=float)
+        y_vals = group[y_col].to_numpy(dtype=float)
+        (line,) = ax.plot(x_vals, y_vals, marker="o", linewidth=1.8, label=str(series_value))
+        if yerr_col is not None and yerr_col in group.columns:
+            y_err = group[yerr_col].to_numpy(dtype=float)
+            ax.fill_between(x_vals, y_vals - y_err, y_vals + y_err, alpha=0.15, color=line.get_color())
+        if ideal_y_col is not None and not ideal_drawn and ideal_y_col in group.columns:
+            ax.plot(x_vals, group[ideal_y_col].to_numpy(dtype=float), "--", color="grey", linewidth=1.2, label="ideal", zorder=0)
+            ideal_drawn = True
+    if hline is not None:
+        ax.axhline(hline, color="grey", linestyle="--", linewidth=1.0, zorder=0)
+    if log_x:
+        ax.set_xscale("log", base=2)
+        ax.xaxis.set_major_formatter(
+            matplotlib.ticker.FuncFormatter(lambda x, _: str(int(x)) if x == int(x) else str(x))
         )
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
@@ -1711,21 +1726,27 @@ def _plot_heatmap(
     pivot = frame.pivot(index="k", columns="n_workers", values=value_col).sort_index().sort_index(axis=1)
     if pivot.empty:
         return
+    n_rows = len(pivot.index)
+    n_cols = len(pivot.columns)
+    # Use integer indices so each cell has equal visual size regardless of the
+    # log-spaced k / n_workers values; true labels are set via tick formatters.
+    col_edges = np.arange(n_cols + 1) - 0.5
+    row_edges = np.arange(n_rows + 1) - 0.5
     fig, ax = plt.subplots(figsize=(6.5, 4.4))
-    image = ax.imshow(pivot.to_numpy(dtype=float), aspect="auto", origin="lower")
-    ax.set_xticks(range(len(pivot.columns)))
+    mesh = ax.pcolormesh(col_edges, row_edges, pivot.to_numpy(dtype=float), shading="flat")
+    ax.set_xticks(range(n_cols))
     ax.set_xticklabels([str(int(value)) for value in pivot.columns])
-    ax.set_yticks(range(len(pivot.index)))
+    ax.set_yticks(range(n_rows))
     ax.set_yticklabels([str(int(value)) for value in pivot.index])
     ax.set_xlabel("n_workers")
     ax.set_ylabel("k")
     ax.set_title(title)
-    fig.colorbar(image, ax=ax, shrink=0.9, label=value_col.replace("_", " "))
+    fig.colorbar(mesh, ax=ax, shrink=0.9, label=value_col.replace("_", " "))
     fig.tight_layout()
     _save_scaling_dataframe(fig, stem, frame, metadata)
 
 
-def _plot_pareto(frame: pd.DataFrame, *, stem: Path, metadata: Dict[str, Any], title: str) -> None:
+def _plot_quality_vs_attempts_scatter(frame: pd.DataFrame, *, stem: Path, metadata: Dict[str, Any], title: str) -> None:
     if frame.empty:
         return
     import matplotlib
@@ -1777,30 +1798,58 @@ def plot_scaling_grid(
         np.nan,
     )
 
-    throughput_mean = (
-        throughput_df.groupby(["base_method", "k", "n_workers"], as_index=False)["throughput_sims_per_s"]
-        .mean()
+    _throughput_grp = throughput_df.groupby(["base_method", "k", "n_workers"])
+    throughput_mean = _throughput_grp[["throughput_sims_per_s"]].mean().reset_index()
+    throughput_mean = throughput_mean.merge(
+        _throughput_grp[["throughput_sims_per_s"]].std().reset_index().rename(
+            columns={"throughput_sims_per_s": "throughput_sims_per_s_std"}
+        ),
+        on=["base_method", "k", "n_workers"],
+        how="left",
     )
+    if "worker_utilization" in throughput_df.columns:
+        throughput_mean = throughput_mean.merge(
+            _throughput_grp[["worker_utilization"]].mean().reset_index(),
+            on=["base_method", "k", "n_workers"],
+            how="left",
+        ).merge(
+            _throughput_grp[["worker_utilization"]].std().reset_index().rename(
+                columns={"worker_utilization": "worker_utilization_std"}
+            ),
+            on=["base_method", "k", "n_workers"],
+            how="left",
+        )
     throughput_mean["efficiency"] = np.nan
+    throughput_mean["efficiency_std"] = np.nan
+    throughput_mean["ideal_throughput"] = np.nan
     for (method, k), group in throughput_mean.groupby(["base_method", "k"], sort=False):
         baseline = group.loc[group["n_workers"] == 1, "throughput_sims_per_s"]
         if baseline.empty or float(baseline.iloc[0]) <= 0:
             continue
+        t1 = float(baseline.iloc[0])
         throughput_mean.loc[group.index, "efficiency"] = (
-            group["throughput_sims_per_s"] / (float(baseline.iloc[0]) * group["n_workers"])
+            group["throughput_sims_per_s"] / (t1 * group["n_workers"])
         )
+        throughput_mean.loc[group.index, "efficiency_std"] = (
+            group["throughput_sims_per_s_std"] / (t1 * group["n_workers"])
+        )
+        throughput_mean.loc[group.index, "ideal_throughput"] = t1 * group["n_workers"]
 
-    budget_mean = (
-        budget_df.groupby(["base_method", "k", "n_workers", "budget_s"], as_index=False)[
-            [
-                "attempts_by_budget",
-                "posterior_samples_by_budget",
-                "quality_wasserstein_by_budget",
-                "best_tolerance_by_budget",
-                "throughput_by_budget",
-            ]
-        ]
-        .mean()
+    _budget_stats_cols = [
+        "attempts_by_budget",
+        "posterior_samples_by_budget",
+        "quality_wasserstein_by_budget",
+        "best_tolerance_by_budget",
+        "throughput_by_budget",
+    ]
+    _budget_grp = budget_df.groupby(["base_method", "k", "n_workers", "budget_s"])
+    budget_mean = _budget_grp[_budget_stats_cols].mean().reset_index()
+    budget_mean = budget_mean.merge(
+        _budget_grp[_budget_stats_cols].std().reset_index().rename(
+            columns={col: f"{col}_std" for col in _budget_stats_cols}
+        ),
+        on=["base_method", "k", "n_workers", "budget_s"],
+        how="left",
     )
 
     for method in methods:
@@ -1812,7 +1861,7 @@ def plot_scaling_grid(
                 x_col="n_workers",
                 y_col="throughput_sims_per_s",
                 series_col="k",
-                xlabel="n_workers",
+                xlabel="workers",
                 ylabel="throughput (sim/s)",
                 title=f"Throughput vs workers: {method}",
                 stem=output_dir.plots / f"throughput_vs_workers__{safe_method}",
@@ -1824,13 +1873,16 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"group_by": "k"},
                 ),
+                yerr_col="throughput_sims_per_s_std",
+                ideal_y_col="ideal_throughput",
+                log_x=True,
             )
             _plot_workers_lines(
                 method_throughput.dropna(subset=["efficiency"]),
                 x_col="n_workers",
                 y_col="efficiency",
                 series_col="k",
-                xlabel="n_workers",
+                xlabel="workers",
                 ylabel="parallel efficiency",
                 title=f"Efficiency vs workers: {method}",
                 stem=output_dir.plots / f"efficiency_vs_workers__{safe_method}",
@@ -1842,7 +1894,32 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"group_by": "k"},
                 ),
+                yerr_col="efficiency_std",
+                hline=1.0,
+                log_x=True,
             )
+            if "worker_utilization" in method_throughput.columns and method_throughput["worker_utilization"].notna().any():
+                _plot_workers_lines(
+                    method_throughput,
+                    x_col="n_workers",
+                    y_col="worker_utilization",
+                    series_col="k",
+                    xlabel="workers",
+                    ylabel="worker utilization",
+                    title=f"Worker utilization vs workers: {method}",
+                    stem=output_dir.plots / f"worker_utilization_vs_workers__{safe_method}",
+                    metadata=_nonbenchmark_plot_metadata(
+                        output_dir,
+                        plot_name=f"worker_utilization_vs_workers__{safe_method}",
+                        title=f"Worker utilization vs workers: {method}",
+                        methods=[method],
+                        summary_plot=True,
+                        extra={"group_by": "k"},
+                    ),
+                    yerr_col="worker_utilization_std",
+                    hline=1.0,
+                    log_x=True,
+                )
 
         method_budget = budget_mean.loc[budget_mean["base_method"] == method].copy()
         for budget_s in sorted(method_budget["budget_s"].dropna().unique().tolist()):
@@ -1855,7 +1932,7 @@ def plot_scaling_grid(
                 x_col="n_workers",
                 y_col="quality_wasserstein_by_budget",
                 series_col="k",
-                xlabel="n_workers",
+                xlabel="workers",
                 ylabel="quality (Wasserstein)",
                 title=f"Quality at T={budget_s:g}s: {method}",
                 stem=output_dir.plots / f"quality_at_budget__{safe_method}__T{budget_label}",
@@ -1867,13 +1944,15 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"budget_s": float(budget_s), "group_by": "k"},
                 ),
+                yerr_col="quality_wasserstein_by_budget_std",
+                log_x=True,
             )
             _plot_workers_lines(
                 budget_subset,
                 x_col="n_workers",
                 y_col="attempts_by_budget",
                 series_col="k",
-                xlabel="n_workers",
+                xlabel="workers",
                 ylabel="attempts by budget",
                 title=f"Attempts at T={budget_s:g}s: {method}",
                 stem=output_dir.plots / f"attempts_at_budget__{safe_method}__T{budget_label}",
@@ -1885,6 +1964,8 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"budget_s": float(budget_s), "group_by": "k"},
                 ),
+                yerr_col="attempts_by_budget_std",
+                log_x=True,
             )
             _plot_heatmap(
                 budget_subset,
@@ -1936,6 +2017,7 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"n_workers": int(n_workers), "group_by": "k"},
                 ),
+                yerr_col="quality_wasserstein_by_budget_std",
             )
             _plot_workers_lines(
                 worker_subset,
@@ -1954,6 +2036,35 @@ def plot_scaling_grid(
                     summary_plot=True,
                     extra={"n_workers": int(n_workers), "group_by": "k"},
                 ),
+                yerr_col="attempts_by_budget_std",
+            )
+
+        # Key plot: quality vs wall-clock budget, one curve per worker count at fixed k.
+        # Reading horizontally: time needed to reach quality Q with N workers.
+        # Reading vertically: quality achieved given budget T with N workers.
+        for k_val in sorted(method_budget["k"].dropna().unique().tolist()):
+            k_subset = method_budget.loc[method_budget["k"] == k_val].copy()
+            if k_subset.empty:
+                continue
+            k_label = _scaling_token(int(k_val))
+            _plot_workers_lines(
+                k_subset,
+                x_col="budget_s",
+                y_col="quality_wasserstein_by_budget",
+                series_col="n_workers",
+                xlabel="wall-clock budget (s)",
+                ylabel="quality (Wasserstein)",
+                title=f"Quality vs budget: {method}, k={int(k_val)}",
+                stem=output_dir.plots / f"quality_vs_budget_by_workers__{safe_method}__k{k_label}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"quality_vs_budget_by_workers__{safe_method}__k{k_label}",
+                    title=f"Quality vs budget: {method}, k={int(k_val)}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"k": int(k_val), "group_by": "n_workers"},
+                ),
+                yerr_col="quality_wasserstein_by_budget_std",
             )
 
     throughput_all = throughput_mean.copy()
@@ -1966,7 +2077,7 @@ def plot_scaling_grid(
         x_col="n_workers",
         y_col="throughput_sims_per_s",
         series_col="series",
-        xlabel="n_workers",
+        xlabel="workers",
         ylabel="throughput (sim/s)",
         title="Throughput vs workers: all methods, all k",
         stem=output_dir.plots / "throughput_vs_workers__all_methods_all_k",
@@ -1978,6 +2089,7 @@ def plot_scaling_grid(
             summary_plot=True,
             extra={"group_by": "method,k"},
         ),
+        log_x=True,
     )
 
     for budget_s in sorted(budget_mean["budget_s"].dropna().unique().tolist()):
@@ -1994,7 +2106,7 @@ def plot_scaling_grid(
             x_col="n_workers",
             y_col="quality_wasserstein_by_budget",
             series_col="series",
-            xlabel="n_workers",
+            xlabel="workers",
             ylabel="quality (Wasserstein)",
             title=f"Quality at T={budget_s:g}s: all methods, all k",
             stem=output_dir.plots / f"quality_at_budget__all_methods_all_k__T{budget_label}",
@@ -2006,13 +2118,14 @@ def plot_scaling_grid(
                 summary_plot=True,
                 extra={"budget_s": float(budget_s), "group_by": "method,k"},
             ),
+            log_x=True,
         )
         _plot_workers_lines(
             budget_subset,
             x_col="n_workers",
             y_col="attempts_by_budget",
             series_col="series",
-            xlabel="n_workers",
+            xlabel="workers",
             ylabel="attempts by budget",
             title=f"Attempts at T={budget_s:g}s: all methods, all k",
             stem=output_dir.plots / f"attempts_at_budget__all_methods_all_k__T{budget_label}",
@@ -2024,19 +2137,20 @@ def plot_scaling_grid(
                 summary_plot=True,
                 extra={"budget_s": float(budget_s), "group_by": "method,k"},
             ),
+            log_x=True,
         )
-        _plot_pareto(
+        _plot_quality_vs_attempts_scatter(
             budget_subset,
-            stem=output_dir.plots / f"pareto_quality_vs_attempts__T{budget_label}",
+            stem=output_dir.plots / f"quality_vs_attempts_scatter__T{budget_label}",
             metadata=_nonbenchmark_plot_metadata(
                 output_dir,
-                plot_name=f"pareto_quality_vs_attempts__T{budget_label}",
-                title=f"Pareto quality vs attempts at T={budget_s:g}s",
+                plot_name=f"quality_vs_attempts_scatter__T{budget_label}",
+                title=f"Quality vs attempts scatter at T={budget_s:g}s",
                 methods=methods,
                 summary_plot=True,
                 extra={"budget_s": float(budget_s)},
             ),
-            title=f"Pareto quality vs attempts at T={budget_s:g}s",
+            title=f"Quality vs attempts scatter at T={budget_s:g}s",
         )
 
 

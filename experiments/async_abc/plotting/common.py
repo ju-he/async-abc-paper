@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 
 import matplotlib
+import matplotlib.ticker
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
@@ -125,9 +126,13 @@ def scaling_plot(
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
 
+    _int_fmt = matplotlib.ticker.FuncFormatter(lambda x, _: str(int(x)) if x == int(x) else str(x))
+
     ax_t = axes[0]
     ax_t.plot(ns, ts, "o-", color="steelblue")
     ax_t.plot(ns, [t1 * n for n in ns], "--", color="grey", label="ideal")
+    ax_t.set_xscale("log", base=2)
+    ax_t.xaxis.set_major_formatter(_int_fmt)
     ax_t.set_xlabel("workers")
     ax_t.set_ylabel("throughput (sim/s)")
     ax_t.set_title("Throughput")
@@ -137,6 +142,8 @@ def scaling_plot(
     ax_e.plot(ns, efficiencies, "s-", color="darkorange")
     ax_e.axhline(1.0, color="grey", linestyle="--")
     ax_e.set_ylim(0, 1.1)
+    ax_e.set_xscale("log", base=2)
+    ax_e.xaxis.set_major_formatter(_int_fmt)
     ax_e.set_xlabel("workers")
     ax_e.set_ylabel("efficiency")
     ax_e.set_title("Parallel efficiency")
