@@ -1011,7 +1011,11 @@ class TestScalingSubmitter:
         out = capsys.readouterr().out
         assert "Mode:      test" in out
         assert "Workers:   [1, 4, 48]" in out
-        assert out.count("sbatch --ntasks=") == 3
+        assert "Bundles:   [[1, 4]]" in out
+        assert "Standalone:[48]" in out
+        assert out.count("sbatch --ntasks=") == 2
+        assert "scaling_packed.sh" in out
+        assert "--workers 1,4" in out
         assert "--test" in out
 
     def test_submit_scaling_small_uses_small_tier_worker_counts(self, tmp_path, monkeypatch, capsys):
@@ -1032,7 +1036,9 @@ class TestScalingSubmitter:
         out = capsys.readouterr().out
         assert "Mode:      small" in out
         assert "Workers:   [1, 16, 48, 96]" in out
-        assert out.count("sbatch --ntasks=") == 4
+        assert "Bundles:   [[1, 16]]" in out
+        assert "Standalone:[48, 96]" in out
+        assert out.count("sbatch --ntasks=") == 3
         assert "--small" in out
         assert "abc_scaling_96" in out
         assert "abc_scaling_256" not in out
@@ -1056,7 +1062,8 @@ class TestScalingSubmitter:
         out = capsys.readouterr().out
         assert "Mode:      small_test" in out
         assert "Workers:   [1, 4, 48]" in out
-        assert out.count("sbatch --ntasks=") == 3
+        assert "Bundles:   [[1, 4]]" in out
+        assert out.count("sbatch --ntasks=") == 2
         assert "--small" in out
         assert "--test" in out
 
@@ -1083,7 +1090,9 @@ class TestScalingSubmitter:
         out = capsys.readouterr().out
         assert f"Config:    {config_path.resolve()}" in out
         assert "Workers:   [2]" in out
+        assert "Bundles:   [[2]]" in out
         assert f"--config {config_path.resolve()}" in out
+        assert "--workers 2" in out
         assert out.count("sbatch --ntasks=") == 1
 
     def test_submit_scaling_warns_and_falls_back_when_timing_run_mode_mismatches(self, tmp_path, monkeypatch, capsys):

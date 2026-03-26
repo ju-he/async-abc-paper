@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Submit one sbatch scaling job per worker count defined in scaling.json.
+"""Submit scaling jobs defined in scaling.json.
 
 Worker counts are read directly from scaling.json so the script stays in sync
 with any config changes.
+
+Worker counts smaller than ``CORES_PER_NODE`` are packed into shared single-node
+jobs so low-rank runs do not waste full-node allocations on systems without
+partial-node scheduling. Each packed job launches one ``srun --exclusive`` per
+worker count and lets them run concurrently on the same node.
 
 Wall-time limits are derived from a previous matching-mode timing output:
 
@@ -74,6 +79,40 @@ def _read_timing_elapsed(
                 continue
             latest_elapsed = float(elapsed_s)
     return latest_elapsed
+
+
+def _job_time_hours(
+    n_workers: int,
+    *,
+    base_time_s: float,
+    safety: float,
+    min_time: float,
+    max_time: float,
+) -> float:
+    time_hours = base_time_s / int(n_workers) * float(safety) / 3600
+    return max(float(min_time), min(float(max_time), time_hours))
+
+
+def _pack_small_worker_counts(worker_counts: list[int], *, capacity: int) -> tuple[list[list[int]], list[int]]:
+    """Pack worker counts smaller than *capacity* into shared-node bundles."""
+    small = sorted([int(value) for value in worker_counts if int(value) < int(capacity)], reverse=True)
+    large = sorted([int(value) for value in worker_counts if int(value) >= int(capacity)])
+    bundles: list[list[int]] = []
+    remaining: list[int] = []
+
+    for n_workers in small:
+        placed = False
+        for idx, free in enumerate(remaining):
+            if n_workers <= free:
+                bundles[idx].append(n_workers)
+                remaining[idx] -= n_workers
+                placed = True
+                break
+        if not placed:
+            bundles.append([n_workers])
+            remaining.append(int(capacity) - n_workers)
+
+    return [sorted(bundle) for bundle in bundles], large
 
 
 def main() -> None:
@@ -198,22 +237,73 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     scaling_script = SCRIPT_DIR / "scaling_single.sh"
+    packed_script = SCRIPT_DIR / "scaling_packed.sh"
+    packed_bundles, standalone_counts = _pack_small_worker_counts(
+        worker_counts,
+        capacity=CORES_PER_NODE,
+    )
 
     print(
         f"Config:    {config_path}\n"
         f"Mode:      {run_mode}\n"
         f"Workers:   {worker_counts}\n"
+        f"Bundles:   {packed_bundles}\n"
+        f"Standalone:{standalone_counts}\n"
         f"Base time: {timing_source}\n"
         f"Safety:    {args.safety}×  (min={args.min_time} h, max={args.max_time} h)\n"
         f"Output:    {output_dir}\n"
     )
 
-    for n in worker_counts:
-        nodes = math.ceil(n / CORES_PER_NODE)
-        time_hours = base_time_s / n * args.safety / 3600
-        time_hours = max(args.min_time, min(args.max_time, time_hours))
+    for bundle in packed_bundles:
+        time_hours = max(
+            _job_time_hours(
+                n_workers=n,
+                base_time_s=base_time_s,
+                safety=args.safety,
+                min_time=args.min_time,
+                max_time=args.max_time,
+            )
+            for n in bundle
+        )
         time_str = _format_time(time_hours)
+        bundle_label = "_".join(str(n) for n in bundle)
+        workers_csv = ",".join(str(n) for n in bundle)
 
+        cmd = [
+            "sbatch",
+            f"--ntasks={CORES_PER_NODE}",
+            "--nodes=1",
+            f"--time={time_str}",
+            f"--job-name=abc_scaling_bundle_{bundle_label}",
+            f"--output={output_dir}/abc_scaling_bundle_{bundle_label}-%j.out",
+            str(packed_script),
+            str(output_dir),
+            "--workers",
+            workers_csv,
+            "--config",
+            str(config_path),
+            *(["--test"] if args.test else []),
+            *(["--small"] if args.small else []),
+            *(["--extend"] if args.extend else []),
+        ]
+
+        tag = "(dry run)" if args.dry_run else ""
+        print(f"  bundle={bundle!r}  ntasks={CORES_PER_NODE}  nodes=1  time={time_str}  {tag}")
+        if args.dry_run:
+            print(f"    {' '.join(cmd)}")
+        else:
+            subprocess.run(cmd, check=True)
+
+    for n in standalone_counts:
+        nodes = math.ceil(n / CORES_PER_NODE)
+        time_hours = _job_time_hours(
+            n_workers=n,
+            base_time_s=base_time_s,
+            safety=args.safety,
+            min_time=args.min_time,
+            max_time=args.max_time,
+        )
+        time_str = _format_time(time_hours)
         cmd = [
             "sbatch",
             f"--ntasks={n}",
@@ -238,7 +328,7 @@ def main() -> None:
             subprocess.run(cmd, check=True)
 
     if not args.dry_run:
-        print(f"\nAll {len(worker_counts)} scaling jobs submitted.")
+        print(f"\nAll {len(packed_bundles) + len(standalone_counts)} scaling jobs submitted.")
         print("Monitor with:  squeue -u $USER")
 
 
