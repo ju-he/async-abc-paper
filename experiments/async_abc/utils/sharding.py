@@ -446,9 +446,30 @@ def shard_timing_summary(statuses: List[Dict[str, Any]]) -> Dict[str, Optional[f
 
 def publish_directory_atomically(source_dir: Path, target_dir: Path) -> None:
     """Publish a prepared directory by replacing the target path."""
-    if target_dir.exists():
-        shutil.rmtree(target_dir)
-    os.replace(source_dir, target_dir)
+    if not target_dir.exists():
+        os.replace(source_dir, target_dir)
+        return
+
+    backup_dir = target_dir.with_name(
+        f".{target_dir.name}.backup.{os.getpid()}.{time.time_ns()}"
+    )
+    while backup_dir.exists():
+        backup_dir = target_dir.with_name(
+            f".{target_dir.name}.backup.{os.getpid()}.{time.time_ns()}"
+        )
+
+    os.replace(target_dir, backup_dir)
+    try:
+        os.replace(source_dir, target_dir)
+    except Exception:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        if backup_dir.exists():
+            os.replace(backup_dir, target_dir)
+        raise
+
+    if backup_dir.exists():
+        shutil.rmtree(backup_dir)
 
 
 def shard_output_dirs(layout: ShardLayout, num_shards: int) -> List[OutputDir]:

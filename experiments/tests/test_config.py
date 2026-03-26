@@ -379,3 +379,64 @@ class TestScalingFactor:
         estimated = compute_corrected_estimate(15.0, raw_results, path)
 
         assert estimated == pytest.approx(142.0)
+
+    def test_corrected_estimate_counts_multiple_active_replicates(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
+        minimal_config["execution"]["n_replicates"] = 4
+        minimal_config["methods"] = ["abc_smc_baseline"]
+        path = tmp_path / "mixed_replicates.json"
+        path.write_text(json.dumps(minimal_config))
+
+        small_dir = tmp_path / "small"
+        small_dir.mkdir()
+        small_cfg = json.loads(json.dumps(minimal_config))
+        small_cfg["inference"]["max_simulations"] = 150
+        small_cfg["execution"]["n_replicates"] = 2
+        (small_dir / path.name).write_text(json.dumps(small_cfg))
+
+        raw_results = tmp_path / "raw_results.csv"
+        raw_results.write_text(
+            "\n".join(
+                [
+                    "method,replicate,wall_time",
+                    "abc_smc_baseline,0,3.0",
+                    "abc_smc_baseline,1,5.0",
+                ]
+            )
+            + "\n"
+        )
+
+        estimated = compute_corrected_estimate(
+            12.0,
+            raw_results,
+            path,
+            small_mode=True,
+            test_mode=False,
+        )
+
+        assert estimated == pytest.approx(40.0)
+
+    def test_corrected_estimate_single_replicate_column_matches_previous_behavior(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_simulations"] = 300
+        minimal_config["inference"]["n_workers"] = 4
+        minimal_config["execution"]["n_replicates"] = 2
+        minimal_config["methods"] = ["async_propulate_abc", "abc_smc_baseline"]
+        path = tmp_path / "single_replicate_column.json"
+        path.write_text(json.dumps(minimal_config))
+
+        raw_results = tmp_path / "raw_results.csv"
+        raw_results.write_text(
+            "\n".join(
+                [
+                    "method,replicate,wall_time",
+                    "async_propulate_abc,0,4.0",
+                    "abc_smc_baseline,0,6.0",
+                ]
+            )
+            + "\n"
+        )
+
+        estimated = compute_corrected_estimate(15.0, raw_results, path)
+
+        assert estimated == pytest.approx(142.0)

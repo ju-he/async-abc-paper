@@ -333,24 +333,29 @@ def compute_corrected_estimate(
         if not rows:
             return fallback
 
-        method_max_wt: Dict[str, float] = {}
+        method_run_max_wt: Dict[Tuple[str, int], float] = {}
         for row in rows:
             wt_str = row.get("wall_time", "")
             m = row.get("method", "")
             if wt_str and m:
                 try:
                     wt = float(wt_str)
-                    method_max_wt[m] = max(method_max_wt.get(m, 0.0), wt)
+                    replicate_raw = row.get("replicate", "")
+                    try:
+                        replicate = int(replicate_raw) if replicate_raw != "" else 0
+                    except (TypeError, ValueError):
+                        replicate = 0
+                    key = (m, replicate)
+                    method_run_max_wt[key] = max(method_run_max_wt.get(key, 0.0), wt)
                 except ValueError:
                     pass
 
-        if not method_max_wt:
+        if not method_run_max_wt:
             return fallback
 
-        n_runs_test = len(method_max_wt)
-        total_compute_test = sum(method_max_wt.values())
+        n_runs_test = len(method_run_max_wt)
+        total_compute_test = sum(method_run_max_wt.values())
         overhead_per_run = max(0.0, (elapsed - total_compute_test) / n_runs_test)
-        compute_per_run = total_compute_test / n_runs_test
 
         cfg_full = load_config(config_path, test_mode=False, small_mode=False)
         cfg_active = load_config(config_path, test_mode=test_mode, small_mode=small_mode)
@@ -359,7 +364,7 @@ def compute_corrected_estimate(
         replicate_scale = full_reps / active_reps
 
         estimated = 0.0
-        for method, method_compute_test in method_max_wt.items():
+        for (method, _replicate), method_compute_test in method_run_max_wt.items():
             method_scale = _method_compute_scale(method, cfg_full, cfg_active)
             estimated += replicate_scale * (
                 overhead_per_run + method_compute_test * method_scale

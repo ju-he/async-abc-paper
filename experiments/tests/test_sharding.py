@@ -59,6 +59,61 @@ class TestShardHelpers:
 
         assert detect_completed_replicates(tmp_path, cfg) == [0, 1, 3, 4]
 
+    def test_publish_directory_atomically_moves_into_empty_target(self, tmp_path):
+        from async_abc.utils.sharding import publish_directory_atomically
+
+        source_dir = tmp_path / "source"
+        (source_dir / "data").mkdir(parents=True)
+        (source_dir / "data" / "payload.txt").write_text("fresh")
+        target_dir = tmp_path / "target"
+
+        publish_directory_atomically(source_dir, target_dir)
+
+        assert not source_dir.exists()
+        assert (target_dir / "data" / "payload.txt").read_text() == "fresh"
+
+    def test_publish_directory_atomically_restores_existing_target_when_replace_fails(self, tmp_path, monkeypatch):
+        from async_abc.utils import sharding
+
+        source_dir = tmp_path / "source"
+        (source_dir / "data").mkdir(parents=True)
+        (source_dir / "data" / "payload.txt").write_text("fresh")
+        target_dir = tmp_path / "target"
+        (target_dir / "data").mkdir(parents=True)
+        (target_dir / "data" / "payload.txt").write_text("stable")
+
+        real_replace = sharding.os.replace
+
+        def flaky_replace(src, dst):
+            src_path = Path(src)
+            dst_path = Path(dst)
+            if src_path == source_dir and dst_path == target_dir:
+                raise OSError("injected publish failure")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(sharding.os, "replace", flaky_replace)
+
+        with pytest.raises(OSError, match="injected publish failure"):
+            sharding.publish_directory_atomically(source_dir, target_dir)
+
+        assert (target_dir / "data" / "payload.txt").read_text() == "stable"
+        assert (source_dir / "data" / "payload.txt").read_text() == "fresh"
+
+    def test_publish_directory_atomically_leaves_no_backup_artifacts_on_success(self, tmp_path):
+        from async_abc.utils.sharding import publish_directory_atomically
+
+        source_dir = tmp_path / "source"
+        source_dir.mkdir()
+        (source_dir / "payload.txt").write_text("fresh")
+        target_dir = tmp_path / "target"
+        target_dir.mkdir()
+        (target_dir / "payload.txt").write_text("stable")
+
+        publish_directory_atomically(source_dir, target_dir)
+
+        assert sorted(path.name for path in tmp_path.iterdir()) == ["target"]
+        assert (target_dir / "payload.txt").read_text() == "fresh"
+
 
 class TestShardedBenchmarkRunner:
     def test_gaussian_runner_merges_two_shards(self, tmp_path):
@@ -99,6 +154,112 @@ class TestShardedBenchmarkRunner:
 
         merge_done = tmp_path / "_shards" / "gaussian_mean" / "runs" / "default" / "merge.done.json"
         assert merge_done.exists()
+
+    def test_gaussian_runner_extend_merges_existing_output_with_new_shard_results(self, tmp_path):
+        from async_abc.io.paths import OutputDir
+        from async_abc.io.records import ParticleRecord, write_records
+        from async_abc.utils.metadata import write_metadata
+        from async_abc.utils.sharding import ShardLayout, build_plan_payload
+
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["timed_fake"],
+            inference_overrides={"max_simulations": 60, "k": 10},
+            execution_overrides={"n_replicates": 2, "base_seed": 1},
+            plots={},
+        )
+        config_path = test_helpers.write_config(tmp_path, "gaussian_sharded_extend.json", cfg)
+
+        final_output = OutputDir(tmp_path, "gaussian_mean").ensure()
+        write_records(
+            final_output.data / "raw_results.csv",
+            [
+                ParticleRecord(
+                    method="timed_fake",
+                    replicate=0,
+                    seed=1,
+                    step=1,
+                    params={"mu": 0.1},
+                    loss=0.4,
+                    weight=0.5,
+                    tolerance=1.0,
+                    wall_time=0.4,
+                    worker_id="0",
+                    sim_start_time=0.0,
+                    sim_end_time=0.2,
+                    generation=0,
+                ),
+                ParticleRecord(
+                    method="timed_fake",
+                    replicate=0,
+                    seed=1,
+                    step=2,
+                    params={"mu": -0.1},
+                    loss=0.2,
+                    weight=0.5,
+                    tolerance=0.5,
+                    wall_time=0.4,
+                    worker_id="1",
+                    sim_start_time=0.2,
+                    sim_end_time=0.4,
+                    generation=1,
+                ),
+            ],
+        )
+        write_metadata(final_output, cfg)
+
+        layout = ShardLayout(tmp_path, "gaussian_mean", "extend-run", 0)
+        layout.plan_path.parent.mkdir(parents=True, exist_ok=True)
+        layout.plan_path.write_text(
+            json.dumps(
+                build_plan_payload(
+                    experiment_name="gaussian_mean",
+                    config_path=str(config_path.resolve()),
+                    unit_kind="replicate",
+                    full_total_units=2,
+                    actual_total_units=2,
+                    target_total_units=1,
+                    requested_num_shards=1,
+                    actual_num_shards=1,
+                    test_mode=False,
+                    small_mode=False,
+                    run_mode="full",
+                    extend=True,
+                    run_id="extend-run",
+                    completed_unit_indices=[0],
+                    pending_unit_indices=[1],
+                    shard_assignments=[[1]],
+                    runner_script="gaussian_mean_runner.py",
+                )
+            )
+        )
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            test_helpers.run_runner_main(
+                "gaussian_mean_runner.py",
+                config_path,
+                tmp_path,
+                extra_args=(
+                    "--shard-index",
+                    "0",
+                    "--num-shards",
+                    "1",
+                    "--shard-run-id",
+                    "extend-run",
+                    "--extend",
+                ),
+            )
+
+        rows = _rows(tmp_path / "gaussian_mean" / "data" / "raw_results.csv")
+        key_tuples = [(row["method"], row["replicate"]) for row in rows]
+
+        assert key_tuples.count(("timed_fake", "0")) == 2
+        assert key_tuples.count(("timed_fake", "1")) == 2
+        assert len(rows) == 4
+
+        metadata = json.loads((tmp_path / "gaussian_mean" / "data" / "metadata.json").read_text())
+        assert metadata["completed_replicates"] == [0, 1]
+        assert metadata["last_shard_run_id"] == "extend-run"
 
 
 class TestShardedSbcRunner:
@@ -250,6 +411,70 @@ class TestShardFailureStatus:
         assert "Traceback" in status["traceback"]
         assert "started_at_s" in status
         assert "finished_at_s" in status
+
+    def test_finalize_benchmark_experiment_preserves_existing_output_when_publish_fails(self, tmp_path, monkeypatch):
+        from async_abc.io.paths import OutputDir
+        from async_abc.io.records import ParticleRecord, write_records
+        from async_abc.utils import sharding
+        from async_abc.utils.shard_finalizers import finalize_benchmark_experiment
+        from async_abc.utils.sharding import ShardLayout
+
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 20, "k": 5},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        layout = ShardLayout(tmp_path, "gaussian_mean", "default", 0)
+        layout.final_output_dir.ensure()
+        write_records(
+            layout.final_output_dir.data / "raw_results.csv",
+            [
+                ParticleRecord(
+                    method="rejection_abc",
+                    replicate=0,
+                    seed=1,
+                    step=1,
+                    params={"mu": 0.0},
+                    loss=0.1,
+                )
+            ],
+        )
+
+        shard_dir = OutputDir(layout.shard_root, "gaussian_mean").ensure()
+        write_records(
+            shard_dir.data / "raw_results.csv",
+            [
+                ParticleRecord(
+                    method="rejection_abc",
+                    replicate=0,
+                    seed=1,
+                    step=1,
+                    params={"mu": 1.0},
+                    loss=0.2,
+                )
+            ],
+        )
+
+        temp_output_root = layout.run_root / "_merge_tmp" / "gaussian_mean"
+        real_replace = sharding.os.replace
+
+        def flaky_replace(src, dst):
+            src_path = Path(src)
+            dst_path = Path(dst)
+            if src_path == temp_output_root and dst_path == layout.final_output_dir.root:
+                raise OSError("injected publish failure")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(sharding.os, "replace", flaky_replace)
+
+        with pytest.raises(OSError, match="injected publish failure"):
+            finalize_benchmark_experiment(cfg, layout, [shard_dir], [{"state": "completed"}])
+
+        rows = _rows(layout.final_output_dir.data / "raw_results.csv")
+        assert len(rows) == 1
+        assert float(rows[0]["param_mu"]) == pytest.approx(0.0)
 
     def test_finalize_only_can_retry_merge_after_finalize_stage_failure(self, tmp_path):
         from async_abc.utils.sharding import ShardLayout, all_shards_completed

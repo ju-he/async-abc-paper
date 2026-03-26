@@ -97,6 +97,51 @@ def test_sbc_plot_metadata_is_complete(tmp_path):
     assert coverage_meta["benchmark"] is False
 
 
+def test_sbc_runner_and_finalizer_plot_outputs_match(tmp_path):
+    runner_module = test_helpers.import_runner_module("sbc_runner.py")
+    from async_abc.io.paths import OutputDir
+    from async_abc.utils import shard_finalizers
+
+    runner_output = OutputDir(tmp_path / "runner", "sbc").ensure()
+    finalizer_output = OutputDir(tmp_path / "finalizer", "sbc").ensure()
+    ranks_df = pd.DataFrame(
+        {
+            "method": ["async_propulate_abc", "async_propulate_abc"],
+            "param": ["mu", "mu"],
+            "trial": [0, 1],
+            "rank": [1, 2],
+            "n_samples": [5, 5],
+        }
+    )
+    coverage_df = pd.DataFrame(
+        {
+            "method": ["async_propulate_abc"],
+            "param": ["mu"],
+            "coverage_level": [0.5],
+            "empirical_coverage": [0.6],
+            "n_trials": [2],
+        }
+    )
+
+    runner_module._plot_rank_histogram(ranks_df, runner_output)
+    runner_module._plot_coverage_table(coverage_df, runner_output)
+    shard_finalizers._plot_rank_histogram(ranks_df, finalizer_output)
+    shard_finalizers._plot_coverage_table(coverage_df, finalizer_output)
+
+    runner_rank_meta = json.loads((runner_output.plots / "rank_histogram_meta.json").read_text())
+    finalizer_rank_meta = json.loads((finalizer_output.plots / "rank_histogram_meta.json").read_text())
+    runner_coverage_meta = json.loads((runner_output.plots / "coverage_table_meta.json").read_text())
+    finalizer_coverage_meta = json.loads((finalizer_output.plots / "coverage_table_meta.json").read_text())
+
+    stable_keys = {"plot_name", "title", "summary_plot", "diagnostic_plot", "experiment_name", "benchmark", "methods"}
+    assert {key: runner_rank_meta[key] for key in stable_keys} == {
+        key: finalizer_rank_meta[key] for key in stable_keys
+    }
+    assert {key: runner_coverage_meta[key] for key in stable_keys} == {
+        key: finalizer_coverage_meta[key] for key in stable_keys
+    }
+
+
 def test_sbc_runner_executes_methods_in_method_major_order(tmp_path, monkeypatch):
     cfg = test_helpers.make_fast_runner_config(
         "sbc.json",
