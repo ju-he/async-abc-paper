@@ -101,15 +101,18 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 
 pids=()
 failed=0
+had_any_run=0
 for n_workers in "${workers[@]}"; do
     srun --exclusive -N 1 -n "$n_workers" python "$experiments_dir/scripts/scaling_runner.py" \
         --config "$config_path" \
         --output-dir "$output_dir" \
         --n-workers "$n_workers" \
+        --skip-finalize \
         ${test_flag:+"$test_flag"} \
         ${small_flag:+"$small_flag"} \
         ${extend_flag:+"$extend_flag"} &
     pids+=("$!")
+    had_any_run=1
 done
 
 for pid in "${pids[@]}"; do
@@ -118,13 +121,13 @@ for pid in "${pids[@]}"; do
     fi
 done
 
-if [ "$failed" -ne 0 ]; then
-    exit "$failed"
+if [ "$had_any_run" -ne 0 ]; then
+    python "$experiments_dir/scripts/scaling_runner.py" \
+        --config "$config_path" \
+        --output-dir "$output_dir" \
+        --finalize-only \
+        ${test_flag:+"$test_flag"} \
+        ${small_flag:+"$small_flag"}
 fi
 
-python "$experiments_dir/scripts/scaling_runner.py" \
-    --config "$config_path" \
-    --output-dir "$output_dir" \
-    --finalize-only \
-    ${test_flag:+"$test_flag"} \
-    ${small_flag:+"$small_flag"}
+exit "$failed"

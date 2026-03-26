@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 _THROUGHPUT_FIELDNAMES = [
     "base_method",
     "method_variant",
+    "stop_policy",
     "k",
     "n_workers",
     "replicate",
@@ -383,6 +384,7 @@ def _final_summary_row(
     max_wall_time_s: float | None,
     test_mode: bool,
     true_params: Dict[str, float],
+    stop_policy: str,
 ) -> dict:
     elapsed = _elapsed_wall_time(records)
     n_sims = _simulation_count(records)
@@ -410,6 +412,7 @@ def _final_summary_row(
     return {
         "base_method": base_method,
         "method_variant": method_variant,
+        "stop_policy": stop_policy,
         "k": int(k),
         "n_workers": int(n_workers),
         "replicate": int(replicate),
@@ -489,6 +492,14 @@ def _requested_max_simulations(inference_cfg: Dict[str, Any], *, n_workers: int,
         candidates.append(int(policy.get("per_worker", 0) or 0) * int(n_workers))
         candidates.append(int(policy.get("k_factor", 0) or 0) * int(k))
     return max(1, max(candidates))
+
+
+def _stop_policy_for_method(base_method: str) -> str:
+    if base_method == "async_propulate_abc":
+        return "simulation_cap_approx"
+    if base_method in {"abc_smc_baseline", "pyabc_smc"}:
+        return "wall_time_exact"
+    return "simulation_cap_approx"
 
 
 def _remove_path(path: Path) -> None:
@@ -603,6 +614,10 @@ def rebuild_scaling_outputs(
             "wall_time_budgets_s": wall_time_budgets_s,
             "wall_time_limit_s": wall_time_limit_s,
             "max_simulations_policy": scaling_cfg.get("max_simulations_policy", {}),
+            "stop_policy_by_method": {
+                str(method): _stop_policy_for_method(str(method))
+                for method in cfg.get("methods", [])
+            },
         },
     )
     return aggregate_rows
@@ -617,6 +632,11 @@ def main(argv: list[str] | None = None) -> None:
         default=None,
         dest="n_workers",
         help="Run only this specific worker count (for HPC: match --ntasks=N).",
+    )
+    parser.add_argument(
+        "--skip-finalize",
+        action="store_true",
+        help="Write per-combination shards only; skip aggregate CSV/plot rebuild.",
     )
     args = parser.parse_args(argv)
 
@@ -703,11 +723,14 @@ def main(argv: list[str] | None = None) -> None:
                     "max_simulations": int(requested_max_simulations),
                     "_checkpoint_tag": checkpoint_tag,
                 }
-                if wall_time_limit_s is not None:
-                    inference_cfg["max_wall_time_s"] = float(wall_time_limit_s)
-
                 for base_method in cfg["methods"]:
+                    stop_policy = _stop_policy_for_method(base_method)
                     method_variant = _tagged_method_name(base_method, int(k), int(n_workers))
+                    method_inference_cfg = dict(inference_cfg)
+                    if wall_time_limit_s is not None and stop_policy == "wall_time_exact":
+                        method_inference_cfg["max_wall_time_s"] = float(wall_time_limit_s)
+                    elif "max_wall_time_s" in method_inference_cfg:
+                        method_inference_cfg.pop("max_wall_time_s", None)
                     for replicate, seed in enumerate(seeds):
                         if (str(n_workers), str(k), base_method, str(replicate)) in done:
                             logger.info(
@@ -724,7 +747,7 @@ def main(argv: list[str] | None = None) -> None:
                             base_method,
                             benchmark.simulate,
                             benchmark.limits,
-                            inference_cfg,
+                            method_inference_cfg,
                             output_dir,
                             replicate,
                             seed,
@@ -749,6 +772,7 @@ def main(argv: list[str] | None = None) -> None:
                             max_wall_time_s=wall_time_limit_s,
                             test_mode=test_mode,
                             true_params=true_params,
+                            stop_policy=stop_policy,
                         )
                         if summary_row["elapsed_wall_time_s"] <= 0 and run_elapsed > 0:
                             summary_row["elapsed_wall_time_s"] = float(run_elapsed)
@@ -855,13 +879,14 @@ def main(argv: list[str] | None = None) -> None:
         run_mode,
     )
     write_timing_comparison_csv(Path(args.output_dir))
-    rebuild_scaling_outputs(
-        output_dir,
-        cfg,
-        fallback_rows=aggregate_throughput_rows,
-        fallback_budget_rows=aggregate_budget_rows,
-        fallback_records=aggregate_records,
-    )
+    if not args.skip_finalize:
+        rebuild_scaling_outputs(
+            output_dir,
+            cfg,
+            fallback_rows=aggregate_throughput_rows,
+            fallback_budget_rows=aggregate_budget_rows,
+            fallback_records=aggregate_records,
+        )
 
 
 if __name__ == "__main__":

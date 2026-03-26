@@ -195,9 +195,6 @@ def run_propulate_abc(
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
     perturbation_scale = inference_cfg.get("perturbation_scale", 0.8)
-    max_wall_time_s = inference_cfg.get("max_wall_time_s")
-    max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
-
     # Pass extra scheduler kwargs if present
     scheduler_kwargs = {}
     for key in ("percentile", "decay_factor", "low_rate", "high_rate",
@@ -219,8 +216,6 @@ def run_propulate_abc(
 
     run_start = time.time()
     eval_count = 0
-    stop_state: dict[str, object] = {"propulator": None}
-
     # Propulate's loss_fn receives an Individual (dict-like).
     # We extract param values and forward to the benchmark simulator.
     def loss_fn(ind) -> float:
@@ -231,16 +226,6 @@ def run_propulate_abc(
         eval_count += 1
         if progress is not None:
             progress.update(evaluations=eval_count)
-        if max_wall_time_s is not None and (time.time() - run_start) >= max_wall_time_s:
-            propulator_ref = stop_state.get("propulator")
-            if propulator_ref is not None:
-                try:
-                    propulator_ref.generations = min(
-                        int(propulator_ref.generations),
-                        int(ind.generation) + 1,
-                    )
-                except Exception:
-                    pass
         return loss
 
     # Each (replicate, seed) gets its own checkpoint dir to prevent cross-contamination.
@@ -273,7 +258,6 @@ def run_propulate_abc(
         checkpoint_path=checkpoint_dir,
         **propulator_kwargs,
     )
-    stop_state["propulator"] = propulator
 
     propulate_completed = False
     try:

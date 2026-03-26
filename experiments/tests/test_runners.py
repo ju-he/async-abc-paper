@@ -316,6 +316,7 @@ class TestScalingRunner:
         assert {int(row["n_workers"]) for row in rows} == {1, 4}
         assert {int(row["k"]) for row in rows} == {10, 50}
         assert {row["base_method"] for row in rows} == {"rejection_abc"}
+        assert {row["stop_policy"] for row in rows} == {"simulation_cap_approx"}
 
     def test_budget_summary_has_expected_budget_rows(self, scaling_runner_artifact):
         csv_path = scaling_runner_artifact["root"] / "scaling" / "data" / "budget_summary.csv"
@@ -409,6 +410,7 @@ class TestScalingRunner:
             {
                 "base_method": "async_propulate_abc",
                 "method_variant": "async_propulate_abc__k50__w4",
+                "stop_policy": "simulation_cap_approx",
                 "k": 50,
                 "n_workers": 4,
                 "replicate": 0,
@@ -427,6 +429,7 @@ class TestScalingRunner:
             {
                 "base_method": "async_propulate_abc",
                 "method_variant": "async_propulate_abc__k10__w1",
+                "stop_policy": "simulation_cap_approx",
                 "k": 10,
                 "n_workers": 1,
                 "replicate": 0,
@@ -516,6 +519,85 @@ class TestScalingRunner:
         assert [int(row["k"]) for row in csv_rows] == [10, 50]
         assert [int(row["n_workers"]) for row in aggregate_rows] == [1, 4]
         assert captured["worker_counts"] == [1, 4]
+
+    def test_rebuild_scaling_metadata_includes_stop_policy_mapping(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        output_dir = module.OutputDir(tmp_path, "scaling").ensure()
+        captured = {}
+        monkeypatch.setattr(
+            module,
+            "write_metadata",
+            lambda _output_dir, _cfg, extra=None: captured.update(extra or {}),
+        )
+        module.rebuild_scaling_outputs(
+            output_dir,
+            {
+                "experiment_name": "scaling",
+                "methods": ["async_propulate_abc", "abc_smc_baseline"],
+                "plots": {},
+                "scaling": {"wall_time_budgets_s": [0.1]},
+            },
+            fallback_rows=[
+                {
+                    "base_method": "async_propulate_abc",
+                    "method_variant": "async_propulate_abc__k10__w1",
+                    "stop_policy": "simulation_cap_approx",
+                    "k": 10,
+                    "n_workers": 1,
+                    "replicate": 0,
+                    "seed": 1,
+                    "requested_max_simulations": 60,
+                    "max_wall_time_s": 0.1,
+                    "elapsed_wall_time_s": 0.1,
+                    "n_simulations": 10,
+                    "throughput_sims_per_s": 100.0,
+                    "final_quality_wasserstein": 1.0,
+                    "final_n_particles": 10,
+                    "final_tolerance": 1.0,
+                    "state_kind": "accepted_prefix",
+                    "test_mode": False,
+                }
+            ],
+            fallback_budget_rows=[],
+            fallback_records=[],
+        )
+        assert captured["stop_policy_by_method"] == {
+            "async_propulate_abc": "simulation_cap_approx",
+            "abc_smc_baseline": "wall_time_exact",
+        }
+
+    def test_skip_finalize_leaves_only_shards(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "scaling.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 60, "k": 10, "tol_init": 1_000_000_000.0},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={"scaling_curve": False, "efficiency": False},
+            top_level_updates={
+                "scaling": {
+                    "worker_counts": [1],
+                    "test_worker_counts": [1],
+                    "k_values": [10],
+                    "test_k_values": [10],
+                    "wall_time_budgets_s": [0.05],
+                    "wall_time_limit_s": 0.05,
+                    "max_simulations_policy": {"min_total": 60, "per_worker": 10, "k_factor": 1},
+                }
+            },
+        )
+        config_path = test_helpers.write_config(tmp_path, "scaling_skip_finalize.json", cfg)
+
+        test_helpers.run_runner_main(
+            "scaling_runner.py",
+            config_path,
+            tmp_path,
+            extra_args=("--skip-finalize",),
+        )
+
+        data_dir = tmp_path / "scaling" / "data"
+        assert (data_dir / "throughput_summary_w1_k10.csv").exists()
+        assert not (data_dir / "throughput_summary.csv").exists()
+        assert not (data_dir / "raw_results.csv").exists()
 
     def test_scaling_runner_writes_grid_plots(self, tmp_path):
         cfg = test_helpers.make_fast_runner_config(

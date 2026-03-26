@@ -1013,6 +1013,12 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
         assert "Standalone:[48]" in out
+        assert "k_values:  [10, 50, 100, 200, 500, 1000, 5000, 10000]" in out
+        assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
+        assert "Reps:      1" in out
+        assert "Wall cap:  900.0 s" in out
+        assert "Workload:  16 combos per worker-count job" in out
+        assert "Finalize:  720.0 s slack" in out
         assert out.count("sbatch --ntasks=") == 2
         assert "scaling_packed.sh" in out
         assert "--workers 1,4" in out
@@ -1038,6 +1044,12 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 16, 48, 96]" in out
         assert "Bundles:   [[1, 16]]" in out
         assert "Standalone:[48, 96]" in out
+        assert "k_values:  [10, 50, 100, 200, 500, 1000]" in out
+        assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
+        assert "Reps:      2" in out
+        assert "Wall cap:  300.0 s" in out
+        assert "Workload:  24 combos per worker-count job" in out
+        assert "Finalize:  300.0 s slack" in out
         assert out.count("sbatch --ntasks=") == 3
         assert "--small" in out
         assert "abc_scaling_96" in out
@@ -1063,6 +1075,12 @@ class TestScalingSubmitter:
         assert "Mode:      small_test" in out
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
+        assert "k_values:  [10, 50, 100, 200, 500, 1000]" in out
+        assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
+        assert "Reps:      1" in out
+        assert "Wall cap:  300.0 s" in out
+        assert "Workload:  12 combos per worker-count job" in out
+        assert "Finalize:  300.0 s slack" in out
         assert out.count("sbatch --ntasks=") == 2
         assert "--small" in out
         assert "--test" in out
@@ -1091,6 +1109,7 @@ class TestScalingSubmitter:
         assert f"Config:    {config_path.resolve()}" in out
         assert "Workers:   [2]" in out
         assert "Bundles:   [[2]]" in out
+        assert "Standalone:[]" in out
         assert f"--config {config_path.resolve()}" in out
         assert "--workers 2" in out
         assert out.count("sbatch --ntasks=") == 1
@@ -1126,7 +1145,7 @@ class TestScalingSubmitter:
 
         out = capsys.readouterr().out
         assert "Warning: no scaling row with run_mode='full' found" in out
-        assert "Base time: --base-time fallback: 1.5 h" in out
+        assert "Timing:    --base-time fallback: 1.5 h" in out
 
 
 class TestShardSmokeScript:

@@ -82,14 +82,17 @@ def _read_timing_elapsed(
 
 
 def _job_time_hours(
-    n_workers: int,
+    workload_count: int,
     *,
-    base_time_s: float,
+    wall_time_limit_s: float,
     safety: float,
     min_time: float,
     max_time: float,
+    finalize_slack_s: float,
 ) -> float:
-    time_hours = base_time_s / int(n_workers) * float(safety) / 3600
+    time_hours = (
+        float(safety) * int(workload_count) * float(wall_time_limit_s) + float(finalize_slack_s)
+    ) / 3600.0
     return max(float(min_time), min(float(max_time), time_hours))
 
 
@@ -209,6 +212,16 @@ def main() -> None:
     full_reps = full_cfg["execution"]["n_replicates"]
     active_sims = active_cfg["inference"]["max_simulations"]
     active_reps = active_cfg["execution"]["n_replicates"]
+    k_values = list(scaling_cfg.get("k_values", [active_cfg["inference"].get("k", 100)]))
+    methods = list(active_cfg.get("methods", []))
+    n_replicates = int(active_cfg["execution"]["n_replicates"])
+    wall_time_limit_s = scaling_cfg.get("wall_time_limit_s")
+    wall_time_budgets_s = [float(value) for value in scaling_cfg.get("wall_time_budgets_s", []) if float(value) > 0]
+    if wall_time_limit_s in (None, "") and wall_time_budgets_s:
+        wall_time_limit_s = max(wall_time_budgets_s)
+    wall_time_limit_s = float(wall_time_limit_s or 0.0)
+    finalize_slack_s = max(300.0, 0.1 * wall_time_limit_s * max(1, len(k_values)))
+    workload_count = max(1, len(k_values) * max(1, len(methods)) * n_replicates)
 
     # --- Determine base wall time for N=1 production (in seconds) ---
     base_time_s: float
@@ -249,22 +262,30 @@ def main() -> None:
         f"Workers:   {worker_counts}\n"
         f"Bundles:   {packed_bundles}\n"
         f"Standalone:{standalone_counts}\n"
-        f"Base time: {timing_source}\n"
+        f"Timing:    {timing_source}\n"
+        f"k_values:  {k_values}\n"
+        f"Methods:   {methods}\n"
+        f"Reps:      {n_replicates}\n"
+        f"Wall cap:  {wall_time_limit_s:.1f} s\n"
+        f"Workload:  {workload_count} combos per worker-count job\n"
+        f"Finalize:  {finalize_slack_s:.1f} s slack\n"
         f"Safety:    {args.safety}×  (min={args.min_time} h, max={args.max_time} h)\n"
         f"Output:    {output_dir}\n"
     )
 
     for bundle in packed_bundles:
-        time_hours = max(
+        bundle_job_hours = [
             _job_time_hours(
-                n_workers=n,
-                base_time_s=base_time_s,
+                workload_count=workload_count,
+                wall_time_limit_s=wall_time_limit_s,
                 safety=args.safety,
                 min_time=args.min_time,
                 max_time=args.max_time,
+                finalize_slack_s=finalize_slack_s,
             )
-            for n in bundle
-        )
+            for _n in bundle
+        ]
+        time_hours = max(bundle_job_hours)
         time_str = _format_time(time_hours)
         bundle_label = "_".join(str(n) for n in bundle)
         workers_csv = ",".join(str(n) for n in bundle)
@@ -288,7 +309,10 @@ def main() -> None:
         ]
 
         tag = "(dry run)" if args.dry_run else ""
-        print(f"  bundle={bundle!r}  ntasks={CORES_PER_NODE}  nodes=1  time={time_str}  {tag}")
+        print(
+            f"  bundle={bundle!r}  ntasks={CORES_PER_NODE}  nodes=1  "
+            f"time={time_str}  workload={workload_count}x{wall_time_limit_s:.0f}s+{finalize_slack_s:.0f}s  {tag}"
+        )
         if args.dry_run:
             print(f"    {' '.join(cmd)}")
         else:
@@ -297,11 +321,12 @@ def main() -> None:
     for n in standalone_counts:
         nodes = math.ceil(n / CORES_PER_NODE)
         time_hours = _job_time_hours(
-            n_workers=n,
-            base_time_s=base_time_s,
+            workload_count=workload_count,
+            wall_time_limit_s=wall_time_limit_s,
             safety=args.safety,
             min_time=args.min_time,
             max_time=args.max_time,
+            finalize_slack_s=finalize_slack_s,
         )
         time_str = _format_time(time_hours)
         cmd = [
@@ -321,7 +346,10 @@ def main() -> None:
         ]
 
         tag = "(dry run)" if args.dry_run else ""
-        print(f"  N={n:3d}  nodes={nodes}  time={time_str}  {tag}")
+        print(
+            f"  N={n:3d}  nodes={nodes}  time={time_str}  "
+            f"workload={workload_count}x{wall_time_limit_s:.0f}s+{finalize_slack_s:.0f}s  {tag}"
+        )
         if args.dry_run:
             print(f"    {' '.join(cmd)}")
         else:
