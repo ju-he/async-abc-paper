@@ -10,6 +10,7 @@ instructions.
 """
 import logging
 import time
+from datetime import timedelta
 from pathlib import Path
 from typing import Callable, Dict, List
 
@@ -62,6 +63,7 @@ def _run_abc_smc_baseline_with_sampler(
     replicate: int,
     seed: int,
     checkpoint_tag: str = "",
+    max_wall_time_s: float | None = None,
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -121,6 +123,11 @@ def _run_abc_smc_baseline_with_sampler(
         minimum_epsilon=0.0,
         max_total_nr_simulations=max_sims,
         max_nr_populations=n_generations,
+        max_walltime=(
+            timedelta(seconds=float(max_wall_time_s))
+            if max_wall_time_s is not None
+            else None
+        ),
     )
 
     observable = history_observable_frame(history, run_start)
@@ -250,6 +257,8 @@ def run_abc_smc_baseline(
     tol_init = inference_cfg.get("tol_init", 10.0)
     n_generations = inference_cfg.get("n_generations", 5)
     n_procs          = inference_cfg.get("n_workers", 1)
+    max_wall_time_s = inference_cfg.get("max_wall_time_s")
+    max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
     parallel_backend = resolve_pyabc_parallel_backend(
         inference_cfg,
         method_name="abc_smc_baseline",
@@ -293,6 +302,7 @@ def run_abc_smc_baseline(
                 replicate=replicate,
                 seed=seed,
                 checkpoint_tag=checkpoint_tag,
+                max_wall_time_s=max_wall_time_s,
                 progress=progress,
             )
 
@@ -309,5 +319,6 @@ def run_abc_smc_baseline(
         replicate=replicate,
         seed=seed,
         checkpoint_tag=checkpoint_tag,
+        max_wall_time_s=max_wall_time_s,
         progress=progress,
     )

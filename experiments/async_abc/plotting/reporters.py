@@ -1612,6 +1612,434 @@ def plot_scaling_summary(throughput_rows: List[Dict[str, Any]], output_dir: Outp
     scaling_plot(throughput_by_workers, path_stem=stem)
 
 
+def _scaling_token(value: Any) -> str:
+    text = str(value)
+    return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in text)
+
+
+def _budget_token(budget_s: float) -> str:
+    if float(budget_s).is_integer():
+        return str(int(budget_s))
+    return str(budget_s).replace(".", "p")
+
+
+def _scaling_frame(rows: List[Dict[str, Any]]) -> pd.DataFrame:
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return frame
+    for col in ("k", "n_workers", "replicate", "seed", "requested_max_simulations", "n_simulations", "final_n_particles"):
+        if col in frame.columns:
+            frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    for col in (
+        "max_wall_time_s",
+        "elapsed_wall_time_s",
+        "throughput_sims_per_s",
+        "final_quality_wasserstein",
+        "final_tolerance",
+        "budget_s",
+        "attempts_by_budget",
+        "posterior_samples_by_budget",
+        "quality_wasserstein_by_budget",
+        "best_tolerance_by_budget",
+    ):
+        if col in frame.columns:
+            frame[col] = pd.to_numeric(frame[col], errors="coerce")
+    return frame
+
+
+def _save_scaling_dataframe(fig, stem: Path, frame: pd.DataFrame, metadata: Dict[str, Any]) -> None:
+    save_figure(
+        fig,
+        stem,
+        data={col: frame[col].tolist() for col in frame.columns},
+        metadata=metadata,
+    )
+
+
+def _plot_workers_lines(
+    frame: pd.DataFrame,
+    *,
+    x_col: str,
+    y_col: str,
+    series_col: str,
+    xlabel: str,
+    ylabel: str,
+    title: str,
+    stem: Path,
+    metadata: Dict[str, Any],
+) -> None:
+    if frame.empty:
+        return
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    for series_value, group in frame.groupby(series_col, sort=True):
+        group = group.sort_values(x_col)
+        ax.plot(
+            group[x_col].to_numpy(dtype=float),
+            group[y_col].to_numpy(dtype=float),
+            marker="o",
+            linewidth=1.8,
+            label=str(series_value),
+        )
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    ax.legend(frameon=False, fontsize="small", title=series_col.replace("_", " "))
+    fig.tight_layout()
+    _save_scaling_dataframe(fig, stem, frame, metadata)
+
+
+def _plot_heatmap(
+    frame: pd.DataFrame,
+    *,
+    value_col: str,
+    title: str,
+    stem: Path,
+    metadata: Dict[str, Any],
+) -> None:
+    if frame.empty:
+        return
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    pivot = frame.pivot(index="k", columns="n_workers", values=value_col).sort_index().sort_index(axis=1)
+    if pivot.empty:
+        return
+    fig, ax = plt.subplots(figsize=(6.5, 4.4))
+    image = ax.imshow(pivot.to_numpy(dtype=float), aspect="auto", origin="lower")
+    ax.set_xticks(range(len(pivot.columns)))
+    ax.set_xticklabels([str(int(value)) for value in pivot.columns])
+    ax.set_yticks(range(len(pivot.index)))
+    ax.set_yticklabels([str(int(value)) for value in pivot.index])
+    ax.set_xlabel("n_workers")
+    ax.set_ylabel("k")
+    ax.set_title(title)
+    fig.colorbar(image, ax=ax, shrink=0.9, label=value_col.replace("_", " "))
+    fig.tight_layout()
+    _save_scaling_dataframe(fig, stem, frame, metadata)
+
+
+def _plot_pareto(frame: pd.DataFrame, *, stem: Path, metadata: Dict[str, Any], title: str) -> None:
+    if frame.empty:
+        return
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    methods = sorted(frame["base_method"].dropna().unique().tolist())
+    markers = ["o", "s", "^", "D", "v", "P", "X"]
+    for idx, method in enumerate(methods):
+        subset = frame.loc[frame["base_method"] == method]
+        scatter = ax.scatter(
+            subset["attempts_by_budget"].to_numpy(dtype=float),
+            subset["quality_wasserstein_by_budget"].to_numpy(dtype=float),
+            c=subset["n_workers"].to_numpy(dtype=float),
+            cmap="viridis",
+            marker=markers[idx % len(markers)],
+            s=56,
+            alpha=0.9,
+            label=str(method),
+        )
+    ax.set_xlabel("attempts by budget")
+    ax.set_ylabel("quality (Wasserstein)")
+    ax.set_title(title)
+    ax.legend(frameon=False, fontsize="small")
+    fig.colorbar(scatter, ax=ax, shrink=0.9, label="n_workers")
+    fig.tight_layout()
+    _save_scaling_dataframe(fig, stem, frame, metadata)
+
+
+def plot_scaling_grid(
+    *,
+    throughput_rows: List[Dict[str, Any]],
+    budget_rows: List[Dict[str, Any]],
+    output_dir: OutputDir,
+) -> None:
+    """Generate grid-aware scaling plots from run-level and budget summaries."""
+    throughput_df = _scaling_frame(throughput_rows)
+    budget_df = _scaling_frame(budget_rows)
+    if throughput_df.empty or budget_df.empty:
+        return
+
+    methods = sorted(throughput_df["base_method"].dropna().unique().tolist())
+    budget_df = budget_df.copy()
+    budget_df["throughput_by_budget"] = np.where(
+        budget_df["elapsed_wall_time_s"] > 0,
+        budget_df["attempts_by_budget"] / budget_df["elapsed_wall_time_s"],
+        np.nan,
+    )
+
+    throughput_mean = (
+        throughput_df.groupby(["base_method", "k", "n_workers"], as_index=False)["throughput_sims_per_s"]
+        .mean()
+    )
+    throughput_mean["efficiency"] = np.nan
+    for (method, k), group in throughput_mean.groupby(["base_method", "k"], sort=False):
+        baseline = group.loc[group["n_workers"] == 1, "throughput_sims_per_s"]
+        if baseline.empty or float(baseline.iloc[0]) <= 0:
+            continue
+        throughput_mean.loc[group.index, "efficiency"] = (
+            group["throughput_sims_per_s"] / (float(baseline.iloc[0]) * group["n_workers"])
+        )
+
+    budget_mean = (
+        budget_df.groupby(["base_method", "k", "n_workers", "budget_s"], as_index=False)[
+            [
+                "attempts_by_budget",
+                "posterior_samples_by_budget",
+                "quality_wasserstein_by_budget",
+                "best_tolerance_by_budget",
+                "throughput_by_budget",
+            ]
+        ]
+        .mean()
+    )
+
+    for method in methods:
+        safe_method = _scaling_token(method)
+        method_throughput = throughput_mean.loc[throughput_mean["base_method"] == method].copy()
+        if not method_throughput.empty:
+            _plot_workers_lines(
+                method_throughput,
+                x_col="n_workers",
+                y_col="throughput_sims_per_s",
+                series_col="k",
+                xlabel="n_workers",
+                ylabel="throughput (sim/s)",
+                title=f"Throughput vs workers: {method}",
+                stem=output_dir.plots / f"throughput_vs_workers__{safe_method}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"throughput_vs_workers__{safe_method}",
+                    title=f"Throughput vs workers: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"group_by": "k"},
+                ),
+            )
+            _plot_workers_lines(
+                method_throughput.dropna(subset=["efficiency"]),
+                x_col="n_workers",
+                y_col="efficiency",
+                series_col="k",
+                xlabel="n_workers",
+                ylabel="parallel efficiency",
+                title=f"Efficiency vs workers: {method}",
+                stem=output_dir.plots / f"efficiency_vs_workers__{safe_method}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"efficiency_vs_workers__{safe_method}",
+                    title=f"Efficiency vs workers: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"group_by": "k"},
+                ),
+            )
+
+        method_budget = budget_mean.loc[budget_mean["base_method"] == method].copy()
+        for budget_s in sorted(method_budget["budget_s"].dropna().unique().tolist()):
+            budget_subset = method_budget.loc[method_budget["budget_s"] == budget_s].copy()
+            if budget_subset.empty:
+                continue
+            budget_label = _budget_token(float(budget_s))
+            _plot_workers_lines(
+                budget_subset,
+                x_col="n_workers",
+                y_col="quality_wasserstein_by_budget",
+                series_col="k",
+                xlabel="n_workers",
+                ylabel="quality (Wasserstein)",
+                title=f"Quality at T={budget_s:g}s: {method}",
+                stem=output_dir.plots / f"quality_at_budget__{safe_method}__T{budget_label}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"quality_at_budget__{safe_method}__T{budget_label}",
+                    title=f"Quality at T={budget_s:g}s: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"budget_s": float(budget_s), "group_by": "k"},
+                ),
+            )
+            _plot_workers_lines(
+                budget_subset,
+                x_col="n_workers",
+                y_col="attempts_by_budget",
+                series_col="k",
+                xlabel="n_workers",
+                ylabel="attempts by budget",
+                title=f"Attempts at T={budget_s:g}s: {method}",
+                stem=output_dir.plots / f"attempts_at_budget__{safe_method}__T{budget_label}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"attempts_at_budget__{safe_method}__T{budget_label}",
+                    title=f"Attempts at T={budget_s:g}s: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"budget_s": float(budget_s), "group_by": "k"},
+                ),
+            )
+            _plot_heatmap(
+                budget_subset,
+                value_col="quality_wasserstein_by_budget",
+                title=f"Quality heatmap at T={budget_s:g}s: {method}",
+                stem=output_dir.plots / f"quality_heatmap__{safe_method}__T{budget_label}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"quality_heatmap__{safe_method}__T{budget_label}",
+                    title=f"Quality heatmap at T={budget_s:g}s: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"budget_s": float(budget_s), "axes": ["n_workers", "k"]},
+                ),
+            )
+            _plot_heatmap(
+                budget_subset,
+                value_col="throughput_by_budget",
+                title=f"Throughput heatmap at T={budget_s:g}s: {method}",
+                stem=output_dir.plots / f"throughput_heatmap__{safe_method}__T{budget_label}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"throughput_heatmap__{safe_method}__T{budget_label}",
+                    title=f"Throughput heatmap at T={budget_s:g}s: {method}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"budget_s": float(budget_s), "axes": ["n_workers", "k"]},
+                ),
+            )
+
+        for n_workers in sorted(method_budget["n_workers"].dropna().unique().tolist()):
+            worker_subset = method_budget.loc[method_budget["n_workers"] == n_workers].copy()
+            if worker_subset.empty:
+                continue
+            _plot_workers_lines(
+                worker_subset,
+                x_col="budget_s",
+                y_col="quality_wasserstein_by_budget",
+                series_col="k",
+                xlabel="wall-clock budget (s)",
+                ylabel="quality (Wasserstein)",
+                title=f"Quality vs time: {method}, w={int(n_workers)}",
+                stem=output_dir.plots / f"quality_vs_time__{safe_method}__w{int(n_workers)}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"quality_vs_time__{safe_method}__w{int(n_workers)}",
+                    title=f"Quality vs time: {method}, w={int(n_workers)}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"n_workers": int(n_workers), "group_by": "k"},
+                ),
+            )
+            _plot_workers_lines(
+                worker_subset,
+                x_col="budget_s",
+                y_col="attempts_by_budget",
+                series_col="k",
+                xlabel="wall-clock budget (s)",
+                ylabel="attempts by budget",
+                title=f"Attempts vs time: {method}, w={int(n_workers)}",
+                stem=output_dir.plots / f"attempts_vs_time__{safe_method}__w{int(n_workers)}",
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=f"attempts_vs_time__{safe_method}__w{int(n_workers)}",
+                    title=f"Attempts vs time: {method}, w={int(n_workers)}",
+                    methods=[method],
+                    summary_plot=True,
+                    extra={"n_workers": int(n_workers), "group_by": "k"},
+                ),
+            )
+
+    throughput_all = throughput_mean.copy()
+    throughput_all["series"] = throughput_all.apply(
+        lambda row: f"{row['base_method']} | k={int(row['k'])}",
+        axis=1,
+    )
+    _plot_workers_lines(
+        throughput_all,
+        x_col="n_workers",
+        y_col="throughput_sims_per_s",
+        series_col="series",
+        xlabel="n_workers",
+        ylabel="throughput (sim/s)",
+        title="Throughput vs workers: all methods, all k",
+        stem=output_dir.plots / "throughput_vs_workers__all_methods_all_k",
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="throughput_vs_workers__all_methods_all_k",
+            title="Throughput vs workers: all methods, all k",
+            methods=methods,
+            summary_plot=True,
+            extra={"group_by": "method,k"},
+        ),
+    )
+
+    for budget_s in sorted(budget_mean["budget_s"].dropna().unique().tolist()):
+        budget_subset = budget_mean.loc[budget_mean["budget_s"] == budget_s].copy()
+        if budget_subset.empty:
+            continue
+        budget_label = _budget_token(float(budget_s))
+        budget_subset["series"] = budget_subset.apply(
+            lambda row: f"{row['base_method']} | k={int(row['k'])}",
+            axis=1,
+        )
+        _plot_workers_lines(
+            budget_subset,
+            x_col="n_workers",
+            y_col="quality_wasserstein_by_budget",
+            series_col="series",
+            xlabel="n_workers",
+            ylabel="quality (Wasserstein)",
+            title=f"Quality at T={budget_s:g}s: all methods, all k",
+            stem=output_dir.plots / f"quality_at_budget__all_methods_all_k__T{budget_label}",
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name=f"quality_at_budget__all_methods_all_k__T{budget_label}",
+                title=f"Quality at T={budget_s:g}s: all methods, all k",
+                methods=methods,
+                summary_plot=True,
+                extra={"budget_s": float(budget_s), "group_by": "method,k"},
+            ),
+        )
+        _plot_workers_lines(
+            budget_subset,
+            x_col="n_workers",
+            y_col="attempts_by_budget",
+            series_col="series",
+            xlabel="n_workers",
+            ylabel="attempts by budget",
+            title=f"Attempts at T={budget_s:g}s: all methods, all k",
+            stem=output_dir.plots / f"attempts_at_budget__all_methods_all_k__T{budget_label}",
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name=f"attempts_at_budget__all_methods_all_k__T{budget_label}",
+                title=f"Attempts at T={budget_s:g}s: all methods, all k",
+                methods=methods,
+                summary_plot=True,
+                extra={"budget_s": float(budget_s), "group_by": "method,k"},
+            ),
+        )
+        _plot_pareto(
+            budget_subset,
+            stem=output_dir.plots / f"pareto_quality_vs_attempts__T{budget_label}",
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name=f"pareto_quality_vs_attempts__T{budget_label}",
+                title=f"Pareto quality vs attempts at T={budget_s:g}s",
+                methods=methods,
+                summary_plot=True,
+                extra={"budget_s": float(budget_s)},
+            ),
+            title=f"Pareto quality vs attempts at T={budget_s:g}s",
+        )
+
+
 def plot_sensitivity_summary(
     data_dir: Path,
     grid: Dict[str, List],

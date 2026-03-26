@@ -170,10 +170,20 @@ class TestExtendScalingRunner:
         cfg = test_helpers.make_fast_runner_config(
             "scaling.json",
             methods=["rejection_abc"],
-            inference_overrides={"max_simulations": 60, "k": 10},
+            inference_overrides={"max_simulations": 60, "k": 10, "tol_init": 1_000_000_000.0},
             execution_overrides={"n_replicates": 2, "base_seed": 1},
             plots={"scaling_curve": False, "efficiency": False},
-            top_level_updates={"scaling": {"worker_counts": [1, 4], "test_worker_counts": [1, 4]}},
+            top_level_updates={
+                "scaling": {
+                    "worker_counts": [1, 4],
+                    "test_worker_counts": [1, 4],
+                    "k_values": [10, 50],
+                    "test_k_values": [10, 50],
+                    "wall_time_budgets_s": [0.05, 0.1],
+                    "wall_time_limit_s": 0.1,
+                    "max_simulations_policy": {"min_total": 60, "per_worker": 10, "k_factor": 1},
+                }
+            },
         )
         config_path = test_helpers.write_config(tmp_path, "scaling_extend.json", cfg)
 
@@ -189,7 +199,7 @@ class TestExtendScalingRunner:
         )
 
         assert _count_csv_rows(csv_path) == count_before
-        tuples = _read_key_tuples(csv_path, ["n_workers", "method", "replicate"])
+        tuples = _read_key_tuples(csv_path, ["n_workers", "k", "base_method", "replicate"])
         assert len(tuples) == len(set(tuples))
 
 

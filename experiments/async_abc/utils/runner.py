@@ -121,13 +121,18 @@ def compute_scaling_factor(
 
     elif "scaling" in cfg:
         full_worker_counts = cfg["scaling"].get("worker_counts", [1])
+        full_k_values = cfg["scaling"].get("k_values", [cfg["inference"].get("k", 1)])
         active_scaling_cfg = active_cfg.get("scaling", {})
         if test_mode:
             active_worker_counts = active_scaling_cfg.get("test_worker_counts", [1])
         else:
             active_worker_counts = active_scaling_cfg.get("worker_counts", [1])
-        factor *= len(full_worker_counts) / len(active_worker_counts)
-        note = f"{full_sims} sims × {full_reps} reps, {len(full_worker_counts)} worker configs"
+        active_k_values = active_scaling_cfg.get("test_k_values" if test_mode else "k_values", [active_cfg["inference"].get("k", 1)])
+        factor *= (len(full_worker_counts) * len(full_k_values)) / max(1, len(active_worker_counts) * len(active_k_values))
+        note = (
+            f"{full_sims} sims × {full_reps} reps, "
+            f"{len(full_worker_counts)} worker configs × {len(full_k_values)} k configs"
+        )
 
     elif "heterogeneity" in cfg:
         het = cfg["heterogeneity"]

@@ -304,14 +304,37 @@ class TestAblationRunner:
 
 
 class TestScalingRunner:
-    def test_creates_throughput_csv(self, scaling_runner_artifact):
+    def test_creates_summary_csvs(self, scaling_runner_artifact):
         data_dir = scaling_runner_artifact["root"] / "scaling" / "data"
-        assert any(data_dir.glob("throughput*.csv"))
+        assert (data_dir / "throughput_summary.csv").exists()
+        assert (data_dir / "budget_summary.csv").exists()
+        assert (data_dir / "raw_results.csv").exists()
 
-    def test_throughput_csv_has_expected_worker_counts(self, scaling_runner_artifact):
+    def test_throughput_csv_has_expected_worker_counts_and_k_values(self, scaling_runner_artifact):
         csv_path = scaling_runner_artifact["root"] / "scaling" / "data" / "throughput_summary.csv"
         rows = _rows(csv_path)
         assert {int(row["n_workers"]) for row in rows} == {1, 4}
+        assert {int(row["k"]) for row in rows} == {10, 50}
+        assert {row["base_method"] for row in rows} == {"rejection_abc"}
+
+    def test_budget_summary_has_expected_budget_rows(self, scaling_runner_artifact):
+        csv_path = scaling_runner_artifact["root"] / "scaling" / "data" / "budget_summary.csv"
+        rows = _rows(csv_path)
+        assert {float(row["budget_s"]) for row in rows} == {0.05, 0.1}
+        assert {int(row["n_workers"]) for row in rows} == {1, 4}
+        assert {int(row["k"]) for row in rows} == {10, 50}
+
+    def test_requested_max_simulations_uses_policy(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+
+        requested = module._requested_max_simulations(
+            {"max_simulations": 80},
+            n_workers=4,
+            k=50,
+            policy={"min_total": 40, "per_worker": 30, "k_factor": 2},
+        )
+
+        assert requested == 120
 
     def test_simulation_count_uses_attempts_before_raw_record_count(self):
         module = test_helpers.import_runner_module("scaling_runner.py")
@@ -384,23 +407,75 @@ class TestScalingRunner:
         output_dir = module.OutputDir(tmp_path, "scaling").ensure()
         rows = [
             {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k50__w4",
+                "k": 50,
                 "n_workers": 4,
-                "method": "async_propulate_abc",
                 "replicate": 0,
                 "seed": 2,
+                "requested_max_simulations": 120,
+                "max_wall_time_s": 0.1,
+                "elapsed_wall_time_s": 2.0,
                 "n_simulations": 20,
-                "wall_time_s": 2.0,
                 "throughput_sims_per_s": 10.0,
+                "final_quality_wasserstein": 1.0,
+                "final_n_particles": 10,
+                "final_tolerance": 0.5,
+                "state_kind": "accepted_prefix",
                 "test_mode": False,
             },
             {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k10__w1",
+                "k": 10,
                 "n_workers": 1,
-                "method": "async_propulate_abc",
                 "replicate": 0,
                 "seed": 1,
+                "requested_max_simulations": 80,
+                "max_wall_time_s": 0.1,
+                "elapsed_wall_time_s": 2.0,
                 "n_simulations": 10,
-                "wall_time_s": 2.0,
                 "throughput_sims_per_s": 5.0,
+                "final_quality_wasserstein": 2.0,
+                "final_n_particles": 5,
+                "final_tolerance": 1.0,
+                "state_kind": "accepted_prefix",
+                "test_mode": False,
+            },
+        ]
+        budget_rows = [
+            {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k10__w1",
+                "k": 10,
+                "n_workers": 1,
+                "replicate": 0,
+                "seed": 1,
+                "budget_s": 0.1,
+                "requested_max_simulations": 80,
+                "max_wall_time_s": 0.1,
+                "elapsed_wall_time_s": 0.1,
+                "attempts_by_budget": 8,
+                "posterior_samples_by_budget": 4,
+                "quality_wasserstein_by_budget": 2.0,
+                "best_tolerance_by_budget": 1.0,
+                "test_mode": False,
+            },
+            {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k50__w4",
+                "k": 50,
+                "n_workers": 4,
+                "replicate": 0,
+                "seed": 2,
+                "budget_s": 0.1,
+                "requested_max_simulations": 120,
+                "max_wall_time_s": 0.1,
+                "elapsed_wall_time_s": 0.1,
+                "attempts_by_budget": 18,
+                "posterior_samples_by_budget": 9,
+                "quality_wasserstein_by_budget": 1.0,
+                "best_tolerance_by_budget": 0.5,
                 "test_mode": False,
             },
         ]
@@ -411,16 +486,65 @@ class TestScalingRunner:
             lambda _output_dir, _cfg, extra=None: captured.setdefault("worker_counts", extra["worker_counts"]),
         )
 
-        module._write_scaling_shards(output_dir, rows)
+        module._write_rows_atomic(
+            module._throughput_shard_path(output_dir.data, 1, 10),
+            [rows[1]],
+            module._THROUGHPUT_FIELDNAMES,
+        )
+        module._write_rows_atomic(
+            module._throughput_shard_path(output_dir.data, 4, 50),
+            [rows[0]],
+            module._THROUGHPUT_FIELDNAMES,
+        )
+        module._write_rows_atomic(
+            module._budget_shard_path(output_dir.data, 1, 10),
+            [budget_rows[0]],
+            module._BUDGET_FIELDNAMES,
+        )
+        module._write_rows_atomic(
+            module._budget_shard_path(output_dir.data, 4, 50),
+            [budget_rows[1]],
+            module._BUDGET_FIELDNAMES,
+        )
         aggregate_rows = module.rebuild_scaling_outputs(
             output_dir,
-            {"plots": {}, "experiment_name": "scaling"},
+            {"plots": {}, "experiment_name": "scaling", "scaling": {"wall_time_budgets_s": [0.1]}},
         )
 
         csv_rows = _rows(output_dir.data / "throughput_summary.csv")
         assert [int(row["n_workers"]) for row in csv_rows] == [1, 4]
+        assert [int(row["k"]) for row in csv_rows] == [10, 50]
         assert [int(row["n_workers"]) for row in aggregate_rows] == [1, 4]
         assert captured["worker_counts"] == [1, 4]
+
+    def test_scaling_runner_writes_grid_plots(self, tmp_path):
+        cfg = test_helpers.make_fast_runner_config(
+            "scaling.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 60, "k": 10, "tol_init": 1_000_000_000.0},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={"scaling_curve": True, "efficiency": True},
+            top_level_updates={
+                "scaling": {
+                    "worker_counts": [1, 4],
+                    "test_worker_counts": [1, 4],
+                    "k_values": [10, 50],
+                    "test_k_values": [10, 50],
+                    "wall_time_budgets_s": [0.05, 0.1],
+                    "wall_time_limit_s": 0.1,
+                    "max_simulations_policy": {"min_total": 60, "per_worker": 10, "k_factor": 1},
+                }
+            },
+        )
+        config_path = test_helpers.write_config(tmp_path, "scaling_plots.json", cfg)
+
+        test_helpers.run_runner_main("scaling_runner.py", config_path, tmp_path)
+
+        plots_dir = tmp_path / "scaling" / "plots"
+        assert (plots_dir / "throughput_vs_workers__rejection_abc.pdf").exists()
+        assert (plots_dir / "efficiency_vs_workers__rejection_abc.pdf").exists()
+        assert (plots_dir / "quality_at_budget__rejection_abc__T0p1.pdf").exists()
+        assert (plots_dir / "throughput_vs_workers__all_methods_all_k_data.csv").exists()
 
 
 class TestTimingComparison:

@@ -370,10 +370,20 @@ def scaling_runner_artifact(tmp_path_factory):
     cfg = make_fast_runner_config(
         "scaling.json",
         methods=["rejection_abc"],
-        inference_overrides={"max_simulations": 80, "k": 15},
+        inference_overrides={"max_simulations": 80, "k": 15, "tol_init": 1_000_000_000.0},
         execution_overrides={"n_replicates": 1, "base_seed": 1},
         plots={"scaling_curve": False, "efficiency": False},
-        top_level_updates={"scaling": {"worker_counts": [1, 4], "test_worker_counts": [1, 4]}},
+        top_level_updates={
+            "scaling": {
+                "worker_counts": [1, 4],
+                "test_worker_counts": [1, 4],
+                "k_values": [10, 50],
+                "test_k_values": [10, 50],
+                "wall_time_budgets_s": [0.05, 0.1],
+                "wall_time_limit_s": 0.1,
+                "max_simulations_policy": {"min_total": 80, "per_worker": 10, "k_factor": 1},
+            }
+        },
     )
     config_path = write_config(root, "scaling_fast.json", cfg)
     run_runner_main("scaling_runner.py", config_path, root)
