@@ -271,7 +271,7 @@ class TestCellularPottsImport:
             cellular_potts.CellularPotts({"name": "cellular_potts"})
 
     def test_normalize_generated_config_paths_rewrites_repo_relative_include(self, tmp_path, monkeypatch):
-        from async_abc.benchmarks.cellular_potts import _normalize_generated_config_paths
+        from async_abc.benchmarks.cellular_potts import _rewrite_generated_config_paths as _normalize_generated_config_paths
 
         include_target = tmp_path / "shared" / "filling.json"
         include_target.parent.mkdir(parents=True)

@@ -1,5 +1,5 @@
 {
-  "config_template": "/p/project1/tissuetwin/herold2/nastjapy/templates/spheroid_inf_nanospheroids/sim_config.json",
+  "config_template": "experiments/assets/cellular_potts/sim_config.json",
   "separate_filling_config": true,
   "filling_generator_params": {
     "center": 25,

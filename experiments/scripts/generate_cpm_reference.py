@@ -12,7 +12,13 @@ Example
         --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
         --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
         --true-params '{"division_rate": 0.049905, "motility": 0.2}' \\
+        --true-params-scale normalized \\
         --seed 0
+
+Note: --true-params values are in the normalized [0, 1] parameter space by default
+(--true-params-scale normalized).  Physical units for the same reference point are
+division_rate ≈ 0.03, motility = 2000.  Pass --true-params-scale physical to supply
+raw simulator values instead.
 """
 import argparse
 import json
@@ -27,7 +33,7 @@ from async_abc.benchmarks.cellular_potts import (
     denormalize_cpm_params,
     _ensure_nastjapy_on_path,
     _ensure_reference_alias,
-    _normalize_generated_config_paths,
+    _rewrite_generated_config_paths,
     _resolve_repo_path,
 )
 
@@ -101,6 +107,20 @@ def main(args=None):
         default="Settings.randomseed",
         help="NAStJA config path for the RNG seed field (default: Settings.randomseed).",
     )
+    parser.add_argument(
+        "--n-seeds",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Number of reference simulations to generate, each with a different seed "
+            "(seeds 0 … N-1, starting from --seed). When N > 1 each simulation is "
+            "written to reference_seed_0/, reference_seed_1/, … inside --output-dir "
+            "instead of a single 'reference/' directory. Point 'reference_data_path' "
+            "at --output-dir and CellularPotts will auto-expand all sub-directories. "
+            "(default: 1)"
+        ),
+    )
     args = parser.parse_args(args)
 
     output_dir_path = _resolve_repo_path(args.output_dir)
@@ -160,42 +180,64 @@ def main(args=None):
         else {name: float(value) for name, value in true_params.items()}
     )
 
-    # Build ParameterList (true params + seed)
-    param_entries = [
-        Parameter(
-            name=name,
-            value=physical_true_params[name],
-            path=param_space_data[name]["path"],
+    n_seeds = args.n_seeds
+    base_seed = args.seed
+    multi = n_seeds > 1
+
+    generated_paths: list[str] = []
+    for i in range(n_seeds):
+        seed = base_seed + i
+        out_dir_name = f"reference_seed_{i}" if multi else "reference"
+
+        param_entries = [
+            Parameter(
+                name=name,
+                value=physical_true_params[name],
+                path=param_space_data[name]["path"],
+            )
+            for name in true_params
+        ]
+        param_entries.append(
+            Parameter(
+                name="random_seed",
+                value=seed,
+                path=args.seed_param_path,
+            )
         )
-        for name in true_params
-    ]
-    param_entries.append(
-        Parameter(
-            name="random_seed",
-            value=args.seed,
-            path=args.seed_param_path,
+        param_list = ParameterList(parameters=param_entries)
+
+        print(
+            f"[{i + 1}/{n_seeds}] Running reference simulation with params "
+            f"(public={true_params}, physical={physical_true_params}), seed={seed}"
         )
-    )
-    param_list = ParameterList(parameters=param_entries)
+        config_path = sim_manager.build_simulation_config(param_list, out_dir_name=out_dir_name)
+        _rewrite_generated_config_paths(config_path)
+        sim_manager.run_simulation(config_path)
 
-    print(
-        "Running reference simulation with params "
-        f"(public={true_params}, physical={physical_true_params}), seed={args.seed}"
-    )
-    config_path = sim_manager.build_simulation_config(param_list, out_dir_name="reference")
-    _normalize_generated_config_paths(config_path)
-    sim_manager.run_simulation(config_path)
+        output_path = Path(config_path).parent
+        if not multi:
+            canonical_output_path = _ensure_reference_alias(output_dir_path, output_path)
+            print(f"Reference simulation written to: {output_path}")
+            if canonical_output_path.resolve() != output_path.resolve():
+                print(f"Created canonical reference alias: {canonical_output_path} -> {output_path}")
+            generated_paths.append(str(canonical_output_path))
+        else:
+            print(f"  Written to: {output_path}")
+            generated_paths.append(str(output_path))
 
-    output_path = Path(config_path).parent
-    canonical_output_path = _ensure_reference_alias(output_dir_path, output_path)
-
-    print(f"Reference simulation written to: {output_path}")
-    if canonical_output_path.resolve() != output_path.resolve():
-        print(f"Created canonical reference alias: {canonical_output_path} -> {output_path}")
-    print(
-        f"Set 'reference_data_path' in cellular_potts.json to: {canonical_output_path}"
-    )
-    return str(canonical_output_path)
+    if multi:
+        print(
+            f"\n{n_seeds} reference simulations written under: {output_dir_path}\n"
+            "Set 'reference_data_path' in cellular_potts.json to the container directory:\n"
+            f"  {output_dir_path}\n"
+            "CellularPotts will auto-expand all reference_seed_*/ sub-directories."
+        )
+        return str(output_dir_path)
+    else:
+        print(
+            f"Set 'reference_data_path' in cellular_potts.json to: {generated_paths[0]}"
+        )
+        return generated_paths[0]
 
 
 if __name__ == "__main__":

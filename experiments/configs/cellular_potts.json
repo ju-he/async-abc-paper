@@ -11,8 +11,9 @@
     "engine_backend": "cis",
     "seed_param_name": "random_seed",
     "seed_param_path": "Settings.randomseed",
-    "true_division_rate": 0.049905,
-    "true_motility": 0.2
+    "true_division_rate_normalized": 0.049905,
+    "true_motility_normalized": 0.2,
+    "true_params_scale": "normalized [0,1]"
   },
   "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
   "inference": {

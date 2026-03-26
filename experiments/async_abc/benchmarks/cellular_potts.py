@@ -28,6 +28,10 @@ _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
 # expose symbolic fenv constants.
 _FE_ALL_EXCEPT = 0x3D   # FE_INVALID|FE_DENORMAL|FE_DIVBYZERO|FE_OVERFLOW|FE_UNDERFLOW|FE_INEXACT (x86)
 _FE_PYABC_MASK = 0x01 | 0x04 | 0x08  # FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW (x86)
+# Physical limits are the authoritative source in parameter_space JSON ("physical_range").
+# This module-level dict is used by the standalone normalize/denormalize helpers which
+# operate without a config instance (e.g. in generate_cpm_reference.py).  Keep it in
+# sync with the JSON values.
 _CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
     "division_rate": (0.00006, 0.6),
     "motility": (0.0, 10000.0),
@@ -37,6 +41,10 @@ try:
     _LIBC = ctypes.CDLL(None)
 except OSError:
     _LIBC = None
+
+# Sentinel for getattr calls that need to distinguish "attribute absent" from
+# "attribute present but falsy" (e.g. conn == 0 before a connection is opened).
+_SENTINEL = object()
 
 
 def _restore_default_fp_state() -> None:
@@ -110,13 +118,17 @@ def _ensure_nastjapy_on_path() -> None:
         ) from path_exc
 
 
-def _normalize_generated_config_paths(config_path: str | Path) -> Path:
+def _rewrite_generated_config_paths(config_path: str | Path) -> Path:
     """Rewrite generated include paths to absolute paths before launching NAStJA.
 
     The nastjapy templates can emit repo-root-relative include paths such as
     ``experiments/data/.../configs/filling.json``. NAStJA resolves those
     relative to the generated config directory, which duplicates the prefix and
     breaks the run. Converting include paths to absolute paths avoids that.
+
+    This function modifies ``config_path`` in-place and returns it.  That is
+    intentional and safe: ``config_path`` always points to a per-evaluation
+    temporary directory (named with a UUID), so there is no concurrent access.
     """
     config_path = Path(config_path)
     with open(config_path) as f:
@@ -279,6 +291,31 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
     )
 
 
+def _collect_reference_paths(configured_path: Path) -> list[str]:
+    """Resolve one or more CPM reference directories from a configured path.
+
+    Two layouts are supported:
+
+    * **Single reference**: ``configured_path`` itself is a valid reference
+      directory → returns ``[configured_path]``.
+    * **Multi-reference container**: ``configured_path`` is a directory whose
+      immediate children are valid reference directories (e.g. those produced
+      by ``generate_cpm_reference.py --n-seeds N``) → returns all children
+      sorted alphabetically.
+
+    The second layout lets you point the config at a container directory and
+    have all seed replicates picked up automatically.
+    """
+    resolved = _resolve_reference_data_path(configured_path)
+    sub_refs = sorted(
+        child for child in resolved.iterdir()
+        if _is_supported_reference_path(child)
+    )
+    if sub_refs:
+        return [str(p) for p in sub_refs]
+    return [str(resolved)]
+
+
 def _ensure_reference_alias(output_dir: Path, actual_reference_dir: Path) -> Path:
     """Create a stable ``output_dir/reference`` alias for generated reference data."""
     alias_path = output_dir / "reference"
@@ -318,28 +355,58 @@ def _remove_eval_path(path_like: str | Path) -> None:
         shutil.rmtree(path)
 
 
-def normalize_cpm_param(name: str, value: float) -> float:
-    """Map a CPM parameter from physical simulator units to [0, 1]."""
-    lo, hi = _CPM_PHYSICAL_LIMITS[name]
+def normalize_cpm_param(
+    name: str,
+    value: float,
+    limits: Optional[Dict[str, Tuple[float, float]]] = None,
+) -> float:
+    """Map a CPM parameter from physical simulator units to [0, 1].
+
+    Parameters
+    ----------
+    limits:
+        Override physical limits dict. Defaults to the module-level
+        ``_CPM_PHYSICAL_LIMITS`` constant, which must match the
+        ``"physical_range"`` values in ``parameter_space_division_motility.json``.
+    """
+    lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
     if hi <= lo:
         raise ValueError(f"Invalid CPM physical range for {name!r}: {(lo, hi)}")
     return (float(value) - lo) / (hi - lo)
 
 
-def denormalize_cpm_param(name: str, value: float) -> float:
-    """Map a CPM parameter from [0, 1] to physical simulator units."""
-    lo, hi = _CPM_PHYSICAL_LIMITS[name]
+def denormalize_cpm_param(
+    name: str,
+    value: float,
+    limits: Optional[Dict[str, Tuple[float, float]]] = None,
+) -> float:
+    """Map a CPM parameter from [0, 1] to physical simulator units.
+
+    Parameters
+    ----------
+    limits:
+        Override physical limits dict. Defaults to the module-level
+        ``_CPM_PHYSICAL_LIMITS`` constant, which must match the
+        ``"physical_range"`` values in ``parameter_space_division_motility.json``.
+    """
+    lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
     return lo + float(value) * (hi - lo)
 
 
-def normalize_cpm_params(params: Dict[str, float]) -> Dict[str, float]:
+def normalize_cpm_params(
+    params: Dict[str, float],
+    limits: Optional[Dict[str, Tuple[float, float]]] = None,
+) -> Dict[str, float]:
     """Return CPM params normalized into the public [0, 1] parameter space."""
-    return {name: normalize_cpm_param(name, float(value)) for name, value in params.items()}
+    return {name: normalize_cpm_param(name, float(value), limits) for name, value in params.items()}
 
 
-def denormalize_cpm_params(params: Dict[str, float]) -> Dict[str, float]:
+def denormalize_cpm_params(
+    params: Dict[str, float],
+    limits: Optional[Dict[str, Tuple[float, float]]] = None,
+) -> Dict[str, float]:
     """Return CPM params converted from public [0, 1] values to physical units."""
-    return {name: denormalize_cpm_param(name, float(value)) for name, value in params.items()}
+    return {name: denormalize_cpm_param(name, float(value), limits) for name, value in params.items()}
 
 
 class CellularPotts:
@@ -413,9 +480,15 @@ class CellularPotts:
 
         self._parameter_space_data: Dict[str, Any] = ps_data["parameters"]
         self._parameter_space = ParameterSpace.model_validate(ps_data)
-        self._physical_limits: Dict[str, Tuple[float, float]] = {
-            name: _CPM_PHYSICAL_LIMITS[name] for name in self._parameter_space_data
-        }
+        self._physical_limits: Dict[str, Tuple[float, float]] = {}
+        for name, entry in self._parameter_space_data.items():
+            if "physical_range" not in entry:
+                raise KeyError(
+                    f"Parameter '{name}' in parameter_space JSON is missing 'physical_range'. "
+                    "Add \"physical_range\": [lo, hi] to each parameter entry."
+                )
+            lo, hi = entry["physical_range"]
+            self._physical_limits[name] = (float(lo), float(hi))
         self.limits: Dict[str, Tuple[float, float]] = {
             name: (0.0, 1.0) for name in self._parameter_space_data
         }
@@ -424,6 +497,7 @@ class CellularPotts:
         self._output_dir: str = str(_resolve_repo_path(config["output_dir"]))
         self._keep_eval_dirs: bool = bool(config.get("keep_eval_dirs", False))
         self._eval_counter: int = 0  # for logging only; dir names use uuid4
+        self._nan_counter: int = 0   # for NaN rate monitoring
 
         # SimulationManager
         if _sim_manager is not None:
@@ -464,9 +538,11 @@ class CellularPotts:
                 dm_raw["feature_space_model"] = str(
                     _resolve_repo_path(dm_raw["feature_space_model"])
                 )
-            dm_raw["reference_data"] = str(
-                _resolve_reference_data_path(config["reference_data_path"])
+            ref_paths = _collect_reference_paths(
+                _resolve_repo_path(config["reference_data_path"])
             )
+            dm_raw["reference_data"] = ref_paths if len(ref_paths) > 1 else ref_paths[0]
+            logger.info("CPM using %d reference simulation(s)", len(ref_paths))
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 
@@ -512,7 +588,10 @@ class CellularPotts:
         sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
         logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
-        physical_params = denormalize_cpm_params(params)
+        physical_params = {
+            name: denormalize_cpm_param(name, value, self._physical_limits)
+            for name, value in params.items()
+        }
         param_entries = [
             Parameter(
                 name=name,
@@ -536,7 +615,7 @@ class CellularPotts:
             config_path = self._sim_manager.build_simulation_config(
                 param_list, out_dir_name=sim_dir_name
             )
-            _normalize_generated_config_paths(config_path)
+            _rewrite_generated_config_paths(config_path)
             sim_dir = str(Path(config_path).parent)
             self._sim_manager.run_simulation(config_path)
         except Exception as exc:
@@ -547,6 +626,8 @@ class CellularPotts:
                 sim_dir = str(Path(self._output_dir) / sim_dir_name)
             self._cleanup_eval_dir(sim_dir)
             _restore_default_fp_state()
+            self._nan_counter += 1
+            self._warn_if_high_nan_rate()
             return float("nan")
 
         # --- compute distance ---
@@ -562,16 +643,42 @@ class CellularPotts:
             self._cleanup_eval_dir(sim_dir)
             _restore_default_fp_state()
 
+        if score != score:  # isnan without importing math
+            self._nan_counter += 1
+            self._warn_if_high_nan_rate()
         return score
+
+    def _warn_if_high_nan_rate(self) -> None:
+        """Emit a warning when the NaN rate exceeds 15% after ≥ 20 evaluations."""
+        if self._eval_counter < 20:
+            return
+        nan_rate = self._nan_counter / self._eval_counter
+        if nan_rate > 0.15:
+            logger.warning(
+                "CPM NaN rate is high: %d/%d evaluations failed (%.0f%%). "
+                "Check simulation stability or parameter ranges.",
+                self._nan_counter,
+                self._eval_counter,
+                100 * nan_rate,
+            )
 
     def close(self) -> None:
         """Best-effort teardown for CPM helper objects between experiment runs."""
         distance_metric = getattr(self, "_distance_metric", None)
         reference_data = getattr(distance_metric, "reference_data", []) if distance_metric else []
         for datahandler in reference_data:
-            # Some DataHandler variants keep a private sqlite connection open.
-            conn = getattr(datahandler, "_SimDir__con", None)
-            if conn not in (None, 0):
+            # nastjapy's DataHandler keeps an internal sqlite connection in the
+            # private ``_SimDir__con`` attribute.  There is no public close() API;
+            # this is a known workaround.  File an upstream nastjapy issue if the
+            # attribute disappears and this warning fires.
+            conn = getattr(datahandler, "_SimDir__con", _SENTINEL)
+            if conn is _SENTINEL:
+                logger.warning(
+                    "Cannot close CPM reference-data connection: nastjapy DataHandler "
+                    "no longer exposes '_SimDir__con'. Resource leak possible. "
+                    "Request a public close() API from nastjapy."
+                )
+            elif conn not in (None, 0):
                 try:
                     conn.close()
                 except Exception:
