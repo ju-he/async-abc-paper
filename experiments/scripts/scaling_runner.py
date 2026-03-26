@@ -7,8 +7,10 @@ On HPC, call this script via ``mpirun -n N`` for each N in worker_counts.
 import csv
 import logging
 import math
+import re
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -20,10 +22,22 @@ from async_abc.io.paths import OutputDir
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
-from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_comparison_csv, write_timing_csv
+from async_abc.utils.runner import compute_scaling_factor, format_duration, make_arg_parser, run_method_distributed, write_timing_comparison_csv, write_timing_csv
 from async_abc.utils.seeding import make_seeds
 
 logger = logging.getLogger(__name__)
+
+_THROUGHPUT_FIELDNAMES = [
+    "n_workers",
+    "method",
+    "replicate",
+    "seed",
+    "n_simulations",
+    "wall_time_s",
+    "throughput_sims_per_s",
+    "test_mode",
+]
+_THROUGHPUT_SHARD_RE = re.compile(r"throughput_summary_w(?P<n_workers>\d+)\.csv$")
 
 
 def _interp_time(w: int, measured: dict) -> float:
@@ -66,6 +80,104 @@ def _simulation_count(records) -> int:
     return len(records)
 
 
+def _read_rows(path: Path) -> list[dict]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _write_rows_atomic(path: Path, rows: list[dict], fieldnames: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        newline="",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as tmp:
+        writer = csv.DictWriter(tmp, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+    try:
+        path.chmod(0o644)
+    except OSError:
+        pass
+
+
+def _scaling_shard_path(data_dir: Path, n_workers: int) -> Path:
+    return data_dir / f"throughput_summary_w{n_workers}.csv"
+
+
+def _load_scaling_rows(output_dir: OutputDir) -> list[dict]:
+    shard_paths = []
+    for path in sorted(output_dir.data.glob("throughput_summary_w*.csv")):
+        if _THROUGHPUT_SHARD_RE.fullmatch(path.name):
+            shard_paths.append(path)
+    if shard_paths:
+        rows = []
+        for path in shard_paths:
+            rows.extend(_read_rows(path))
+        return rows
+    return _read_rows(output_dir.data / "throughput_summary.csv")
+
+
+def _find_completed_scaling(output_dir: OutputDir, key_cols: list[str]) -> set[tuple[str, ...]]:
+    rows = _load_scaling_rows(output_dir)
+    return {tuple(str(row.get(col, "")) for col in key_cols) for row in rows}
+
+
+def _sort_throughput_rows(rows: list[dict]) -> list[dict]:
+    return sorted(
+        rows,
+        key=lambda row: (
+            int(row["n_workers"]),
+            str(row["method"]),
+            int(row["replicate"]),
+            int(row["seed"]),
+        ),
+    )
+
+
+def _write_scaling_shards(output_dir: OutputDir, throughput_rows: list[dict]) -> None:
+    by_workers: dict[int, list[dict]] = {}
+    for row in throughput_rows:
+        n_workers = int(row["n_workers"])
+        by_workers.setdefault(n_workers, []).append(row)
+    for n_workers, rows in by_workers.items():
+        _write_rows_atomic(
+            _scaling_shard_path(output_dir.data, n_workers),
+            _sort_throughput_rows(rows),
+            _THROUGHPUT_FIELDNAMES,
+        )
+
+
+def rebuild_scaling_outputs(output_dir: OutputDir, cfg: dict, fallback_rows: list[dict] | None = None) -> list[dict]:
+    """Rebuild aggregate scaling CSV/plots/metadata from per-worker shard CSVs."""
+    aggregate_rows = _load_scaling_rows(output_dir)
+    if not aggregate_rows and fallback_rows:
+        aggregate_rows = list(fallback_rows)
+    aggregate_rows = _sort_throughput_rows(aggregate_rows)
+    if not aggregate_rows:
+        return []
+
+    throughput_path = output_dir.data / "throughput_summary.csv"
+    _write_rows_atomic(throughput_path, aggregate_rows, _THROUGHPUT_FIELDNAMES)
+
+    plots_cfg = cfg.get("plots", {})
+    if plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"):
+        from async_abc.plotting.reporters import plot_scaling_summary
+
+        plot_scaling_summary(aggregate_rows, output_dir)
+
+    worker_counts = sorted({int(row["n_workers"]) for row in aggregate_rows})
+    write_metadata(output_dir, cfg, extra={"worker_counts": worker_counts})
+    return aggregate_rows
+
+
 def main(argv: list[str] | None = None) -> None:
     configure_logging()
     parser = make_arg_parser("Scaling experiment.")
@@ -95,8 +207,7 @@ def main(argv: list[str] | None = None) -> None:
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
-    throughput_path = output_dir.data / "throughput_summary.csv"
-    done = find_completed_combinations(throughput_path, ["n_workers", "method", "replicate"]) if args.extend else set()
+    done = _find_completed_scaling(output_dir, ["n_workers", "method", "replicate"]) if args.extend else set()
 
     # Clean up stale checkpoint dirs so we start fresh (skip when extending).
     if not args.extend and is_root_rank():
@@ -184,23 +295,10 @@ def main(argv: list[str] | None = None) -> None:
     write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
     write_timing_comparison_csv(Path(args.output_dir))
 
-    # Write throughput summary — append when extending, overwrite otherwise
     if throughput_rows:
-        write_header = not args.extend or not throughput_path.exists() or throughput_path.stat().st_size == 0
-        mode = "a" if args.extend and not write_header else "w"
-        with open(throughput_path, mode, newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=list(throughput_rows[0].keys()))
-            if write_header:
-                writer.writeheader()
-            writer.writerows(throughput_rows)
+        _write_scaling_shards(output_dir, throughput_rows)
 
-    plots_cfg = cfg.get("plots", {})
-    if plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"):
-        from async_abc.plotting.reporters import plot_scaling_summary
-
-        plot_scaling_summary(throughput_rows, output_dir)
-
-    write_metadata(output_dir, cfg, extra={"worker_counts": worker_counts})
+    rebuild_scaling_outputs(output_dir, cfg, fallback_rows=throughput_rows)
 
 
 if __name__ == "__main__":

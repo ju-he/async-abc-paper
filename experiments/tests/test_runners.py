@@ -379,6 +379,49 @@ class TestScalingRunner:
         assert module._simulation_count(attempt_records) == 2
         assert module._simulation_count(accepted_only_records) == 9
 
+    def test_rebuild_scaling_outputs_merges_worker_shards(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        output_dir = module.OutputDir(tmp_path, "scaling").ensure()
+        rows = [
+            {
+                "n_workers": 4,
+                "method": "async_propulate_abc",
+                "replicate": 0,
+                "seed": 2,
+                "n_simulations": 20,
+                "wall_time_s": 2.0,
+                "throughput_sims_per_s": 10.0,
+                "test_mode": False,
+            },
+            {
+                "n_workers": 1,
+                "method": "async_propulate_abc",
+                "replicate": 0,
+                "seed": 1,
+                "n_simulations": 10,
+                "wall_time_s": 2.0,
+                "throughput_sims_per_s": 5.0,
+                "test_mode": False,
+            },
+        ]
+        captured = {}
+        monkeypatch.setattr(
+            module,
+            "write_metadata",
+            lambda _output_dir, _cfg, extra=None: captured.setdefault("worker_counts", extra["worker_counts"]),
+        )
+
+        module._write_scaling_shards(output_dir, rows)
+        aggregate_rows = module.rebuild_scaling_outputs(
+            output_dir,
+            {"plots": {}, "experiment_name": "scaling"},
+        )
+
+        csv_rows = _rows(output_dir.data / "throughput_summary.csv")
+        assert [int(row["n_workers"]) for row in csv_rows] == [1, 4]
+        assert [int(row["n_workers"]) for row in aggregate_rows] == [1, 4]
+        assert captured["worker_counts"] == [1, 4]
+
 
 class TestTimingComparison:
     def test_small_mode_estimate_is_included_in_comparison(self, tmp_path):
