@@ -65,8 +65,7 @@ def _read_sharded_estimate(
                 continue
             row_run_mode = row.get("run_mode", "")
             if run_mode is None:
-                if row.get("test_mode", "").lower() not in ("true", "1"):
-                    continue
+                pass
             elif row_run_mode:
                 if row_run_mode != run_mode:
                     continue
