@@ -23,8 +23,27 @@
     "base_seed": 0
   },
   "sbc": {
-    "n_trials": 100,
-    "coverage_levels": [0.5, 0.8, 0.9, 0.95]
+    "n_trials": 300,
+    "coverage_levels": [0.5, 0.8, 0.9, 0.95],
+    "benchmarks": [
+      {
+        "name": "gaussian_mean",
+        "n_obs": 100,
+        "sigma_obs": 1.0,
+        "prior_low": -5.0,
+        "prior_high": 5.0,
+        "inference_overrides": {}
+      },
+      {
+        "name": "gandk",
+        "n_obs": 200,
+        "inference_overrides": {
+          "max_simulations": 20000,
+          "k": 200,
+          "tol_init": 2.0
+        }
+      }
+    ]
   },
   "plots": {
     "rank_histogram": true,

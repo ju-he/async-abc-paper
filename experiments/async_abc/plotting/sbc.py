@@ -15,19 +15,36 @@ def plot_rank_histogram(ranks_df: Any, output_dir: OutputDir) -> None:
     if ranks_df.empty:
         return
 
-    methods = list(ranks_df["method"].dropna().unique())
+    has_benchmark_col = "benchmark" in ranks_df.columns and not ranks_df["benchmark"].dropna().empty
+    if has_benchmark_col:
+        panels = list(
+            ranks_df[["benchmark", "method"]].dropna().drop_duplicates()
+            .itertuples(index=False, name=None)
+        )
+    else:
+        panels = [(None, m) for m in ranks_df["method"].dropna().unique()]
+
+    n_panels = len(panels)
     fig, axes = plt.subplots(
-        len(methods),
+        n_panels,
         1,
-        figsize=(6, max(3.5, 2.8 * len(methods))),
+        figsize=(6, max(3.5, 3.2 * n_panels)),
         squeeze=False,
     )
-    for idx, method in enumerate(methods):
+    for idx, (bench, method) in enumerate(panels):
         ax = axes[idx, 0]
-        group = ranks_df[ranks_df["method"] == method]
+        mask = ranks_df["method"] == method
+        if has_benchmark_col and bench is not None:
+            mask = mask & (ranks_df["benchmark"] == bench)
+        group = ranks_df[mask]
         bins = int(group["n_samples"].max()) + 1 if not group.empty else 10
-        ax.hist(group["rank"], bins=min(max(bins, 5), 30), color="steelblue", alpha=0.8)
-        ax.set_title(f"Rank histogram: {method}")
+        ax.hist(group["rank"], bins=bins, color="steelblue", alpha=0.8)
+        if group["rank"].shape[0] > 0:
+            ax.axhline(len(group) / bins, color="grey", ls="--", lw=0.8, label="uniform")
+        title = f"Rank histogram: {method}"
+        if bench is not None:
+            title = f"[{bench}] {title}"
+        ax.set_title(title)
         ax.set_xlabel("rank")
         ax.set_ylabel("count")
     fig.tight_layout()
@@ -42,7 +59,8 @@ def plot_rank_histogram(ranks_df: Any, output_dir: OutputDir) -> None:
             "diagnostic_plot": False,
             "experiment_name": output_dir.root.name,
             "benchmark": False,
-            "methods": methods,
+            "methods": [m for _, m in panels],
+            "n_panels": n_panels,
         },
     )
 
@@ -71,10 +89,24 @@ def plot_coverage_table(coverage_df: Any, output_dir: OutputDir) -> None:
         plot_df["empirical_coverage_ci_low"] = ci_low
         plot_df["empirical_coverage_ci_high"] = ci_high
 
+    has_benchmark_col = "benchmark" in plot_df.columns and not plot_df["benchmark"].dropna().empty
+    if has_benchmark_col:
+        group_keys = ["benchmark", "method"]
+    else:
+        group_keys = ["method"]
+
     fig, ax = plt.subplots(figsize=(6, 4))
-    for method, group in plot_df.groupby("method", dropna=False, sort=True):
+    combo_labels = []
+    for keys, group in plot_df.groupby(group_keys, dropna=False, sort=True):
+        if has_benchmark_col:
+            bench, method = keys
+            label = f"{bench} / {method}" if bench else str(method)
+        else:
+            method = keys
+            label = str(method) if method else "method"
+        combo_labels.append(label)
         group = group.sort_values("coverage_level")
-        ax.plot(group["coverage_level"], group["empirical_coverage"], marker="o", label=method or "method")
+        ax.plot(group["coverage_level"], group["empirical_coverage"], marker="o", label=label)
         if {"empirical_coverage_ci_low", "empirical_coverage_ci_high"} <= set(group.columns):
             ax.fill_between(
                 group["coverage_level"],
@@ -100,6 +132,6 @@ def plot_coverage_table(coverage_df: Any, output_dir: OutputDir) -> None:
             "diagnostic_plot": False,
             "experiment_name": output_dir.root.name,
             "benchmark": False,
-            "methods": sorted(plot_df["method"].dropna().unique().tolist()),
+            "methods": combo_labels,
         },
     )

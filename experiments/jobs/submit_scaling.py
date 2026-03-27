@@ -213,6 +213,8 @@ def main() -> None:
     active_sims = active_cfg["inference"]["max_simulations"]
     active_reps = active_cfg["execution"]["n_replicates"]
     k_values = list(scaling_cfg.get("k_values", [active_cfg["inference"].get("k", 100)]))
+    if args.test:
+        k_values = list(scaling_cfg.get("test_k_values", k_values))
     methods = list(active_cfg.get("methods", []))
     n_replicates = int(active_cfg["execution"]["n_replicates"])
     wall_time_limit_s = scaling_cfg.get("wall_time_limit_s")

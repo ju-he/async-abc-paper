@@ -33,6 +33,7 @@
     "idle_fraction": true,
     "throughput_over_time": true,
     "idle_fraction_comparison": true,
-    "gantt": true
+    "gantt": true,
+    "quality_by_sigma": true
   }
 }

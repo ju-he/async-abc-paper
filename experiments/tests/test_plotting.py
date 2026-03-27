@@ -1084,6 +1084,68 @@ class TestTaggedDbPaths:
 # PNG Agg fallback
 # ---------------------------------------------------------------------------
 
+class TestQualityBySigmaPlot:
+    """Phase 3: plot_quality_by_sigma integration tests."""
+
+    def test_creates_pdf(self, runtime_heterogeneity_runner_artifact):
+        plots_dir = (
+            runtime_heterogeneity_runner_artifact["root"]
+            / "runtime_heterogeneity"
+            / "plots"
+        )
+        assert (plots_dir / "quality_by_sigma.pdf").exists(), (
+            "quality_by_sigma.pdf must be created by the runner"
+        )
+
+    def test_creates_data_csv(self, runtime_heterogeneity_runner_artifact):
+        plots_dir = (
+            runtime_heterogeneity_runner_artifact["root"]
+            / "runtime_heterogeneity"
+            / "plots"
+        )
+        csv_path = plots_dir / "quality_by_sigma_data.csv"
+        assert csv_path.exists(), "quality_by_sigma_data.csv must exist"
+
+    def test_meta_records_n_sigma_levels(self, runtime_heterogeneity_runner_artifact):
+        plots_dir = (
+            runtime_heterogeneity_runner_artifact["root"]
+            / "runtime_heterogeneity"
+            / "plots"
+        )
+        meta = json.loads((plots_dir / "quality_by_sigma_meta.json").read_text())
+        assert "n_sigma_levels" in meta
+        assert int(meta["n_sigma_levels"]) >= 1
+
+    def test_unit_returns_pdf_without_quality_data(self, tmp_path):
+        """plot_quality_by_sigma creates output even when quality curves are empty."""
+        from async_abc.plotting.reporters import plot_quality_by_sigma
+        from async_abc.io.paths import OutputDir
+
+        # Records with __sigma tags but no true_params derivable → graceful skip
+        rec = ParticleRecord(
+            method="fake__sigma1.0",
+            replicate=0,
+            seed=0,
+            step=1,
+            params={"mu": 0.1},
+            loss=0.4,
+            weight=0.5,
+            tolerance=1.0,
+            wall_time=1.0,
+        )
+        output_dir = OutputDir(tmp_path, "test_quality").ensure()
+        cfg = {
+            "benchmark": {"name": "gaussian_mean"},  # no true_mu → skip
+            "inference": {"k": 5},
+        }
+        plot_quality_by_sigma([rec], cfg, output_dir)
+        # Should create a meta file (either skip metadata or actual plot)
+        assert (
+            (output_dir.plots / "quality_by_sigma.pdf").exists()
+            or (output_dir.plots / "quality_by_sigma_meta.json").exists()
+        )
+
+
 class TestPngAggFallback:
     def test_png_created_when_external_tools_unavailable(self, tmp_path, monkeypatch):
         """Even without pdftoppm/convert, PNG should be created via Agg fallback."""
@@ -1094,3 +1156,209 @@ class TestPngAggFallback:
         assert (tmp_path / "fallback_fig.png").exists()
         meta = json.loads((tmp_path / "fallback_fig_meta.json").read_text())
         assert meta["png"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 wiring: quality_df parameter
+# ---------------------------------------------------------------------------
+
+class TestSensitivitySummaryWithQualityDf:
+    """plot_sensitivity_summary accepts quality_df and uses wasserstein_mean."""
+
+    def _make_quality_df(self, grid: dict) -> pd.DataFrame:
+        import itertools
+        keys = sorted(grid.keys())
+        rows = []
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            row = dict(zip(keys, combo))
+            row["wasserstein_mean"] = 0.5
+            row["wasserstein_std"] = 0.05
+            row["n_replicates"] = 3
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def _make_tol_csvs(self, data_dir: Path, grid: dict) -> None:
+        import itertools
+        keys = sorted(grid.keys())
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            variant = dict(zip(keys, combo))
+            name = "__".join(f"{k}={v}" for k, v in sorted(variant.items()))
+            with open(data_dir / f"sensitivity_{name}.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["tolerance"])
+                w.writeheader()
+                w.writerows([{"tolerance": "1.0"}])
+
+    def test_quality_df_parameter_accepted(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {"k": [50, 100], "perturbation_scale": [0.4, 0.8], "tol_init_multiplier": [1.0]}
+        self._make_tol_csvs(output_dir.data, grid)
+        quality_df = self._make_quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+
+    def test_quality_df_produces_heatmap_file(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {"k": [50, 100], "perturbation_scale": [0.4, 0.8], "tol_init_multiplier": [1.0]}
+        self._make_tol_csvs(output_dir.data, grid)
+        quality_df = self._make_quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        pdfs = list(output_dir.plots.glob("sensitivity_heatmap*.pdf"))
+        assert len(pdfs) >= 1, f"Expected at least one PDF, got: {[p.name for p in pdfs]}"
+
+    def test_quality_summary_csv_written(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {"k": [50, 100], "perturbation_scale": [0.4, 0.8], "tol_init_multiplier": [1.0]}
+        self._make_tol_csvs(output_dir.data, grid)
+        quality_df = self._make_quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        assert (output_dir.data / "sensitivity_quality_summary.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: per-scheduler heatmap figures
+# ---------------------------------------------------------------------------
+
+class TestSensitivityHeatmapPerScheduler:
+    """When scheduler_type is in the grid, one figure per scheduler is produced."""
+
+    def _quality_df(self, grid: dict) -> pd.DataFrame:
+        import itertools
+        keys = sorted(grid.keys())
+        rows = []
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            row = dict(zip(keys, combo))
+            row["wasserstein_mean"] = 0.5
+            row["wasserstein_std"] = 0.05
+            row["n_replicates"] = 3
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def _tol_csvs(self, data_dir: Path, grid: dict) -> None:
+        import itertools
+        keys = sorted(grid.keys())
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            variant = dict(zip(keys, combo))
+            name = "__".join(f"{k}={v}" for k, v in sorted(variant.items()))
+            with open(data_dir / f"sensitivity_{name}.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["tolerance"])
+                w.writeheader()
+                w.writerows([{"tolerance": "1.0"}])
+
+    def test_generates_one_figure_per_scheduler(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {
+            "k": [50, 100],
+            "perturbation_scale": [0.4, 0.8],
+            "tol_init_multiplier": [0.5, 1.0],
+            "scheduler_type": ["acceptance_rate", "quantile"],
+        }
+        self._tol_csvs(output_dir.data, grid)
+        quality_df = self._quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        pdfs = {p.name for p in output_dir.plots.glob("sensitivity_heatmap*.pdf")}
+        assert "sensitivity_heatmap__scheduler_type=acceptance_rate.pdf" in pdfs, pdfs
+        assert "sensitivity_heatmap__scheduler_type=quantile.pdf" in pdfs, pdfs
+
+    def test_per_scheduler_csv_exported(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {
+            "k": [50, 100],
+            "perturbation_scale": [0.4, 0.8],
+            "tol_init_multiplier": [1.0],
+            "scheduler_type": ["acceptance_rate", "geometric_decay"],
+        }
+        self._tol_csvs(output_dir.data, grid)
+        quality_df = self._quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        for sched in ("acceptance_rate", "geometric_decay"):
+            csv_path = output_dir.plots / f"sensitivity_heatmap__scheduler_type={sched}_data.csv"
+            assert csv_path.exists(), f"Missing CSV for scheduler={sched}"
+
+    def test_missing_scheduler_data_skips_gracefully(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {
+            "k": [50],
+            "perturbation_scale": [0.4],
+            "tol_init_multiplier": [1.0],
+            "scheduler_type": ["acceptance_rate", "quantile"],
+        }
+        self._tol_csvs(output_dir.data, grid)
+        import itertools
+        keys = sorted(grid.keys())
+        rows = []
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            row = dict(zip(keys, combo))
+            if row["scheduler_type"] == "quantile":
+                row["wasserstein_mean"] = float("nan")
+                row["wasserstein_std"] = float("nan")
+                row["n_replicates"] = 0
+            else:
+                row["wasserstein_mean"] = 0.5
+                row["wasserstein_std"] = 0.05
+                row["n_replicates"] = 3
+            rows.append(row)
+        quality_df = pd.DataFrame(rows)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+
+    def test_no_scheduler_type_in_grid_gives_single_heatmap(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {
+            "k": [50, 100],
+            "perturbation_scale": [0.4, 0.8],
+            "tol_init_multiplier": [0.5, 1.0],
+        }
+        self._tol_csvs(output_dir.data, grid)
+        quality_df = self._quality_df(grid)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        assert (output_dir.plots / "sensitivity_heatmap.pdf").exists()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: per-replicate std in heatmap
+# ---------------------------------------------------------------------------
+
+class TestSensitivityHeatmapUncertainty:
+
+    def test_csv_output_contains_wasserstein_std(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        import itertools
+        grid = {"k": [50, 100], "perturbation_scale": [0.4, 0.8], "tol_init_multiplier": [1.0]}
+        keys = sorted(grid.keys())
+        rows = []
+        for combo in itertools.product(*[grid[k] for k in keys]):
+            row = dict(zip(keys, combo))
+            row["wasserstein_mean"] = 0.5
+            row["wasserstein_std"] = 0.08
+            row["n_replicates"] = 5
+            rows.append(row)
+        quality_df = pd.DataFrame(rows)
+        for row in rows:
+            name = "__".join(f"{k}={row[k]}" for k in keys)
+            with open(output_dir.data / f"sensitivity_{name}.csv", "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=["tolerance"])
+                w.writeheader()
+                w.writerow({"tolerance": "1.0"})
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        csv_path = output_dir.plots / "sensitivity_heatmap_data.csv"
+        assert csv_path.exists()
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            cols = reader.fieldnames or []
+        assert "wasserstein_std" in cols, f"wasserstein_std missing: {cols}"
+
+    def test_n_replicates_in_heatmap_metadata(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        grid = {"k": [50], "perturbation_scale": [0.4], "tol_init_multiplier": [1.0]}
+        quality_df = pd.DataFrame([{
+            "k": 50, "perturbation_scale": 0.4, "tol_init_multiplier": 1.0,
+            "wasserstein_mean": 0.3, "wasserstein_std": 0.02, "n_replicates": 5,
+        }])
+        with open(output_dir.data / "sensitivity_k=50__perturbation_scale=0.4__tol_init_multiplier=1.0.csv",
+                  "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["tolerance"])
+            w.writeheader()
+            w.writerow({"tolerance": "1.0"})
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
+        metas = list(output_dir.plots.glob("sensitivity_heatmap*meta.json"))
+        assert metas, "No metadata JSON found"
+        meta = json.loads(metas[0].read_text())
+        assert "n_replicates_min" in meta.get("extra", {}), f"n_replicates_min missing: {meta}"

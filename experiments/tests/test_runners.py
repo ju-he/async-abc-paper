@@ -707,6 +707,131 @@ class TestRuntimeHeterogeneityRunner:
             "active_span_s",
         } <= set(rows[0].keys())
 
+    # ── Phase 1: replicate-specific delay seed ────────────────────────────────
+
+    def test_delay_patterns_differ_by_seed(self):
+        """_make_heterogeneous_simulate with different seeds produces different delays."""
+        from unittest.mock import patch
+
+        module = test_helpers.import_runner_module("runtime_heterogeneity_runner.py")
+
+        def fake_sim(params, seed=0):
+            return 0.0
+
+        delays_a: list[float] = []
+        delays_b: list[float] = []
+
+        with patch("time.sleep", side_effect=delays_a.append):
+            wrapped_a = module._make_heterogeneous_simulate(
+                fake_sim, mu=0.0, sigma=1.0, seed=10, test_mode=False
+            )
+            for i in range(25):
+                wrapped_a({"mu": float(i)}, seed=i * 7 + 1)
+
+        with patch("time.sleep", side_effect=delays_b.append):
+            wrapped_b = module._make_heterogeneous_simulate(
+                fake_sim, mu=0.0, sigma=1.0, seed=99, test_mode=False
+            )
+            for i in range(25):
+                wrapped_b({"mu": float(i)}, seed=i * 7 + 1)
+
+        assert delays_a != delays_b, "Different seeds must produce different delay sequences"
+
+    def test_delay_seed_is_replicate_specific_in_runner(self, tmp_path):
+        """Runner passes per-replicate delay seed (not a fixed constant)."""
+        from unittest.mock import patch
+
+        module = test_helpers.import_runner_module("runtime_heterogeneity_runner.py")
+        captured_seeds: list[int] = []
+        original_make = module._make_heterogeneous_simulate
+
+        def recording_make(simulate_fn, mu, sigma, seed, test_mode=False):
+            captured_seeds.append(seed)
+            return original_make(simulate_fn, mu, sigma, seed, test_mode=True)
+
+        cfg = test_helpers.make_fast_runner_config(
+            "runtime_heterogeneity.json",
+            methods=["timed_fake"],
+            inference_overrides={"max_simulations": 10, "k": 5},
+            execution_overrides={"n_replicates": 2, "base_seed": 0},
+            plots={"idle_fraction": False, "throughput_over_time": False,
+                   "idle_fraction_comparison": False, "gantt": False},
+            top_level_updates={"heterogeneity": {"distribution": "lognormal", "mu": 0.0,
+                                                  "sigma_levels": [0.5]}},
+        )
+        config_path = test_helpers.write_config(tmp_path, "cfg.json", cfg)
+        output_dir = tmp_path / "out"
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            with patch.object(module, "_make_heterogeneous_simulate", recording_make):
+                module.main(["--config", str(config_path), "--output-dir", str(output_dir)])
+
+        # With 2 replicates and 1 sigma level → 2 calls with different seeds
+        assert len(captured_seeds) == 2, f"Expected 2 delay seeds, got {captured_seeds}"
+        assert captured_seeds[0] != captured_seeds[1], (
+            f"Replicates must get different delay seeds; got {captured_seeds}"
+        )
+
+    # ── Phase 2: base_delay_s calibration ────────────────────────────────────
+
+    def test_base_delay_s_in_config_overrides_mu(self, tmp_path):
+        """base_delay_s config key sets median delay (mu = log(base_delay_s))."""
+        import math
+        from unittest.mock import patch
+
+        module = test_helpers.import_runner_module("runtime_heterogeneity_runner.py")
+        captured_seeds: list[int] = []
+        original_make = module._make_heterogeneous_simulate
+
+        def recording_make(simulate_fn, mu, sigma, seed, test_mode=False):
+            captured_seeds.append(mu)
+            return original_make(simulate_fn, mu, sigma, seed, test_mode=True)
+
+        cfg = test_helpers.make_fast_runner_config(
+            "runtime_heterogeneity.json",
+            methods=["timed_fake"],
+            inference_overrides={"max_simulations": 10, "k": 5},
+            execution_overrides={"n_replicates": 1, "base_seed": 0},
+            plots={"idle_fraction": False, "throughput_over_time": False,
+                   "idle_fraction_comparison": False, "gantt": False},
+            replace_top_level={"heterogeneity": {"distribution": "lognormal",
+                                                  "base_delay_s": 2.5,
+                                                  "sigma_levels": [0.5]}},
+        )
+        config_path = test_helpers.write_config(tmp_path, "cfg.json", cfg)
+        output_dir = tmp_path / "out"
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            with patch.object(module, "_make_heterogeneous_simulate", recording_make):
+                module.main(["--config", str(config_path), "--output-dir", str(output_dir)])
+
+        assert captured_seeds, "Expected at least one _make_heterogeneous_simulate call"
+        expected_mu = math.log(2.5)
+        assert all(abs(mu - expected_mu) < 1e-9 for mu in captured_seeds), (
+            f"Expected mu=log(2.5)={expected_mu:.4f} but got {captured_seeds}"
+        )
+
+    # ── Phase 4: speedup summary CSV ─────────────────────────────────────────
+
+    def test_writes_speedup_summary_csv(self, runtime_heterogeneity_runner_artifact):
+        data_dir = runtime_heterogeneity_runner_artifact["root"] / "runtime_heterogeneity" / "data"
+        csv_path = data_dir / "speedup_summary.csv"
+        assert csv_path.exists(), "speedup_summary.csv must be written by the runner"
+        rows = _rows(csv_path)
+        assert rows, "speedup_summary.csv must contain data rows"
+        assert {"sigma", "base_method", "median_completion_time_s",
+                "speedup_vs_abc_smc_baseline"} <= set(rows[0].keys())
+
+    # ── Phase 5: no cluttered combined benchmark diagnostics ──────────────────
+
+    def test_no_cluttered_benchmark_diagnostics_plot(self, runtime_heterogeneity_runner_artifact):
+        """Runner must not call plot_benchmark_diagnostics on combined multi-sigma records."""
+        plots_dir = runtime_heterogeneity_runner_artifact["root"] / "runtime_heterogeneity" / "plots"
+        # If plot_benchmark_diagnostics were called on combined records, it would produce
+        # a posterior_comparison.pdf with 10 methods (2 methods × 5 sigma levels).
+        # The heterogeneity runner should NOT produce this plot.
+        assert not (plots_dir / "posterior_comparison.pdf").exists()
+
 
 class TestStragglerRunner:
     def test_resolves_effective_straggler_worker_id_by_backend(self):

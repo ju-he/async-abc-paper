@@ -263,8 +263,22 @@ def main(argv: list[str] | None = None) -> None:
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("sensitivity_heatmap"):
         from async_abc.plotting.reporters import plot_sensitivity_summary
+        from async_abc.analysis.sensitivity import (
+            compute_sensitivity_quality_summary,
+            true_params_from_benchmark_cfg,
+        )
 
-        plot_sensitivity_summary(output_dir.data, grid, output_dir)
+        true_params = true_params_from_benchmark_cfg(cfg.get("benchmark", {}))
+        max_sims = cfg["inference"].get("max_simulations", 0)
+        quality_df = None
+        if true_params and max_sims:
+            try:
+                quality_df = compute_sensitivity_quality_summary(
+                    output_dir.data, grid, true_params, max_sims
+                )
+            except Exception as exc:
+                logger.warning("[sensitivity] quality summary failed: %s", exc)
+        plot_sensitivity_summary(output_dir.data, grid, output_dir, quality_df=quality_df)
 
     write_metadata(output_dir, cfg, extra={"sensitivity_grid": grid})
 

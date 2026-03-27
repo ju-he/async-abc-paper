@@ -914,6 +914,171 @@ def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: Out
     )
 
 
+def plot_quality_by_sigma(
+    records: List[ParticleRecord],
+    cfg: Dict[str, Any],
+    output_dir: OutputDir,
+) -> None:
+    """Wasserstein-vs-wall-time faceted by sigma level — headline heterogeneity figure.
+
+    One panel per sigma level; each panel overlays async vs. sync methods.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from ..analysis import posterior_quality_curve
+
+    benchmark_cfg = cfg.get("benchmark", {})
+    inference_cfg = cfg.get("inference", {})
+    true_params = _true_params_from_cfg(records, benchmark_cfg)
+    if not true_params:
+        write_plot_metadata(
+            output_dir.plots / "quality_by_sigma",
+            metadata={
+                "plot_name": "quality_by_sigma",
+                "skip_reason": "no_true_params",
+                "summary_plot": True,
+            },
+        )
+        return
+
+    archive_size = inference_cfg.get("k")
+
+    sigma_set: set[float] = set()
+    for r in records:
+        if "__sigma" in r.method:
+            try:
+                sigma_set.add(float(r.method.split("__sigma", 1)[1]))
+            except ValueError:
+                pass
+    sigmas = sorted(sigma_set)
+    if not sigmas:
+        write_plot_metadata(
+            output_dir.plots / "quality_by_sigma",
+            metadata={
+                "plot_name": "quality_by_sigma",
+                "skip_reason": "no_sigma_tagged_records",
+                "summary_plot": True,
+            },
+        )
+        return
+
+    fig, axes = plt.subplots(
+        len(sigmas), 1,
+        figsize=(7.0, max(3.5, 2.8 * len(sigmas))),
+        squeeze=False,
+    )
+    summary_rows: list[dict[str, object]] = []
+    cmap = plt.get_cmap("tab10")
+
+    for sigma_idx, sigma in enumerate(sigmas):
+        ax = axes[sigma_idx, 0]
+        sigma_records = [r for r in records if f"__sigma{sigma}" in r.method]
+        if not sigma_records:
+            ax.set_title(f"σ={sigma:g} — no data")
+            ax.set_visible(False)
+            continue
+
+        # Strip __sigma{X} suffix so quality_curve groups by base method name
+        stripped = [
+            ParticleRecord(
+                method=base_method_name(r.method),
+                replicate=r.replicate,
+                seed=r.seed,
+                step=r.step,
+                params=r.params,
+                loss=r.loss,
+                weight=r.weight,
+                tolerance=r.tolerance,
+                wall_time=r.wall_time,
+                worker_id=r.worker_id,
+                sim_start_time=r.sim_start_time,
+                sim_end_time=r.sim_end_time,
+                generation=r.generation,
+                record_kind=r.record_kind,
+                time_semantics=r.time_semantics,
+                attempt_count=r.attempt_count,
+            )
+            for r in sigma_records
+        ]
+
+        quality_df = posterior_quality_curve(
+            stripped,
+            true_params=true_params,
+            axis_kind="wall_time",
+            checkpoint_strategy="quantile",
+            checkpoint_count=8,
+            archive_size=archive_size,
+        )
+        if quality_df.empty:
+            ax.set_title(f"σ={sigma:g} — no quality data")
+            ax.text(0.5, 0.5, "no quality data", ha="center", va="center", transform=ax.transAxes)
+            continue
+
+        panel_summary = _step_curve_summary(
+            quality_df,
+            x_col="axis_value",
+            y_col="wasserstein",
+            ci_level=0.95,
+            log_y=False,
+            lower_bound=0.0,
+        )
+        for method_idx, (method, group) in enumerate(panel_summary.groupby("method", sort=True)):
+            group = group.sort_values("axis_value")
+            color = cmap(method_idx % 10)
+            ax.plot(
+                group["axis_value"], group["wasserstein"],
+                linewidth=1.8, label=method, color=color,
+            )
+            valid_ci = (
+                group["wasserstein_ci_low"].notna()
+                & group["wasserstein_ci_high"].notna()
+                & (group["n_replicates"] >= 2)
+            )
+            if valid_ci.any():
+                ax.fill_between(
+                    group.loc[valid_ci, "axis_value"],
+                    group.loc[valid_ci, "wasserstein_ci_low"],
+                    group.loc[valid_ci, "wasserstein_ci_high"],
+                    alpha=0.15, color=color,
+                )
+            for _, row in group.iterrows():
+                summary_rows.append(
+                    {
+                        "sigma": float(sigma),
+                        "base_method": str(method),
+                        "wall_time": float(row["axis_value"]),
+                        "wasserstein": float(row["wasserstein"]),
+                        "n_replicates": int(row["n_replicates"]),
+                    }
+                )
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("wasserstein")
+        ax.set_title(f"Quality vs. wall-clock time: σ={sigma:g}")
+        ax.legend(frameon=False, fontsize="small")
+
+    fig.tight_layout()
+    data = (
+        {col: [row[col] for row in summary_rows]
+         for col in ["sigma", "base_method", "wall_time", "wasserstein", "n_replicates"]}
+        if summary_rows
+        else None
+    )
+    save_figure(
+        fig,
+        output_dir.plots / "quality_by_sigma",
+        data=data,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="quality_by_sigma",
+            title="Posterior quality vs. wall-clock time by σ",
+            methods=sorted({base_method_name(r.method) for r in records}),
+            summary_plot=True,
+            extra={"n_sigma_levels": len(sigmas), "n_data_rows": len(summary_rows)},
+        ),
+    )
+
+
 def plot_quality_vs_wall_time_diagnostic(
     records: List[ParticleRecord],
     true_params: Dict[str, float],
@@ -1634,6 +1799,7 @@ def _scaling_frame(rows: List[Dict[str, Any]]) -> pd.DataFrame:
         "max_wall_time_s",
         "elapsed_wall_time_s",
         "throughput_sims_per_s",
+        "worker_utilization",
         "final_quality_wasserstein",
         "final_tolerance",
         "budget_s",
@@ -2158,8 +2324,26 @@ def plot_sensitivity_summary(
     data_dir: Path,
     grid: Dict[str, List],
     output_dir: OutputDir,
+    quality_df: Optional[pd.DataFrame] = None,
 ) -> None:
-    """Heatmap of mean final tolerance across the sensitivity grid."""
+    """Heatmap of posterior quality (Wasserstein) across the sensitivity grid.
+
+    Parameters
+    ----------
+    data_dir:
+        Directory containing ``sensitivity_*.csv`` particle files.
+    grid:
+        The sensitivity grid dict ``{param: [values]}``.
+    output_dir:
+        Output directory for plots and data.
+    quality_df:
+        Pre-computed posterior quality summary from
+        :func:`~async_abc.analysis.sensitivity.compute_sensitivity_quality_summary`.
+        When provided, the heatmap uses ``wasserstein_mean`` as the cell value
+        and ``wasserstein_std`` / ``n_replicates`` are recorded in the CSV and
+        metadata.  When ``None``, falls back to the legacy mean-final-tolerance
+        metric computed directly from the raw particle CSVs.
+    """
     axes = list(grid.keys())
     if len(axes) < 2:
         return
@@ -2173,7 +2357,58 @@ def plot_sensitivity_summary(
     facet_vals = grid[facet_key] if facet_key else None
     scheduler_vals = grid[scheduler_key] if scheduler_key else None
 
-    # Build lookup: (row_val, col_val, facet_val, scheduler_val) → mean final tolerance
+    if quality_df is not None:
+        # ------------------------------------------------------------------ #
+        # New path: use pre-computed Wasserstein quality scores               #
+        # ------------------------------------------------------------------ #
+        # Persist the quality summary to the data directory for reproducibility.
+        quality_df.to_csv(data_dir / "sensitivity_quality_summary.csv", index=False)
+
+        base_meta = _nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="sensitivity_heatmap",
+            title="Sensitivity heatmap",
+            summary_plot=True,
+        )
+        n_rep_min = int(quality_df["n_replicates"].min()) if "n_replicates" in quality_df.columns else 0
+        base_meta.setdefault("extra", {})["n_replicates_min"] = n_rep_min
+
+        if scheduler_key and scheduler_vals is not None:
+            # One figure per scheduler value — keeps scheduler as a separate
+            # comparison axis rather than a visual facet column.
+            for sv in scheduler_vals:
+                sched_stem = output_dir.plots / f"sensitivity_heatmap__scheduler_type={sv}"
+                subset = quality_df[quality_df[scheduler_key].astype(str) == str(sv)]
+                plot_name = f"sensitivity_heatmap__scheduler_type={sv}"
+                meta = _nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name=plot_name,
+                    title=f"Sensitivity heatmap — {scheduler_key}={sv}",
+                    summary_plot=True,
+                    extra={"scheduler_type": str(sv), "n_replicates_min": n_rep_min},
+                )
+                _emit_sensitivity_heatmap(
+                    subset,
+                    row_key=row_key, col_key=col_key, facet_key=facet_key,
+                    row_vals=row_vals, col_vals=col_vals, facet_vals=facet_vals,
+                    path_stem=sched_stem,
+                    meta_path=output_dir.plots / f"{plot_name}_meta.json",
+                    extra_meta=meta,
+                )
+        else:
+            _emit_sensitivity_heatmap(
+                quality_df,
+                row_key=row_key, col_key=col_key, facet_key=facet_key,
+                row_vals=row_vals, col_vals=col_vals, facet_vals=facet_vals,
+                path_stem=output_dir.plots / "sensitivity_heatmap",
+                meta_path=output_dir.plots / "sensitivity_heatmap_meta.json",
+                extra_meta=base_meta,
+            )
+        return
+
+    # ---------------------------------------------------------------------- #
+    # Legacy fallback: mean-final-tolerance computed from raw particle CSVs  #
+    # ---------------------------------------------------------------------- #
     tol_map: Dict = defaultdict(list)
     for csv_path in sorted(data_dir.glob("sensitivity_*.csv")):
         rows = _read_csv(csv_path)
@@ -2187,8 +2422,7 @@ def plot_sensitivity_summary(
             continue
         mean_tol = float(np.mean(tolerances[-max(1, len(tolerances) // 10):]))
 
-        # Parse variant name from filename stem
-        stem_str = csv_path.stem[len("sensitivity_"):]  # strip prefix
+        stem_str = csv_path.stem[len("sensitivity_"):]
         variant = _parse_variant_stem(stem_str, list(grid))
         rv = variant.get(row_key)
         cv = variant.get(col_key)
@@ -2282,6 +2516,117 @@ def plot_sensitivity_summary(
             summary_plot=True,
         ),
     )
+
+
+def _emit_sensitivity_heatmap(
+    quality_df: pd.DataFrame,
+    *,
+    row_key: str,
+    col_key: str,
+    facet_key: Optional[str],
+    row_vals: List,
+    col_vals: List,
+    facet_vals: Optional[List],
+    path_stem: Path,
+    meta_path: Path,
+    extra_meta: Dict,
+) -> None:
+    """Build and save a single sensitivity heatmap figure from a quality_df slice.
+
+    Uses ``wasserstein_mean`` for cell values and includes ``wasserstein_std``
+    and ``n_replicates`` in the exported data CSV.  Calls :func:`sensitivity_heatmap`
+    for the visual figure, then rewrites the data CSV in tidy format.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    row_labels = [str(v) for v in row_vals]
+    col_labels = [str(v) for v in col_vals]
+
+    # ------------------------------------------------------------------ #
+    # Build mean and std matrices                                          #
+    # ------------------------------------------------------------------ #
+    def _get(rv, cv, fv=None) -> tuple[float, float, int]:
+        """Return (mean, std, n_rep) for a cell."""
+        if quality_df.empty:
+            return float("nan"), float("nan"), 0
+        mask = (
+            (quality_df[row_key].astype(str) == str(rv)) &
+            (quality_df[col_key].astype(str) == str(cv))
+        )
+        if fv is not None and facet_key:
+            mask &= quality_df[facet_key].astype(str) == str(fv)
+        subset = quality_df[mask]
+        if subset.empty:
+            return float("nan"), float("nan"), 0
+        mean = float(subset["wasserstein_mean"].iloc[0]) if "wasserstein_mean" in subset.columns else float("nan")
+        std = float(subset["wasserstein_std"].iloc[0]) if "wasserstein_std" in subset.columns else float("nan")
+        n_rep = int(subset["n_replicates"].iloc[0]) if "n_replicates" in subset.columns else 0
+        return mean, std, n_rep
+
+    if facet_key and facet_vals is not None:
+        mean_mat = np.full((len(facet_vals), len(row_vals), len(col_vals)), np.nan)
+        std_mat = np.full_like(mean_mat, np.nan)
+        tidy_rows: list[dict] = []
+        for f_idx, fv in enumerate(facet_vals):
+            for i, rv in enumerate(row_vals):
+                for j, cv in enumerate(col_vals):
+                    m, s, n = _get(rv, cv, fv)
+                    mean_mat[f_idx, i, j] = m
+                    std_mat[f_idx, i, j] = s
+                    tidy_rows.append({
+                        "facet": str(fv),
+                        row_key: str(rv),
+                        col_key: str(cv),
+                        "wasserstein_mean": m,
+                        "wasserstein_std": s,
+                        "n_replicates": n,
+                    })
+        if not np.isfinite(mean_mat).any():
+            return
+        paths = sensitivity_heatmap(
+            mean_mat,
+            row_labels=row_labels,
+            col_labels=col_labels,
+            path_stem=path_stem,
+            facet_labels=[str(v) for v in facet_vals],
+        )
+    else:
+        mean_mat = np.full((len(row_vals), len(col_vals)), np.nan)
+        std_mat = np.full_like(mean_mat, np.nan)
+        tidy_rows = []
+        for i, rv in enumerate(row_vals):
+            for j, cv in enumerate(col_vals):
+                m, s, n = _get(rv, cv)
+                mean_mat[i, j] = m
+                std_mat[i, j] = s
+                tidy_rows.append({
+                    row_key: str(rv),
+                    col_key: str(cv),
+                    "wasserstein_mean": m,
+                    "wasserstein_std": s,
+                    "n_replicates": n,
+                })
+        if not np.isfinite(mean_mat).any():
+            return
+        paths = sensitivity_heatmap(
+            mean_mat,
+            row_labels=row_labels,
+            col_labels=col_labels,
+            path_stem=path_stem,
+        )
+
+    # Rewrite the data CSV in tidy format with wasserstein_std included.
+    csv_path = paths.get("csv")
+    if csv_path and tidy_rows:
+        fieldnames = list(tidy_rows[0].keys())
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(tidy_rows)
+
+    _merge_metadata(paths.get("meta", meta_path), extra_meta)
 
 
 def plot_ablation_summary(

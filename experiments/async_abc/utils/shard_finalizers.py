@@ -470,6 +470,8 @@ def finalize_sbc_experiment(
                     continue
                 payload = json.loads(line)
                 payload["posterior_samples"] = np.asarray(payload["posterior_samples"], dtype=float)
+                if "posterior_weights" in payload and payload["posterior_weights"] is not None:
+                    payload["posterior_weights"] = np.asarray(payload["posterior_weights"], dtype=float)
                 result.append(payload)
         return result
 
@@ -481,6 +483,10 @@ def finalize_sbc_experiment(
                 payload["posterior_samples"] = [
                     float(value) for value in np.asarray(payload["posterior_samples"], dtype=float)
                 ]
+                if "posterior_weights" in payload and payload["posterior_weights"] is not None:
+                    payload["posterior_weights"] = [
+                        float(value) for value in np.asarray(payload["posterior_weights"], dtype=float)
+                    ]
                 f.write(json.dumps(payload) + "\n")
 
     trial_sources = _merge_sources(layout, shard_dirs, "sbc_trials.jsonl")

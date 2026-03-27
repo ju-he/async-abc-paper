@@ -364,18 +364,63 @@ Two complementary experiments characterize the advantage of asynchrony under dif
 
 ### 10.1 Stochastic Runtime Heterogeneity
 
-Artificially introduce runtime variability via LogNormal noise:
+Artificially introduce runtime variability by wrapping the benchmark simulator with a LogNormal
+sleep after each evaluation completes, modelling a slow simulator call:
 
 $$
-t(\theta) \sim \text{LogNormal}(\mu(\theta), \sigma)
+\text{delay} \sim \text{LogNormal}(\mu, \sigma)
 $$
+
+The median delay is controlled by `base_delay_s` in the config: `mu = log(base_delay_s)`.
+The sweep parameter `sigma` controls the spread (coefficient of variation).
+
+**Important implementation notes:**
+- `mu` is constant (not parameter-dependent); delays are random per evaluation, not correlated
+  with `θ`. This models hardware/scheduling jitter rather than stiff-parameter regions.
+- Each replicate receives a unique delay seed `stable_seed(base_seed, replicate_idx, sigma)`
+  to ensure statistical independence across replicates.
+- The sleep is injected *after* the simulation call, so worker timing (from Propulate's
+  `evaltime`/`evalperiod`) correctly spans the full busy period including the delay.
+- In `--test` mode the sleep is skipped entirely.
+
+Config fields:
+
+```json
+{
+  "heterogeneity": {
+    "distribution": "lognormal",
+    "base_delay_s": 1.0,
+    "sigma_levels": [0.0, 0.5, 1.0, 1.5, 2.0]
+  }
+}
+```
 
 Then compare:
 
-* synchronous ABC-SMC
-* asynchronous steady-state ABC
+* synchronous ABC-SMC (`abc_smc_baseline`)
+* asynchronous steady-state ABC (`async_propulate_abc`)
 
-Expected result: Async method maintains high utilization while sync method idles at generation barriers.
+Expected result: Async method maintains high utilization while sync method idles at generation
+barriers. At high `sigma`, async completes the same simulation budget in substantially less
+wall-clock time.
+
+**Idle fraction measurement:**
+Two complementary methods are used because the backends record timing differently:
+- `worker_idle`: direct per-worker `sim_start_time`/`sim_end_time` span — used for
+  `async_propulate_abc` (Propulate records per-evaluation `evaltime`/`evalperiod`).
+- `barrier_overhead`: generation-level timing fraction — used for `abc_smc_baseline`
+  (which only records generation-start/end, not per-worker intervals).
+
+Both are shown with distinct labels in the idle fraction plots.
+
+**Primary paper figures:**
+1. `quality_by_sigma.pdf` — Wasserstein distance vs. wall-clock time, one panel per sigma
+   level, async vs. sync overlaid. This is the headline result.
+2. `idle_fraction_comparison.pdf` — utilization-loss fraction vs. sigma for each method.
+3. `speedup_summary.csv` — median wall-clock span (and speedup ratio vs. `abc_smc_baseline`)
+   per sigma level and method; for stating direct speedup claims in the paper.
+4. `throughput_over_time.pdf` — simulations/s over time, faceted by sigma.
+5. `worker_gantt.pdf` — diagnostic Gantt chart (per-worker timeline).
 
 ---
 

@@ -68,14 +68,42 @@ def _write_trial_records_jsonl(trial_records: list[dict], path: Path) -> None:
         for row in trial_records:
             payload = dict(row)
             payload["posterior_samples"] = [float(x) for x in np.asarray(payload["posterior_samples"], dtype=float)]
+            if "posterior_weights" in payload and payload["posterior_weights"] is not None:
+                payload["posterior_weights"] = [float(x) for x in np.asarray(payload["posterior_weights"], dtype=float)]
             f.write(json.dumps(payload) + "\n")
 
 
-def _posterior_samples(records, param_name: str, *, archive_size: int | None = None) -> np.ndarray:
+def _posterior_samples(
+    records,
+    param_name: str,
+    *,
+    archive_size: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return (samples, weights) arrays for the final archive of a single trial."""
     final = []
     for result in final_state_results(records, archive_size=archive_size):
         final.extend(result.records)
-    return np.asarray([r.params[param_name] for r in final if param_name in r.params], dtype=float)
+    param_records = [r for r in final if param_name in r.params]
+    samples = np.asarray([r.params[param_name] for r in param_records], dtype=float)
+    weights = np.asarray(
+        [float(r.weight) if r.weight is not None else 1.0 for r in param_records],
+        dtype=float,
+    )
+    return samples, weights
+
+
+def _resolve_benchmark_configs(cfg: dict) -> list[dict]:
+    """Return the list of benchmark configs for the SBC loop.
+
+    If ``cfg["sbc"]["benchmarks"]`` is present it is used directly.
+    Otherwise falls back to the single ``cfg["benchmark"]`` entry for backward
+    compatibility. Each returned dict is a complete benchmark config; entries
+    may carry an optional ``"inference_overrides"`` key.
+    """
+    sbc_benchmarks = cfg.get("sbc", {}).get("benchmarks")
+    if sbc_benchmarks:
+        return list(sbc_benchmarks)
+    return [dict(cfg["benchmark"])]
 
 
 def _true_param_config(base_cfg: dict, true_params: dict[str, float], observed_seed: int) -> dict:
@@ -109,22 +137,38 @@ def _extend_trial_records(
     target: list[dict],
     trial_idx: int,
     method: str,
+    benchmark_name: str,
     true_params: dict[str, float],
     param_names: list[str],
     records,
     archive_size: int | None,
-) -> None:
+) -> bool:
+    """Append per-param trial records to *target*.
+
+    Returns True on success.  Returns False (dropout) if any parameter has no
+    posterior samples — a warning is logged and nothing is appended.
+    """
+    param_data = []
     for param in param_names:
-        samples = _posterior_samples(records, param, archive_size=archive_size)
+        samples, weights = _posterior_samples(records, param, archive_size=archive_size)
         if samples.size == 0:
-            continue
+            logger.warning(
+                "[sbc] trial dropout: trial=%s method=%s benchmark=%s param=%s — no posterior samples",
+                trial_idx, method, benchmark_name, param,
+            )
+            return False
+        param_data.append((param, samples, weights))
+    for param, samples, weights in param_data:
         target.append({
             "trial": trial_idx,
             "method": method,
+            "benchmark": benchmark_name,
             "param": param,
             "true_value": true_params[param],
             "posterior_samples": samples,
+            "posterior_weights": weights,
         })
+    return True
 
 
 def _log_method_phase(method: str) -> None:
@@ -160,14 +204,16 @@ def main(argv: list[str] | None = None) -> None:
     experiment_name = cfg["experiment_name"]
 
     sbc_cfg = cfg["sbc"]
-    benchmark_cfg = cfg["benchmark"]
     n_trials = int(sbc_cfg["n_trials"])
     coverage_levels = [float(x) for x in sbc_cfg["coverage_levels"]]
-    archive_size = cfg.get("inference", {}).get("k")
 
-    base_benchmark = make_benchmark(benchmark_cfg)
-    param_names = list(base_benchmark.limits.keys())
-    if not param_names:
+    # Resolve benchmark list (supports single or multi-benchmark configs).
+    benchmark_configs = _resolve_benchmark_configs(cfg)
+
+    # Use first benchmark to classify method execution modes (stable across benchmarks).
+    _first_benchmark_cfg = benchmark_configs[0]
+    _first_benchmark = make_benchmark(_first_benchmark_cfg)
+    if not _first_benchmark.limits:
         raise ValueError("SBC requires at least one inferable parameter.")
 
     seeds = make_seeds(n_trials, int(cfg["execution"]["base_seed"]))
@@ -226,126 +272,148 @@ def main(argv: list[str] | None = None) -> None:
     else:
         output_dir = OutputDir(args.output_dir, experiment_name).ensure()
 
-    # Classify methods into execution phases once (use base_benchmark for classification).
+    # Classify methods into execution phases once (use first benchmark for classification).
     all_methods = cfg["methods"]
     all_ranks_methods = [
         m for m in all_methods
-        if method_execution_mode_for_cfg(m, cfg["inference"], base_benchmark.simulate) == "all_ranks"
+        if method_execution_mode_for_cfg(m, cfg["inference"], _first_benchmark.simulate) == "all_ranks"
     ]
     rank_parallel_methods = [
         m for m in all_methods
-        if method_execution_mode_for_cfg(m, cfg["inference"], base_benchmark.simulate) == "rank_parallel"
+        if method_execution_mode_for_cfg(m, cfg["inference"], _first_benchmark.simulate) == "rank_parallel"
     ]
     other_methods = [m for m in all_methods if m not in set(all_ranks_methods) and m not in set(rank_parallel_methods)]
     phase1_methods = all_ranks_methods + other_methods
     method_idx_map = {m: idx for idx, m in enumerate(all_methods)}
 
     t0 = time.time()
+    trial_dropouts: dict[str, dict[str, int]] = {}
     try:
-        # ── Phase 1: all_ranks (and other) methods, method-major ────────────────
-        for method in phase1_methods:
-            _log_method_phase(method)
-            for trial_idx in selected_trials:
-                seed = seeds[trial_idx]
-                true_params, trial_benchmark = _build_trial_context(
-                    base_benchmark=base_benchmark,
-                    benchmark_cfg=benchmark_cfg,
-                    param_names=param_names,
-                    seed=seed,
-                )
-                method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
-                if is_root_rank():
-                    logger.info("[runner] starting method %s trial=%s", method, trial_idx)
-                records = run_method_distributed(
-                    method,
-                    trial_benchmark.simulate,
-                    trial_benchmark.limits,
-                    cfg["inference"],
-                    output_dir,
-                    replicate=trial_idx,
-                    seed=method_seed,
-                )
-                if is_root_rank():
-                    logger.info("[runner] finished method %s trial=%s", method, trial_idx)
-                _extend_trial_records(
-                    target=trial_records,
-                    trial_idx=trial_idx,
-                    method=method,
-                    true_params=true_params,
-                    param_names=param_names,
-                    records=records,
-                    archive_size=archive_size,
-                )
+        for bench_cfg_entry in benchmark_configs:
+            bench_name = bench_cfg_entry["name"]
+            # Per-benchmark inference overrides (e.g. different budget for g-and-k).
+            bench_inference_overrides = bench_cfg_entry.get("inference_overrides", {})
+            bench_inference_cfg = {**cfg["inference"], **bench_inference_overrides}
+            bench_archive_size = bench_inference_cfg.get("k")
+            base_benchmark = make_benchmark(bench_cfg_entry)
+            param_names = list(base_benchmark.limits.keys())
 
-        # ── Barrier: drain MPI state before rank_parallel phase ──────────────────
-        if rank_parallel_methods:
-            allgather(None)
+            if is_root_rank():
+                logger.info("[sbc] benchmark=%s n_trials=%s", bench_name, n_trials)
 
-        # ── Phase 2: rank_parallel methods, method-major on each rank ────────────
-        if rank_parallel_methods:
-            my_rank = get_rank()
-            world_size = get_world_size()
-            my_trials = selected_trials[my_rank::world_size]
-
-            phase2_error = None
-            my_trial_records = []
-            for method in rank_parallel_methods:
+            # ── Phase 1: all_ranks (and other) methods, method-major ────────────
+            for method in phase1_methods:
                 _log_method_phase(method)
-                if phase2_error:
-                    break
-                for trial_idx in my_trials:
-                    if phase2_error:
-                        break
+                for trial_idx in selected_trials:
                     seed = seeds[trial_idx]
                     true_params, trial_benchmark = _build_trial_context(
                         base_benchmark=base_benchmark,
-                        benchmark_cfg=benchmark_cfg,
+                        benchmark_cfg=bench_cfg_entry,
                         param_names=param_names,
                         seed=seed,
                     )
                     method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
-                    try:
-                        if is_root_rank():
-                            logger.info("[runner] starting method %s trial=%s", method, trial_idx)
-                        records = run_method_distributed(
-                            method,
-                            trial_benchmark.simulate,
-                            trial_benchmark.limits,
-                            cfg["inference"],
-                            output_dir,
-                            replicate=trial_idx,
-                            seed=method_seed,
-                        )
-                        if is_root_rank():
-                            logger.info("[runner] finished method %s trial=%s", method, trial_idx)
-                        _extend_trial_records(
-                            target=my_trial_records,
-                            trial_idx=trial_idx,
-                            method=method,
-                            true_params=true_params,
+                    if is_root_rank():
+                        logger.info("[runner] benchmark=%s method=%s trial=%s", bench_name, method, trial_idx)
+                    records = run_method_distributed(
+                        method,
+                        trial_benchmark.simulate,
+                        trial_benchmark.limits,
+                        bench_inference_cfg,
+                        output_dir,
+                        replicate=trial_idx,
+                        seed=method_seed,
+                    )
+                    if not _extend_trial_records(
+                        target=trial_records,
+                        trial_idx=trial_idx,
+                        method=method,
+                        benchmark_name=bench_name,
+                        true_params=true_params,
+                        param_names=param_names,
+                        records=records,
+                        archive_size=bench_archive_size,
+                    ):
+                        trial_dropouts.setdefault(bench_name, {})
+                        trial_dropouts[bench_name][method] = trial_dropouts[bench_name].get(method, 0) + 1
+
+            # ── Barrier: drain MPI state before rank_parallel phase ──────────────
+            if rank_parallel_methods:
+                allgather(None)
+
+            # ── Phase 2: rank_parallel methods, method-major on each rank ────────
+            if rank_parallel_methods:
+                my_rank = get_rank()
+                world_size = get_world_size()
+                my_trials = selected_trials[my_rank::world_size]
+
+                phase2_error = None
+                my_trial_records = []
+                my_dropout_counts: dict[str, dict[str, int]] = {}
+                for method in rank_parallel_methods:
+                    _log_method_phase(method)
+                    if phase2_error:
+                        break
+                    for trial_idx in my_trials:
+                        if phase2_error:
+                            break
+                        seed = seeds[trial_idx]
+                        true_params, trial_benchmark = _build_trial_context(
+                            base_benchmark=base_benchmark,
+                            benchmark_cfg=bench_cfg_entry,
                             param_names=param_names,
-                            records=records,
-                            archive_size=archive_size,
+                            seed=seed,
                         )
-                    except ImportError as exc:
-                        phase2_error = ("ImportError", str(exc))
-                        break
-                    except Exception:
-                        phase2_error = ("Exception", traceback.format_exc())
-                        break
+                        method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
+                        try:
+                            if is_root_rank():
+                                logger.info("[runner] benchmark=%s method=%s trial=%s", bench_name, method, trial_idx)
+                            records = run_method_distributed(
+                                method,
+                                trial_benchmark.simulate,
+                                trial_benchmark.limits,
+                                bench_inference_cfg,
+                                output_dir,
+                                replicate=trial_idx,
+                                seed=method_seed,
+                            )
+                            if not _extend_trial_records(
+                                target=my_trial_records,
+                                trial_idx=trial_idx,
+                                method=method,
+                                benchmark_name=bench_name,
+                                true_params=true_params,
+                                param_names=param_names,
+                                records=records,
+                                archive_size=bench_archive_size,
+                            ):
+                                my_dropout_counts.setdefault(bench_name, {})
+                                my_dropout_counts[bench_name][method] = my_dropout_counts[bench_name].get(method, 0) + 1
+                        except ImportError as exc:
+                            phase2_error = ("ImportError", str(exc))
+                            break
+                        except Exception:
+                            phase2_error = ("Exception", traceback.format_exc())
+                            break
 
-            all_errors = allgather(phase2_error)
-            first_error = next((e for e in all_errors if e is not None), None)
-            if first_error is not None:
-                kind, message = first_error
-                if kind == "ImportError":
-                    raise ImportError(message)
-                raise RuntimeError(message)
+                all_errors = allgather(phase2_error)
+                first_error = next((e for e in all_errors if e is not None), None)
+                if first_error is not None:
+                    kind, message = first_error
+                    if kind == "ImportError":
+                        raise ImportError(message)
+                    raise RuntimeError(message)
 
-            all_trial_records_by_rank = allgather(my_trial_records)
-            if is_root_rank():
-                for rank_records in all_trial_records_by_rank:
-                    trial_records.extend(rank_records)
+                all_trial_records_by_rank = allgather(my_trial_records)
+                all_dropout_counts_by_rank = allgather(my_dropout_counts)
+                if is_root_rank():
+                    for rank_records in all_trial_records_by_rank:
+                        trial_records.extend(rank_records)
+                    for rank_counts in all_dropout_counts_by_rank:
+                        for b_name, method_counts in rank_counts.items():
+                            for m, count in method_counts.items():
+                                trial_dropouts.setdefault(b_name, {})
+                                trial_dropouts[b_name][m] = trial_dropouts[b_name].get(m, 0) + count
 
         elapsed = time.time() - t0
     except Exception as exc:
@@ -425,6 +493,7 @@ def main(argv: list[str] | None = None) -> None:
         extra={
             "n_trials": n_trials,
             "coverage_levels": coverage_levels,
+            "trial_dropouts": trial_dropouts,
         },
     )
 

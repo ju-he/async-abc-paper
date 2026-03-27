@@ -30,7 +30,7 @@ def _configured_propulate_generation_budget(cfg: Dict[str, Any]) -> int:
     """Return the effective Propulate generation budget for a resolved config."""
     inference = cfg["inference"]
     sims = int(inference["max_simulations"])
-    workers = max(1, int(inference["n_workers"]))
+    workers = max(1, int(inference.get("n_workers", 1)))
     if inference.get("propulate_budget_mode") == "total_simulations":
         return max(1, math.ceil(sims / workers))
     if not inference.get("test_mode"):
@@ -44,9 +44,9 @@ def _method_compute_scale(method: str, cfg_full: Dict[str, Any], cfg_test: Dict[
     test_inf = cfg_test["inference"]
 
     full_sims = float(full_inf["max_simulations"])
-    full_workers = max(1.0, float(full_inf["n_workers"]))
+    full_workers = max(1.0, float(full_inf.get("n_workers", 1)))
     test_sims = float(test_inf["max_simulations"])
-    test_workers = max(1.0, float(test_inf["n_workers"]))
+    test_workers = max(1.0, float(test_inf.get("n_workers", 1)))
 
     if method == "async_propulate_abc":
         return float(_configured_propulate_generation_budget(cfg_full)) / float(
@@ -98,7 +98,7 @@ def compute_scaling_factor(
     active_cfg = load_config(config_path, test_mode=test_mode, small_mode=small_mode)
 
     full_sims = cfg["inference"]["max_simulations"]
-    full_workers = cfg["inference"]["n_workers"]
+    full_workers = cfg["inference"].get("n_workers", 1)
     full_reps = cfg["execution"]["n_replicates"]
     active_reps = active_cfg["execution"]["n_replicates"]
 

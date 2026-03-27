@@ -12,7 +12,6 @@ REQUIRED_BENCHMARK = ["name"]
 
 REQUIRED_INFERENCE = [
     "max_simulations",
-    "n_workers",
     "k",
     "tol_init",
     "scheduler_type",

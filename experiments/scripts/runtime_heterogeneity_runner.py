@@ -43,6 +43,7 @@ from async_abc.utils.sharding import (
     write_shard_status,
 )
 from async_abc.utils.runner import compute_corrected_estimate, format_duration, make_arg_parser, run_experiment, write_timing_comparison_csv, write_timing_csv
+from async_abc.utils.seeding import stable_seed
 from async_abc.benchmarks import make_benchmark
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,66 @@ def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int
     return wrapped
 
 
+def _compute_speedup_summary(records):
+    """Return per-(sigma, base_method) median completion time and speedup vs abc_smc_baseline."""
+    import numpy as np
+    import pandas as pd
+    from async_abc.analysis import base_method_name as _base_method_name
+
+    timing_rows = []
+    for r in records:
+        if r.sim_start_time is None or r.sim_end_time is None:
+            continue
+        if "__sigma" not in r.method:
+            continue
+        try:
+            sigma = float(r.method.split("__sigma", 1)[1])
+        except ValueError:
+            continue
+        timing_rows.append(
+            {
+                "sigma": sigma,
+                "base_method": _base_method_name(r.method),
+                "replicate": int(r.replicate),
+                "sim_start_time": float(r.sim_start_time),
+                "sim_end_time": float(r.sim_end_time),
+            }
+        )
+
+    empty = pd.DataFrame(
+        columns=["sigma", "base_method", "median_completion_time_s", "speedup_vs_abc_smc_baseline"]
+    )
+    if not timing_rows:
+        return empty
+
+    df = pd.DataFrame(timing_rows)
+    span_rows = (
+        df.groupby(["sigma", "base_method", "replicate"])
+        .apply(lambda g: g["sim_end_time"].max() - g["sim_start_time"].min(), include_groups=False)
+        .reset_index(name="active_span_s")
+    )
+    summary = (
+        span_rows.groupby(["sigma", "base_method"])["active_span_s"]
+        .median()
+        .reset_index()
+        .rename(columns={"active_span_s": "median_completion_time_s"})
+    )
+    baseline_map = (
+        summary[summary["base_method"] == "abc_smc_baseline"]
+        .set_index("sigma")["median_completion_time_s"]
+        .to_dict()
+    )
+    summary["speedup_vs_abc_smc_baseline"] = summary.apply(
+        lambda row: (
+            baseline_map[row["sigma"]] / row["median_completion_time_s"]
+            if row["sigma"] in baseline_map and row["median_completion_time_s"] > 0
+            else np.nan
+        ),
+        axis=1,
+    )
+    return summary
+
+
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
     owner_id = f"{os.getenv('SLURM_JOB_ID', 'manual')}:{layout.shard_index}"
     maybe_finalize_sharded_run(
@@ -108,13 +169,20 @@ def main(argv: list[str] | None = None) -> None:
 
     bm = make_benchmark(cfg["benchmark"])
     het = cfg.get("heterogeneity", {})
-    mu = float(het.get("mu", 0.0))
+    if "base_delay_s" in het:
+        import math as _math
+        mu = _math.log(float(het["base_delay_s"]))
+    else:
+        mu = float(het.get("mu", 0.0))
 
     # Support both single sigma and a list of sigma levels for a sweep
     if "sigma_levels" in het:
         sigma_levels = list(het["sigma_levels"])
     else:
         sigma_levels = [float(het.get("sigma", 1.0))]
+
+    base_seed = cfg["execution"]["base_seed"]
+    n_replicates = cfg["execution"]["n_replicates"]
 
     original_simulate = bm.simulate
     all_records = []
@@ -174,38 +242,40 @@ def main(argv: list[str] | None = None) -> None:
         experiment_start = time.time()
         try:
             for sigma in sigma_levels:
-                wrapped_simulate = _make_heterogeneous_simulate(
-                    original_simulate, mu, sigma, seed=42, test_mode=test_mode
-                )
-                bm.simulate = wrapped_simulate
                 sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
-                all_records.extend(
-                    run_experiment(
-                        sigma_cfg,
-                        output_dir,
-                        benchmark=bm,
-                        extend=False,
-                        replicate_indices=unit_indices,
-                        record_transform=lambda record, sigma=sigma: ParticleRecord(
-                            method=f"{record.method}__sigma{sigma}",
-                            replicate=record.replicate,
-                            seed=record.seed,
-                            step=record.step,
-                            params=record.params,
-                            loss=record.loss,
-                            weight=record.weight,
-                            tolerance=record.tolerance,
-                            wall_time=record.wall_time,
-                            worker_id=record.worker_id,
-                            sim_start_time=record.sim_start_time,
-                            sim_end_time=record.sim_end_time,
-                            generation=record.generation,
-                            record_kind=record.record_kind,
-                            time_semantics=record.time_semantics,
-                            attempt_count=record.attempt_count,
-                        ),
+                for replicate_idx in unit_indices:
+                    replicate_delay_seed = stable_seed(base_seed, replicate_idx, sigma)
+                    bm.simulate = _make_heterogeneous_simulate(
+                        original_simulate, mu, sigma,
+                        seed=replicate_delay_seed, test_mode=test_mode,
                     )
-                )
+                    all_records.extend(
+                        run_experiment(
+                            sigma_cfg,
+                            output_dir,
+                            benchmark=bm,
+                            extend=False,
+                            replicate_indices=[replicate_idx],
+                            record_transform=lambda record, sigma=sigma: ParticleRecord(
+                                method=f"{record.method}__sigma{sigma}",
+                                replicate=record.replicate,
+                                seed=record.seed,
+                                step=record.step,
+                                params=record.params,
+                                loss=record.loss,
+                                weight=record.weight,
+                                tolerance=record.tolerance,
+                                wall_time=record.wall_time,
+                                worker_id=record.worker_id,
+                                sim_start_time=record.sim_start_time,
+                                sim_end_time=record.sim_end_time,
+                                generation=record.generation,
+                                record_kind=record.record_kind,
+                                time_semantics=record.time_semantics,
+                                attempt_count=record.attempt_count,
+                            ),
+                        )
+                    )
             bm.simulate = original_simulate
 
             experiment_elapsed = time.time() - experiment_start
@@ -263,36 +333,39 @@ def main(argv: list[str] | None = None) -> None:
     output_dir = OutputDir(args.output_dir, experiment_name).ensure()
     experiment_start = time.time()
     for sigma in sigma_levels:
-        wrapped_simulate = _make_heterogeneous_simulate(
-            original_simulate, mu, sigma, seed=42, test_mode=test_mode
-        )
-        bm.simulate = wrapped_simulate
         sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
-        records = run_experiment(
-            sigma_cfg,
-            output_dir,
-            benchmark=bm,
-            extend=args.extend,
-            record_transform=lambda record, sigma=sigma: ParticleRecord(
-                method=f"{record.method}__sigma{sigma}",
-                replicate=record.replicate,
-                seed=record.seed,
-                step=record.step,
-                params=record.params,
-                loss=record.loss,
-                weight=record.weight,
-                tolerance=record.tolerance,
-                wall_time=record.wall_time,
-            worker_id=record.worker_id,
-            sim_start_time=record.sim_start_time,
-            sim_end_time=record.sim_end_time,
-            generation=record.generation,
-            record_kind=record.record_kind,
-            time_semantics=record.time_semantics,
-            attempt_count=record.attempt_count,
-        ),
-    )
-        all_records.extend(records)
+        for replicate_idx in range(n_replicates):
+            replicate_delay_seed = stable_seed(base_seed, replicate_idx, sigma)
+            bm.simulate = _make_heterogeneous_simulate(
+                original_simulate, mu, sigma,
+                seed=replicate_delay_seed, test_mode=test_mode,
+            )
+            records = run_experiment(
+                sigma_cfg,
+                output_dir,
+                benchmark=bm,
+                extend=args.extend,
+                replicate_indices=[replicate_idx],
+                record_transform=lambda record, sigma=sigma: ParticleRecord(
+                    method=f"{record.method}__sigma{sigma}",
+                    replicate=record.replicate,
+                    seed=record.seed,
+                    step=record.step,
+                    params=record.params,
+                    loss=record.loss,
+                    weight=record.weight,
+                    tolerance=record.tolerance,
+                    wall_time=record.wall_time,
+                    worker_id=record.worker_id,
+                    sim_start_time=record.sim_start_time,
+                    sim_end_time=record.sim_end_time,
+                    generation=record.generation,
+                    record_kind=record.record_kind,
+                    time_semantics=record.time_semantics,
+                    attempt_count=record.attempt_count,
+                ),
+            )
+            all_records.extend(records)
 
     bm.simulate = original_simulate
 
@@ -314,10 +387,6 @@ def main(argv: list[str] | None = None) -> None:
         write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
         write_timing_comparison_csv(Path(args.output_dir))
 
-    if is_root_rank() and any(cfg.get("plots", {}).values()):
-        from async_abc.plotting.reporters import plot_benchmark_diagnostics
-
-        plot_benchmark_diagnostics(all_records, cfg, output_dir)
     if is_root_rank() and cfg.get("plots", {}).get("gantt"):
         from async_abc.plotting.reporters import plot_worker_gantt
 
@@ -335,10 +404,16 @@ def main(argv: list[str] | None = None) -> None:
         from async_abc.plotting.reporters import plot_idle_fraction_comparison
 
         plot_idle_fraction_comparison(all_records, output_dir)
+    if is_root_rank() and plots_cfg.get("quality_by_sigma"):
+        from async_abc.plotting.reporters import plot_quality_by_sigma
+
+        plot_quality_by_sigma(all_records, cfg, output_dir)
     if is_root_rank():
         from async_abc.plotting.reporters import write_runtime_debug_summary
 
         write_runtime_debug_summary(all_records, output_dir)
+        speedup_df = _compute_speedup_summary(all_records)
+        speedup_df.to_csv(output_dir.data / "speedup_summary.csv", index=False)
         write_metadata(output_dir, cfg, extra={"heterogeneity": het, "sigma_levels": sigma_levels})
 
 

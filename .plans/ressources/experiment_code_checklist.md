@@ -404,6 +404,7 @@ python experiments/scripts/gaussian_mean_runner.py \
 Purpose:
 
 - quantify benefits of asynchronous execution when simulation runtime varies strongly
+- measure idle worker fraction and posterior quality over wall-clock time under increasing variance
 
 Required files:
 
@@ -413,35 +414,55 @@ Required files:
 
 Required functionality:
 
-- inject controlled synthetic runtime distributions into at least Gaussian and Lotka-Volterra benchmarks
-- compare methods under increasing runtime variance
-- record utilization and idle fractions
+- wrap the benchmark simulator with a per-evaluation LogNormal sleep to model heterogeneous HPC workloads
+- sweep over multiple `sigma_levels` in a single run; each sigma level shares the same replicate budget
+- per-replicate delay seeds derived via `stable_seed(base_seed, replicate_idx, sigma)` — no shared hardcoded seed
+- sleep is injected **after** the simulation call, so Propulate `evaltime`/`evalperiod` records the full busy span
+- in `--test` mode the sleep is skipped entirely
+- record utilization and idle fractions, posterior quality curves, and speedup summary
 
-Suggested config fields:
+Actual config structure:
 
 ```json
 {
-  "benchmarks": ["gaussian_mean", "lotka_volterra"],
-  "methods": ["async_propulate_abc", "pyabc_smc"],
-  "runtime_model": {
-    "type": "lognormal",
-    "variance_levels": [0.0, 0.5, 1.0, 1.5]
+  "experiment_name": "runtime_heterogeneity",
+  "benchmark": { "name": "gaussian_mean", ... },
+  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "inference": { "max_simulations": 20000, "n_workers": 48, ... },
+  "execution": { "n_replicates": 5, "base_seed": 0 },
+  "heterogeneity": {
+    "distribution": "lognormal",
+    "base_delay_s": 1.0,
+    "sigma_levels": [0.0, 0.5, 1.0, 1.5, 2.0]
   },
-  "execution": {
-    "n_workers": [8, 32, 128],
-    "seeds": [1, 2, 3]
+  "plots": {
+    "idle_fraction": true,
+    "throughput_over_time": true,
+    "idle_fraction_comparison": true,
+    "gantt": true,
+    "quality_by_sigma": true
   }
 }
 ```
 
+`base_delay_s` sets the **median** delay per evaluation (`mu = log(base_delay_s)`).
+`sigma_levels` sweeps the spread of the delay distribution.
+
 Outputs:
 
-- worker Gantt diagnostics
-- idle fraction summary plots
-- idle fraction comparison plots
-- throughput-over-time plots
-- benchmark summary and diagnostic plots via the standard benchmark plotting pipeline
-- each with CSV and metadata
+- `data/raw_results.csv` — particle records; method names include `__sigma{X}` tag
+- `data/speedup_summary.csv` — per-(sigma, base_method) median completion time and speedup ratio vs `abc_smc_baseline`
+- `data/runtime_debug_summary.csv` — per-worker timing debug info
+- `plots/quality_by_sigma.pdf` — **headline figure**: Wasserstein distance vs wall-clock time, one panel per sigma level, async vs sync overlaid
+- `plots/idle_fraction_comparison.pdf` — utilization-loss fraction vs sigma, both methods
+- `plots/idle_fraction.pdf` — per-method idle fraction summary
+- `plots/throughput_over_time.pdf` — simulations/s over time, faceted by sigma
+- `plots/worker_gantt.pdf` — diagnostic per-worker timeline (not a paper figure)
+- each with accompanying CSV and metadata
+
+Note: `plot_benchmark_diagnostics` is **not** called in this runner. The `quality_by_sigma` plot
+replaces its function for the heterogeneity experiment (calling it on the combined
+`method__sigma{X}` records would produce cluttered 10-method plots).
 
 ### 5.3 Scaling experiment
 

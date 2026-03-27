@@ -457,8 +457,12 @@ def runtime_heterogeneity_runner_artifact(tmp_path_factory):
             "throughput_over_time": False,
             "idle_fraction_comparison": False,
             "gantt": True,
+            "quality_by_sigma": True,
         },
-        top_level_updates={"heterogeneity": {"distribution": "lognormal", "mu": 0.0, "sigma_levels": [0.0, 0.5]}},
+        top_level_updates={
+            "heterogeneity": {"distribution": "lognormal", "mu": 0.0, "sigma_levels": [0.0, 0.5]},
+            "benchmark": {"true_mu": 0.0},
+        },
     )
     config_path = write_config(root, "runtime_heterogeneity_fast.json", cfg)
     with patched_method_registry({"timed_fake": timed_fake_method}):

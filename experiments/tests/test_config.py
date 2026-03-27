@@ -285,6 +285,38 @@ class TestSensitivityConfig:
         cfg = load_config("configs/sensitivity.json")
         assert "tol_init_multiplier" in cfg["sensitivity_grid"]
 
+    def test_tol_init_multiplier_has_four_levels(self):
+        """Paper-concept specifies [0.5, 1.0, 2.0, 5.0] — all four must be present."""
+        cfg = load_config("configs/sensitivity.json")
+        levels = cfg["sensitivity_grid"]["tol_init_multiplier"]
+        assert 2.0 in levels, f"Missing 2.0 in tol_init_multiplier levels: {levels}"
+        assert len(levels) == 4, f"Expected 4 levels, got {len(levels)}: {levels}"
+
+    def test_n_workers_not_in_sensitivity_inference(self):
+        """n_workers is a system parameter and must not appear in the inference block."""
+        cfg = load_config("configs/sensitivity.json")
+        assert "n_workers" not in cfg["inference"], (
+            "n_workers should not be in sensitivity inference config"
+        )
+
+    def test_sensitivity_gandk_config_exists(self):
+        """A sensitivity_gandk.json config must exist for the g-and-k benchmark."""
+        # load_config resolves relative to experiments/, so this will raise
+        # FileNotFoundError if the file is absent.
+        cfg = load_config("configs/sensitivity_gandk.json")
+        assert cfg is not None
+
+    def test_sensitivity_gandk_benchmark_is_gandk(self):
+        cfg = load_config("configs/sensitivity_gandk.json")
+        assert cfg["benchmark"]["name"] == "gandk"
+
+    def test_sensitivity_gandk_has_adequate_budget(self):
+        cfg = load_config("configs/sensitivity_gandk.json")
+        assert cfg["inference"]["max_simulations"] >= 20000, (
+            f"g-and-k sensitivity needs >= 20000 simulations, "
+            f"got {cfg['inference']['max_simulations']}"
+        )
+
 
 class TestScalingFactor:
     def test_propulate_total_budget_mode_scales_with_worker_count(self, tmp_path, minimal_config):
