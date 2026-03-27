@@ -303,7 +303,7 @@ def main() -> None:
             shard_assignments=shard_assignments,
         )
 
-        n_tasks = int(actual_cfg["inference"]["n_workers"])
+        n_tasks = int(actual_cfg.get("inference", {}).get("n_workers", 1) or 1)
         nodes = max(1, math.ceil(n_tasks / CORES_PER_NODE))
         script_dir = jobs_root / experiment_name / run_id
         script_dir.mkdir(parents=True, exist_ok=True)
