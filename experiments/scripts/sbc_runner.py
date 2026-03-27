@@ -180,6 +180,10 @@ def _log_method_phase(method: str) -> None:
         logger.info("[sbc] entering %s phase", method)
 
 
+def _checkpoint_tag(benchmark_name: str, method: str) -> str:
+    return f"{benchmark_name}__{method}"
+
+
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
     owner_id = f"{os.getenv('SLURM_JOB_ID', 'manual')}:{layout.shard_index}"
     maybe_finalize_sharded_run(
@@ -313,13 +317,17 @@ def main(argv: list[str] | None = None) -> None:
                         seed=seed,
                     )
                     method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
+                    method_inference_cfg = {
+                        **bench_inference_cfg,
+                        "_checkpoint_tag": _checkpoint_tag(bench_name, method),
+                    }
                     if is_root_rank():
                         logger.info("[runner] benchmark=%s method=%s trial=%s", bench_name, method, trial_idx)
                     records = run_method_distributed(
                         method,
                         trial_benchmark.simulate,
                         trial_benchmark.limits,
-                        bench_inference_cfg,
+                        method_inference_cfg,
                         output_dir,
                         replicate=trial_idx,
                         seed=method_seed,
@@ -365,6 +373,10 @@ def main(argv: list[str] | None = None) -> None:
                             seed=seed,
                         )
                         method_seed = int(seed + 1000 * (method_idx_map[method] + 1))
+                        method_inference_cfg = {
+                            **bench_inference_cfg,
+                            "_checkpoint_tag": _checkpoint_tag(bench_name, method),
+                        }
                         try:
                             if is_root_rank():
                                 logger.info("[runner] benchmark=%s method=%s trial=%s", bench_name, method, trial_idx)
@@ -372,7 +384,7 @@ def main(argv: list[str] | None = None) -> None:
                                 method,
                                 trial_benchmark.simulate,
                                 trial_benchmark.limits,
-                                bench_inference_cfg,
+                                method_inference_cfg,
                                 output_dir,
                                 replicate=trial_idx,
                                 seed=method_seed,

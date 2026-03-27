@@ -206,6 +206,67 @@ def test_sbc_runner_executes_methods_in_method_major_order(tmp_path, monkeypatch
     ]
 
 
+def test_sbc_runner_uses_benchmark_scoped_checkpoint_tags(tmp_path, monkeypatch):
+    cfg = test_helpers.make_fast_runner_config(
+        "sbc.json",
+        methods=["async_propulate_abc"],
+        inference_overrides={"max_simulations": 10, "n_workers": 1, "k": 5, "tol_init": 5.0},
+        execution_overrides={"n_replicates": 1, "base_seed": 0},
+        plots={"rank_histogram": False, "coverage_table": False},
+        replace_top_level={
+            "sbc": {
+                "n_trials": 1,
+                "coverage_levels": [0.5],
+                "benchmarks": [
+                    {
+                        "name": "gaussian_mean",
+                        "n_obs": 40,
+                        "sigma_obs": 1.0,
+                        "prior_low": -5.0,
+                        "prior_high": 5.0,
+                        "inference_overrides": {},
+                    },
+                    {
+                        "name": "gandk",
+                        "n_obs": 50,
+                        "inference_overrides": {"max_simulations": 20, "k": 10, "tol_init": 2.0},
+                    },
+                ],
+            }
+        },
+    )
+    config_path = test_helpers.write_config(tmp_path, "sbc_checkpoint_tags.json", cfg)
+    module = test_helpers.import_runner_module("sbc_runner.py")
+
+    calls = []
+
+    def fake_run_method_distributed(method, simulate_fn, limits, inference_cfg, output_dir, replicate, seed):
+        calls.append((method, tuple(limits.keys()), inference_cfg.get("_checkpoint_tag")))
+        return []
+
+    monkeypatch.setattr(module, "run_method_distributed", fake_run_method_distributed)
+    monkeypatch.setattr(module, "_extend_trial_records", lambda **_kwargs: True)
+    monkeypatch.setattr(module, "configure_logging", lambda: None)
+    monkeypatch.setattr(module, "write_timing_comparison_csv", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "write_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(module, "is_root_rank", lambda: True)
+    monkeypatch.setattr(module, "allgather", lambda value: [value])
+    monkeypatch.setattr(module, "get_rank", lambda: 0)
+    monkeypatch.setattr(module, "get_world_size", lambda: 1)
+
+    module.main([
+        "--config",
+        str(config_path),
+        "--output-dir",
+        str(tmp_path),
+    ])
+
+    assert calls == [
+        ("async_propulate_abc", ("mu",), "gaussian_mean__async_propulate_abc"),
+        ("async_propulate_abc", ("A", "B", "g", "k"), "gandk__async_propulate_abc"),
+    ]
+
+
 def test_posterior_samples_reconstructs_async_final_archive_per_replicate():
     module = test_helpers.import_runner_module("sbc_runner.py")
     records = [
