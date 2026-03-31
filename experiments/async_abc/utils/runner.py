@@ -24,6 +24,10 @@ from ..utils.seeding import make_seeds
 logger = logging.getLogger(__name__)
 
 _RANK_ZERO_STATUS_POLL_S = 0.2
+# Maximum wall seconds non-root ranks wait for root to write a terminal status.
+# Override via the ABC_RANK_ZERO_TIMEOUT_S environment variable for testing.
+import os as _os
+_RANK_ZERO_STATUS_TIMEOUT_S = float(_os.environ.get("ABC_RANK_ZERO_TIMEOUT_S", "7200"))
 
 
 def _configured_propulate_generation_budget(cfg: Dict[str, Any]) -> int:
@@ -498,8 +502,19 @@ def _write_rank_zero_status(path: Path, payload: Dict[str, str]) -> None:
     tmp_path.replace(path)
 
 
-def _wait_for_rank_zero_status(path: Path) -> Dict[str, str]:
-    """Poll until root writes a terminal status for a rank-zero method."""
+def _wait_for_rank_zero_status(
+    path: Path,
+    timeout_s: Optional[float] = None,
+) -> Dict[str, str]:
+    """Poll until root writes a terminal status for a rank-zero method.
+
+    Raises ``TimeoutError`` after *timeout_s* seconds (default
+    ``_RANK_ZERO_STATUS_TIMEOUT_S``) so non-root ranks do not poll indefinitely
+    when root hangs in record extraction or MPI finalization.
+    """
+    if timeout_s is None:
+        timeout_s = _RANK_ZERO_STATUS_TIMEOUT_S
+    deadline = time.time() + timeout_s
     while True:
         try:
             with open(path) as f:
@@ -515,6 +530,11 @@ def _wait_for_rank_zero_status(path: Path) -> Dict[str, str]:
         except json.JSONDecodeError:
             # Root may still be replacing the status file.
             pass
+        if time.time() >= deadline:
+            raise TimeoutError(
+                f"Rank-zero status not written after {timeout_s:.0f}s: {path}. "
+                "Root rank may be hung in record extraction or MPI finalization."
+            )
         time.sleep(_RANK_ZERO_STATUS_POLL_S)
 
 

@@ -5,9 +5,12 @@ standard set of figures for a given experiment type.
 """
 import csv
 import json
+import logging
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import pandas as pd
@@ -1192,6 +1195,165 @@ def plot_quality_vs_wall_time(
     )
 
 
+def _progress_export_frame(
+    *,
+    tolerance_df: pd.DataFrame | None = None,
+    quality_df: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    if tolerance_df is not None and not tolerance_df.empty:
+        tol_frame = tolerance_df.copy()
+        tol_frame["metric"] = "tolerance"
+        tol_frame["axis_kind"] = "wall_time"
+        tol_frame["axis_value"] = tol_frame["wall_time"]
+        frames.append(tol_frame)
+    if quality_df is not None and not quality_df.empty:
+        qual_frame = quality_df.copy()
+        qual_frame["metric"] = "wasserstein"
+        frames.append(qual_frame)
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True, sort=False)
+
+
+def plot_progress_summary(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+    ci_level: float = 0.95,
+    audit_df: pd.DataFrame | None = None,
+) -> None:
+    """Paper summary: tolerance and Wasserstein progress over wall-clock time."""
+    from ..analysis import posterior_quality_curve, tolerance_over_wall_time
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    audit_df = audit_df if audit_df is not None else pd.DataFrame()
+    tolerance_df = tolerance_over_wall_time(records)
+    tolerance_summary = pd.DataFrame()
+    if not tolerance_df.empty:
+        tolerance_summary = _step_curve_summary(
+            tolerance_df,
+            x_col="wall_time",
+            y_col="tolerance",
+            ci_level=ci_level,
+            log_y=True,
+        )
+
+    quality_summary = pd.DataFrame()
+    quality_skip_reason = None
+    if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
+        quality_skip_reason = "paper_quality_plots_disallowed_by_audit"
+    else:
+        quality_df = posterior_quality_curve(
+            records,
+            true_params=true_params,
+            axis_kind="wall_time",
+            checkpoint_strategy="quantile",
+            checkpoint_count=checkpoint_count,
+            archive_size=archive_size,
+        )
+        if quality_df.empty:
+            quality_skip_reason = "missing_true_params_or_quality_rows"
+        else:
+            quality_summary = _step_curve_summary(
+                quality_df,
+                x_col="axis_value",
+                y_col="wasserstein",
+                ci_level=ci_level,
+                log_y=False,
+                lower_bound=0.0,
+            )
+            if quality_summary.empty:
+                quality_skip_reason = "empty_quality_summary"
+
+    if tolerance_summary.empty and quality_summary.empty:
+        write_plot_metadata(
+            output_dir.plots / "progress_summary",
+            metadata={
+                "plot_name": "progress_summary",
+                "skip_reason": "missing_tolerance_and_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    n_panels = int(not tolerance_summary.empty) + int(not quality_summary.empty)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6.2 * n_panels, 4), squeeze=False)
+    axes_list = list(axes.ravel())
+    panel_idx = 0
+    if not tolerance_summary.empty:
+        ax = axes_list[panel_idx]
+        panel_idx += 1
+        for method, group in tolerance_summary.groupby("method", sort=True):
+            group = group.sort_values("wall_time")
+            ax.plot(group["wall_time"], group["tolerance"], linewidth=1.8, label=method)
+            valid_ci = (
+                group["tolerance_ci_low"].notna()
+                & group["tolerance_ci_high"].notna()
+                & (group["n_replicates"] >= 2)
+            )
+            if valid_ci.any():
+                ax.fill_between(
+                    group.loc[valid_ci, "wall_time"],
+                    group.loc[valid_ci, "tolerance_ci_low"],
+                    group.loc[valid_ci, "tolerance_ci_high"],
+                    alpha=0.2,
+                )
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("tolerance")
+        ax.set_yscale("log")
+        ax.set_title("Tolerance progress")
+        ax.legend(frameon=False, fontsize=8)
+    if not quality_summary.empty:
+        ax = axes_list[panel_idx]
+        for method, group in quality_summary.groupby("method", sort=True):
+            group = group.sort_values("axis_value")
+            ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=method)
+            valid_ci = (
+                group["wasserstein_ci_low"].notna()
+                & group["wasserstein_ci_high"].notna()
+                & (group["n_replicates"] >= 2)
+            )
+            if valid_ci.any():
+                ax.fill_between(
+                    group.loc[valid_ci, "axis_value"],
+                    group.loc[valid_ci, "wasserstein_ci_low"],
+                    group.loc[valid_ci, "wasserstein_ci_high"],
+                    alpha=0.2,
+                )
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("wasserstein")
+        ax.set_title("Posterior quality progress")
+        ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+
+    export_df = _progress_export_frame(
+        tolerance_df=tolerance_summary,
+        quality_df=quality_summary,
+    )
+    save_figure(
+        fig,
+        output_dir.plots / "progress_summary",
+        data={col: export_df[col].tolist() for col in export_df.columns},
+        metadata={
+            "plot_name": "progress_summary",
+            "summary_plot": True,
+            "ci_level": float(ci_level),
+            "has_tolerance_panel": bool(not tolerance_summary.empty),
+            "has_wasserstein_panel": bool(not quality_summary.empty),
+            "quality_skip_reason": quality_skip_reason,
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
 def plot_quality_vs_posterior_samples(
     records: List[ParticleRecord],
     true_params: Dict[str, float],
@@ -1391,6 +1553,73 @@ def plot_quality_vs_attempt_budget_diagnostic(
             "plot_name": "quality_vs_attempt_budget_diagnostic",
             "axis_kind": "attempt_budget",
             "diagnostic_plot": True,
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    )
+
+
+def plot_progress_diagnostic(
+    records: List[ParticleRecord],
+    true_params: Dict[str, float],
+    output_dir: OutputDir,
+    *,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Diagnostic replicate-level tolerance and Wasserstein progress over wall-clock time."""
+    from ..analysis import posterior_quality_curve, tolerance_over_wall_time
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    tolerance_df = tolerance_over_wall_time(records)
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if tolerance_df.empty and quality_df.empty:
+        write_plot_metadata(
+            output_dir.plots / "progress_diagnostic",
+            metadata={
+                "plot_name": "progress_diagnostic",
+                "skip_reason": "missing_tolerance_and_quality_rows",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        )
+        return
+
+    n_panels = int(not tolerance_df.empty) + int(not quality_df.empty)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6.2 * n_panels, 4), squeeze=False)
+    axes_list = list(axes.ravel())
+    panel_idx = 0
+    if not tolerance_df.empty:
+        tolerance_trajectory_plot(tolerance_df, ax=axes_list[panel_idx])
+        axes_list[panel_idx].set_title("Tolerance progress")
+        panel_idx += 1
+    if not quality_df.empty:
+        posterior_quality_plot(quality_df, axis_kind="wall_time", ax=axes_list[panel_idx])
+        axes_list[panel_idx].set_title("Posterior quality progress")
+    fig.tight_layout()
+
+    export_df = _progress_export_frame(
+        tolerance_df=tolerance_df,
+        quality_df=quality_df,
+    )
+    save_figure(
+        fig,
+        output_dir.plots / "progress_diagnostic",
+        data={col: export_df[col].tolist() for col in export_df.columns},
+        metadata={
+            "plot_name": "progress_diagnostic",
+            "diagnostic_plot": True,
+            "has_tolerance_panel": bool(not tolerance_df.empty),
+            "has_wasserstein_panel": bool(not quality_df.empty),
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
         },
     )
@@ -2760,6 +2989,15 @@ def plot_benchmark_diagnostics(
         target = float(analysis_cfg.get("target_wasserstein", 1.0))
         checkpoint_count = len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8
         if emit_paper:
+            plot_progress_summary(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+                ci_level=ci_level,
+                audit_df=audit_df,
+            )
             plot_quality_vs_wall_time(
                 records,
                 true_params=true_params,
@@ -2806,6 +3044,13 @@ def plot_benchmark_diagnostics(
                 audit_df=audit_df,
             )
         if emit_diagnostics:
+            plot_progress_diagnostic(
+                records,
+                true_params=true_params,
+                output_dir=output_dir,
+                archive_size=archive_size,
+                checkpoint_count=checkpoint_count,
+            )
             plot_quality_vs_wall_time_diagnostic(
                 records,
                 true_params=true_params,
@@ -3105,12 +3350,38 @@ def _parse_variant_stem(stem_str: str, keys: List[str]) -> Dict[str, Any]:
 
 
 def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str, Any]) -> Dict[str, float]:
-    """Extract true parameter values from benchmark config using param names."""
+    """Extract true parameter values from benchmark config using param names.
+
+    Emits a warning when the config contains ``true_*`` numeric keys that do not
+    match any inferred parameter column.  This catches naming mismatches (e.g.
+    ``true_division_rate_normalized`` vs the inferred column ``division_rate``)
+    that would otherwise cause quality-vs-time plots to be silently skipped.
+    """
+    inferred_names = set(_param_names(records))
     true_params: Dict[str, float] = {}
-    for param in _param_names(records):
+    for param in inferred_names:
         key = f"true_{param}"
         if key in benchmark_cfg:
             true_params[param] = float(benchmark_cfg[key])
+
+    # Warn about config true_* keys that have no matching inferred column.
+    if inferred_names:
+        unmapped = [
+            key
+            for key, val in benchmark_cfg.items()
+            if key.startswith("true_")
+            and isinstance(val, (int, float))
+            and key[len("true_"):] not in inferred_names
+        ]
+        if unmapped:
+            logger.warning(
+                "_true_params_from_cfg: benchmark config has true_* keys %s that do not "
+                "match any inferred parameter column %s; quality plots will be skipped. "
+                "Rename the config keys to match the inferred column names.",
+                unmapped,
+                sorted(inferred_names),
+            )
+
     return true_params
 
 

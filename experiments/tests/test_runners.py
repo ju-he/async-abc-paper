@@ -147,6 +147,8 @@ class TestGaussianMeanRunner:
     def test_creates_phase3_plots(self, gaussian_runner_artifact):
         plots_dir = gaussian_runner_artifact["root"] / "gaussian_mean" / "plots"
         data_dir = gaussian_runner_artifact["root"] / "gaussian_mean" / "data"
+        assert (plots_dir / "progress_summary.pdf").exists()
+        assert (plots_dir / "progress_diagnostic.pdf").exists()
         assert (plots_dir / "quality_vs_wall_time.pdf").exists()
         assert (plots_dir / "quality_vs_wall_time_diagnostic.pdf").exists()
         assert (plots_dir / "quality_vs_posterior_samples.pdf").exists()
@@ -627,6 +629,189 @@ class TestScalingRunner:
         assert (plots_dir / "efficiency_vs_workers__rejection_abc.pdf").exists()
         assert (plots_dir / "quality_at_budget__rejection_abc__T0p1.pdf").exists()
         assert (plots_dir / "throughput_vs_workers__all_methods_all_k_data.csv").exists()
+
+    # --- Phase 3 tests: fair comparison summaries ---
+
+    def test_time_to_quality_rows_returns_nan_when_threshold_never_reached(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        budget_rows = [
+            {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k10__w1",
+                "k": "10",
+                "n_workers": "1",
+                "replicate": "0",
+                "seed": "1",
+                "budget_s": "0.1",
+                "attempts_by_budget": "5",
+                "quality_wasserstein_by_budget": "2.0",
+                "test_mode": "False",
+            },
+            {
+                "base_method": "async_propulate_abc",
+                "method_variant": "async_propulate_abc__k10__w1",
+                "k": "10",
+                "n_workers": "1",
+                "replicate": "0",
+                "seed": "1",
+                "budget_s": "0.2",
+                "attempts_by_budget": "10",
+                "quality_wasserstein_by_budget": "1.5",
+                "test_mode": "False",
+            },
+        ]
+        rows = module._time_to_quality_rows(budget_rows, quality_thresholds=[0.5])
+
+        assert len(rows) == 1
+        assert math.isnan(float(rows[0]["time_to_quality_s"])), (
+            "time_to_quality_s must be NaN when quality threshold is never reached"
+        )
+        assert math.isnan(float(rows[0]["realized_attempts_at_threshold"]))
+
+    def test_time_to_quality_rows_returns_first_budget_meeting_threshold(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        budget_rows = [
+            {
+                "base_method": "rejection_abc",
+                "method_variant": "rejection_abc__k10__w1",
+                "k": "10",
+                "n_workers": "1",
+                "replicate": "0",
+                "seed": "1",
+                "budget_s": "0.1",
+                "attempts_by_budget": "5",
+                "quality_wasserstein_by_budget": "2.0",
+                "test_mode": "False",
+            },
+            {
+                "base_method": "rejection_abc",
+                "method_variant": "rejection_abc__k10__w1",
+                "k": "10",
+                "n_workers": "1",
+                "replicate": "0",
+                "seed": "1",
+                "budget_s": "0.2",
+                "attempts_by_budget": "12",
+                "quality_wasserstein_by_budget": "0.8",
+                "test_mode": "False",
+            },
+            {
+                "base_method": "rejection_abc",
+                "method_variant": "rejection_abc__k10__w1",
+                "k": "10",
+                "n_workers": "1",
+                "replicate": "0",
+                "seed": "1",
+                "budget_s": "0.3",
+                "attempts_by_budget": "18",
+                "quality_wasserstein_by_budget": "0.4",
+                "test_mode": "False",
+            },
+        ]
+        rows = module._time_to_quality_rows(budget_rows, quality_thresholds=[1.0])
+
+        assert len(rows) == 1
+        assert float(rows[0]["time_to_quality_s"]) == 0.2, (
+            "should return the first (smallest) budget_s that meets the threshold"
+        )
+        assert int(rows[0]["realized_attempts_at_threshold"]) == 12
+
+    def test_time_to_quality_fieldnames_are_complete(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        required = {"time_to_quality_s", "realized_attempts_at_threshold", "quality_threshold"}
+        assert required <= set(module._TIME_TO_QUALITY_FIELDNAMES)
+
+    # --- Phase 1 regression tests: freeze run4 measurement failures ---
+
+    def test_worker_utilization_never_exceeds_one(self, monkeypatch):
+        """Regression: population_particle timing must not inflate worker_utilization > 1.
+
+        With the bug, sim_intervals includes population_particle records whose
+        [sim_start_time, sim_end_time] spans the entire generation interval (0.0–1.0).
+        Ten such records give active_time = 10 * 1.0 = 10.0 on top of the 1.0 from
+        simulation_attempt records → worker_utilization = 11.0 with 1 worker/1 s elapsed.
+        After the fix only simulation_attempt records are counted: utilization = 1.0.
+        """
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        monkeypatch.setattr(module, "final_state_results", lambda records, archive_size: [])
+
+        # 10 simulation_attempt records tiling [0.0, 1.0] exactly (no overlap).
+        attempt_records = [
+            test_helpers.ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=1,
+                step=i,
+                params={"mu": 0.0},
+                loss=0.0,
+                weight=1.0,
+                tolerance=1.0,
+                wall_time=float(i + 1) / 10.0,
+                sim_start_time=float(i) / 10.0,
+                sim_end_time=float(i + 1) / 10.0,
+                generation=0,
+                record_kind="simulation_attempt",
+                attempt_count=i + 1,
+            )
+            for i in range(10)
+        ]
+        # 10 population_particle records sharing the full generation interval [0.0, 1.0].
+        # These inflate active_time by 10 * 1.0 = 10.0 when the filter is missing.
+        particle_records = [
+            test_helpers.ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=1,
+                step=10 + i,
+                params={"mu": float(i) / 10.0},
+                loss=float(i) / 10.0,
+                weight=0.1,
+                tolerance=1.0,
+                wall_time=1.0,
+                sim_start_time=0.0,
+                sim_end_time=1.0,
+                generation=0,
+                record_kind="population_particle",
+                attempt_count=10,
+            )
+            for i in range(10)
+        ]
+
+        row = module._final_summary_row(
+            attempt_records + particle_records,
+            base_method="abc_smc_baseline",
+            method_variant="abc_smc_baseline__k10__w1",
+            k=10,
+            n_workers=1,
+            replicate=0,
+            seed=1,
+            requested_max_simulations=100,
+            max_wall_time_s=None,
+            test_mode=True,
+            true_params={},
+            stop_policy="wall_time_exact",
+        )
+
+        assert row["worker_utilization"] <= 1.0, (
+            f"worker_utilization={row['worker_utilization']:.3f} > 1.0: "
+            "population_particle records are being included in active-time accounting"
+        )
+
+    def test_throughput_summary_exposes_realized_attempts(self):
+        """Regression: throughput_summary.csv must include a realized_attempts column."""
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        assert "realized_attempts" in module._THROUGHPUT_FIELDNAMES, (
+            "realized_attempts column is missing from _THROUGHPUT_FIELDNAMES; "
+            "the CSV cannot support budget-matched comparisons"
+        )
+
+    def test_throughput_summary_exposes_posterior_samples(self):
+        """Regression: throughput_summary.csv must include a posterior_samples column."""
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        assert "posterior_samples" in module._THROUGHPUT_FIELDNAMES, (
+            "posterior_samples column is missing from _THROUGHPUT_FIELDNAMES; "
+            "the CSV cannot support budget-matched comparisons"
+        )
 
 
 class TestTimingComparison:

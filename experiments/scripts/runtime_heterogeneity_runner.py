@@ -118,10 +118,13 @@ def _compute_speedup_summary(records):
 
     df = pd.DataFrame(timing_rows)
     span_rows = (
-        df.groupby(["sigma", "base_method", "replicate"])
-        .apply(lambda g: g["sim_end_time"].max() - g["sim_start_time"].min(), include_groups=False)
-        .reset_index(name="active_span_s")
+        df.groupby(["sigma", "base_method", "replicate"], as_index=False)
+        .agg(
+            min_start_time=("sim_start_time", "min"),
+            max_end_time=("sim_end_time", "max"),
+        )
     )
+    span_rows["active_span_s"] = span_rows["max_end_time"] - span_rows["min_start_time"]
     summary = (
         span_rows.groupby(["sigma", "base_method"])["active_span_s"]
         .median()

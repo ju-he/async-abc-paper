@@ -115,6 +115,10 @@ def _run_pyabc_smc_with_sampler(
     # Seed numpy before running so pyABC's internal prior sampling is reproducible
     np.random.seed(seed % (2**31))
     run_start = time.time()
+    logger.info(
+        "[pyabc] abc.run() starting: replicate=%d seed=%d max_sims=%d",
+        replicate, seed, max_sims,
+    )
     history = abc.run(
         minimum_epsilon=tol_init * 0.01,
         max_total_nr_simulations=max_sims,
@@ -124,16 +128,29 @@ def _run_pyabc_smc_with_sampler(
             else None
         ),
     )
+    logger.info(
+        "[pyabc] abc.run() finished: replicate=%d seed=%d max_t=%d",
+        replicate, seed, history.max_t,
+    )
 
     observable = history_observable_frame(history, run_start)
 
     # Collect records from the pyABC history
+    logger.info(
+        "[pyabc] loading attempt events: replicate=%d seed=%d trace_dir=%s",
+        replicate, seed, trace_dir,
+    )
     attempt_events = load_attempt_events(trace_dir, run_start_abs=run_start)
+    logger.info(
+        "[pyabc] loaded %d attempt events: replicate=%d seed=%d",
+        len(attempt_events), replicate, seed,
+    )
     loss_by_param_key = {
         str(event["param_key"]): float(event["loss"])
         for event in attempt_events
     }
 
+    logger.info("[pyabc] building records: replicate=%d seed=%d", replicate, seed)
     records: List[ParticleRecord] = []
     records.extend(
         attempt_records_from_events(
@@ -196,8 +213,23 @@ def _run_pyabc_smc_with_sampler(
                 attempt_count=attempt_count,
             ))
 
+    logger.info(
+        "[pyabc] records built: %d total (%d attempts, %d population_particles) "
+        "replicate=%d seed=%d",
+        len(records),
+        sum(1 for r in records if r.record_kind == "simulation_attempt"),
+        sum(1 for r in records if r.record_kind == "population_particle"),
+        replicate, seed,
+    )
     if progress is not None:
-        progress.finish(simulations=eval_count, records=len(records))
+        # Use len(attempt_events) rather than eval_count: under MPI the pyabc_model
+        # callback executes on worker ranks so root's eval_count stays at 0 while
+        # attempt_events captures all traced work from every rank.
+        progress.finish(
+            simulations=len(attempt_events),
+            generations=history.max_t + 1,
+            records=len(records),
+        )
     return records
 
 

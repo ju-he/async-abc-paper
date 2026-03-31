@@ -679,6 +679,84 @@ class TestCellularPotts:
 # make_benchmark factory
 # ---------------------------------------------------------------------------
 
+class TestCellularPottsAnalysisContract:
+    """Phase 6 regression: cellular_potts.json true_param keys must match inferred columns."""
+
+    _CONFIGS_DIR = Path(__file__).parent.parent / "configs"
+
+    def _load_cpm_cfg(self) -> dict:
+        path = self._CONFIGS_DIR / "cellular_potts.json"
+        return json.loads(path.read_text())
+
+    def test_true_param_keys_match_cpm_physical_param_names(self):
+        """Config true_* keys must use bare param names (division_rate, motility).
+
+        Inferred parameter columns in the results CSV are 'division_rate' and
+        'motility' (normalized [0,1]).  Historically the config used
+        'true_division_rate_normalized' / 'true_motility_normalized', causing
+        true_params_from_benchmark_cfg to return empty → quality plots skipped.
+        """
+        from async_abc.analysis.sensitivity import true_params_from_benchmark_cfg
+
+        cfg = self._load_cpm_cfg()
+        benchmark_cfg = cfg.get("benchmark", {})
+        true_params = true_params_from_benchmark_cfg(benchmark_cfg)
+
+        assert "division_rate" in true_params, (
+            "Config must have 'true_division_rate' (not 'true_division_rate_normalized'); "
+            "got true_* keys: "
+            + str([k for k in benchmark_cfg if k.startswith("true_")])
+        )
+        assert "motility" in true_params, (
+            "Config must have 'true_motility' (not 'true_motility_normalized'); "
+            "got true_* keys: "
+            + str([k for k in benchmark_cfg if k.startswith("true_")])
+        )
+
+    def test_true_params_have_no_normalized_suffix(self):
+        """Confirm the _normalized suffix has been removed from all true_* keys."""
+        cfg = self._load_cpm_cfg()
+        bad_keys = [
+            k
+            for k in cfg.get("benchmark", {})
+            if k.startswith("true_") and k.endswith("_normalized")
+        ]
+        assert not bad_keys, (
+            f"Found true_* keys with _normalized suffix: {bad_keys}. "
+            "These do not match the inferred column names and cause quality plots to be skipped."
+        )
+
+    def test_true_params_from_cfg_warns_on_normalized_key_mismatch(self, caplog):
+        """_true_params_from_cfg warns when a true_* key does not match any inferred column."""
+        import logging
+        from async_abc.io.records import ParticleRecord
+        from async_abc.plotting.reporters import _true_params_from_cfg
+
+        records = [
+            ParticleRecord(
+                method="rejection_abc",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"division_rate": 0.05, "motility": 0.2},
+                loss=1.0,
+                wall_time=0.1,
+            )
+        ]
+        # Simulate the old (wrong) config with _normalized suffix.
+        bad_benchmark_cfg = {
+            "true_division_rate_normalized": 0.049905,
+            "true_motility_normalized": 0.2,
+        }
+        with caplog.at_level(logging.WARNING, logger="async_abc.plotting.reporters"):
+            result = _true_params_from_cfg(records, bad_benchmark_cfg)
+
+        assert result == {}, "No true_params should be returned when keys don't match columns"
+        assert any("true_division_rate_normalized" in record.getMessage() for record in caplog.records), (
+            "Expected a warning about unmapped true_* keys"
+        )
+
+
 class TestMakeBenchmark:
     def test_gaussian_mean(self):
         bm = make_benchmark({"name": "gaussian_mean", "observed_data_seed": 0, "n_obs": 20})

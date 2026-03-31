@@ -425,6 +425,8 @@ class TestPhase3Reporters:
             "plots": {"quality_vs_time": True},
         }
         plot_benchmark_diagnostics(sample_records, cfg, output_dir)
+        assert (output_dir.plots / "progress_summary.pdf").exists()
+        assert (output_dir.plots / "progress_diagnostic.pdf").exists()
         assert (output_dir.plots / "quality_vs_wall_time_diagnostic.pdf").exists()
         assert (output_dir.plots / "quality_vs_posterior_samples.pdf").exists()
         assert (output_dir.plots / "quality_vs_attempt_budget.pdf").exists()
@@ -449,6 +451,8 @@ class TestPhase3Reporters:
         assert (output_dir.data / "plot_audit_summary.json").exists()
         assert (output_dir.plots / "archive_evolution.pdf").exists()
         assert (output_dir.plots / "archive_evolution_diagnostic.pdf").exists()
+        assert (output_dir.plots / "progress_summary.pdf").exists()
+        assert (output_dir.plots / "progress_diagnostic.pdf").exists()
         assert (output_dir.plots / "tolerance_trajectory.pdf").exists()
         assert (output_dir.plots / "tolerance_trajectory_diagnostic.pdf").exists()
         assert (output_dir.plots / "time_to_target_diagnostic_meta.json").exists()
@@ -467,6 +471,12 @@ class TestPhase3Reporters:
         assert meta["skipped"] is True
         diag_meta = json.loads((output_dir.plots / "quality_vs_wall_time_diagnostic_meta.json").read_text())
         assert diag_meta["skip_reason"] == "missing_true_params_or_quality_rows"
+        progress_meta = json.loads((output_dir.plots / "progress_summary_meta.json").read_text())
+        assert progress_meta["has_tolerance_panel"] is True
+        assert progress_meta["has_wasserstein_panel"] is False
+        progress_diag_meta = json.loads((output_dir.plots / "progress_diagnostic_meta.json").read_text())
+        assert progress_diag_meta["has_tolerance_panel"] is True
+        assert progress_diag_meta["has_wasserstein_panel"] is False
 
     def test_plot_benchmark_diagnostics_writes_lotka_tol_init_diagnostic(self, tmp_path):
         output_dir = OutputDir(tmp_path, "plots").ensure()

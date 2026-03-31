@@ -476,6 +476,57 @@ class TestMethodProgress:
         assert any("status=update" in message and "simulations=" in message for message in messages)
         assert any("status=finish" in message and "records=" in message for message in messages)
 
+    def test_pyabc_wrapper_finish_simulations_matches_traced_attempts(self, tmp_output_dir, caplog, monkeypatch):
+        """Regression (Phase 4): finish log simulations must equal traced attempt count, not eval_count.
+
+        Under MPI, pyabc_model executes on worker ranks so the root-local eval_count stays
+        at 0 while all real work is traced on disk. The finish log must use len(attempt_events)
+        from the trace, not eval_count, so the count is correct in both single- and multi-rank runs.
+        """
+        pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
+        import async_abc.utils.progress as progress_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.pyabc_wrapper import run_pyabc_smc
+
+        clock = _Clock()
+        monkeypatch.setattr(progress_mod.time, "monotonic", clock)
+
+        def simulate(params, seed):
+            del params, seed
+            clock.now += 1.0
+            return 0.0
+
+        od = OutputDir(tmp_output_dir, "pyabc_progress_count").ensure()
+        reporter = MethodProgressReporter("pyabc_smc", replicate=0, interval_s=0.0, rank=0)
+
+        with caplog.at_level(logging.INFO, logger="async_abc.utils.progress"):
+            reporter.start()
+            records = run_pyabc_smc(
+                simulate,
+                {"mu": (-1.0, 1.0)},
+                {**_test_inference_cfg(), "max_simulations": 8, "n_workers": 1},
+                od,
+                replicate=1,
+                seed=2,
+                progress=reporter,
+            )
+
+        attempt_records = [r for r in records if r.record_kind == "simulation_attempt"]
+        n_attempts = len(attempt_records)
+
+        finish_messages = [
+            record.getMessage()
+            for record in caplog.records
+            if "status=finish" in record.getMessage()
+        ]
+        assert finish_messages, "expected a finish log message"
+        finish_msg = finish_messages[-1]
+        assert f"simulations={n_attempts}" in finish_msg, (
+            f"finish log reports wrong simulation count: expected simulations={n_attempts} "
+            f"but got: {finish_msg}"
+        )
+        assert "generations=" in finish_msg, "finish log must include generations count"
+
     def test_abc_smc_baseline_emits_progress(self, tmp_output_dir, caplog, monkeypatch):
         pytest.importorskip("pyabc", reason="pyabc not installed — skipping")
         import async_abc.utils.progress as progress_mod

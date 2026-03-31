@@ -61,6 +61,8 @@ _THROUGHPUT_FIELDNAMES = [
     "max_wall_time_s",
     "elapsed_wall_time_s",
     "n_simulations",
+    "realized_attempts",
+    "posterior_samples",
     "throughput_sims_per_s",
     "final_quality_wasserstein",
     "final_n_particles",
@@ -85,6 +87,19 @@ _BUDGET_FIELDNAMES = [
     "posterior_samples_by_budget",
     "quality_wasserstein_by_budget",
     "best_tolerance_by_budget",
+    "test_mode",
+]
+
+_TIME_TO_QUALITY_FIELDNAMES = [
+    "base_method",
+    "method_variant",
+    "k",
+    "n_workers",
+    "replicate",
+    "seed",
+    "quality_threshold",
+    "time_to_quality_s",
+    "realized_attempts_at_threshold",
     "test_mode",
 ]
 
@@ -418,7 +433,8 @@ def _final_summary_row(
     sim_intervals = [
         (float(r.sim_start_time), float(r.sim_end_time))
         for r in records
-        if r.sim_start_time is not None
+        if r.record_kind == "simulation_attempt"
+        and r.sim_start_time is not None
         and r.sim_end_time is not None
         and float(r.sim_end_time) > float(r.sim_start_time)
     ]
@@ -440,6 +456,8 @@ def _final_summary_row(
         "max_wall_time_s": "" if max_wall_time_s is None else float(max_wall_time_s),
         "elapsed_wall_time_s": float(elapsed),
         "n_simulations": int(n_sims),
+        "realized_attempts": int(n_sims),
+        "posterior_samples": int(final_n_particles),
         "throughput_sims_per_s": float(throughput),
         "final_quality_wasserstein": float(final_quality),
         "final_n_particles": int(final_n_particles),
@@ -502,6 +520,60 @@ def _budget_summary_rows(
                 "test_mode": bool(test_mode),
             }
         )
+    return rows
+
+
+def _time_to_quality_rows(
+    budget_rows: list[dict],
+    quality_thresholds: list[float],
+) -> list[dict]:
+    """Return one row per (run identity, threshold).
+
+    ``time_to_quality_s`` is the smallest ``budget_s`` at which
+    ``quality_wasserstein_by_budget`` first falls at or below the threshold.
+    When the threshold is never reached within the available wall-time budget,
+    ``time_to_quality_s`` and ``realized_attempts_at_threshold`` are ``nan``
+    rather than omitting the row, so downstream comparisons stay aligned.
+    """
+    _KEY_COLS = ["base_method", "method_variant", "k", "n_workers", "replicate", "seed", "test_mode"]
+    groups: dict[tuple, list[dict]] = {}
+    for row in budget_rows:
+        key = tuple(row.get(c, "") for c in _KEY_COLS)
+        groups.setdefault(key, []).append(row)
+
+    rows: list[dict] = []
+    for key, run_rows in groups.items():
+        run_meta = dict(zip(_KEY_COLS, key))
+        sorted_rows = sorted(run_rows, key=lambda r: float(r["budget_s"]))
+        for threshold in sorted(set(quality_thresholds)):
+            hit = None
+            for r in sorted_rows:
+                raw_q = r.get("quality_wasserstein_by_budget", "")
+                try:
+                    q_val = float(raw_q)
+                except (ValueError, TypeError):
+                    continue
+                if math.isnan(q_val):
+                    continue
+                if q_val <= threshold:
+                    hit = r
+                    break
+            rows.append(
+                {
+                    "base_method": run_meta["base_method"],
+                    "method_variant": run_meta["method_variant"],
+                    "k": run_meta["k"],
+                    "n_workers": run_meta["n_workers"],
+                    "replicate": run_meta["replicate"],
+                    "seed": run_meta["seed"],
+                    "quality_threshold": float(threshold),
+                    "time_to_quality_s": float(hit["budget_s"]) if hit is not None else float("nan"),
+                    "realized_attempts_at_threshold": (
+                        int(hit["attempts_by_budget"]) if hit is not None else float("nan")
+                    ),
+                    "test_mode": run_meta["test_mode"],
+                }
+            )
     return rows
 
 
@@ -608,6 +680,20 @@ def rebuild_scaling_outputs(
         )
     if aggregate_records:
         write_records(output_dir.data / "raw_results.csv", aggregate_records)
+
+    quality_thresholds = [
+        float(v)
+        for v in cfg.get("scaling", {}).get("quality_thresholds", [])
+        if v is not None
+    ]
+    if quality_thresholds and budget_rows:
+        ttq_rows = _time_to_quality_rows(budget_rows, quality_thresholds)
+        if ttq_rows:
+            _write_rows_atomic(
+                output_dir.data / "time_to_quality_summary.csv",
+                ttq_rows,
+                _TIME_TO_QUALITY_FIELDNAMES,
+            )
 
     plots_cfg = cfg.get("plots", {})
     should_plot = bool(plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"))

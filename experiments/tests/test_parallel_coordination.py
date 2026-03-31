@@ -297,6 +297,47 @@ class TestRunMethodDistributed:
         else:
             raise AssertionError("Expected ImportError")
 
+    # --- Phase 5 regression tests: MPI finalization hang ---
+
+    def test_wait_for_rank_zero_status_raises_timeout_when_status_never_written(self, tmp_path):
+        """Regression (Phase 5): non-root ranks must not poll forever if root hangs.
+
+        _wait_for_rank_zero_status raises TimeoutError after timeout_s seconds when
+        the status file is never written.  This prevents the 'finished inference but
+        shard still running' pattern seen on gaussian_mean and gandk in run4.
+        """
+        missing_path = tmp_path / "rank_zero_never_written.json"
+        with pytest.raises(TimeoutError, match="Root rank may be hung"):
+            runner_utils._wait_for_rank_zero_status(missing_path, timeout_s=0.05)
+
+    def test_wait_for_rank_zero_status_raises_timeout_on_stale_partial_file(self, tmp_path):
+        """Regression (Phase 5): a partial/corrupt status file must not cause infinite polling."""
+        path = tmp_path / "partial_status.json"
+        path.write_text("{incomplete")  # simulate partially-written file
+        with pytest.raises(TimeoutError, match="Root rank may be hung"):
+            runner_utils._wait_for_rank_zero_status(path, timeout_s=0.05)
+
+    def test_wait_for_rank_zero_status_succeeds_before_timeout(self, tmp_path):
+        """Baseline: a valid status file is read successfully within the timeout."""
+        import json
+        import threading
+
+        path = tmp_path / "status.json"
+
+        def write_after_delay():
+            import time
+            time.sleep(0.02)
+            path.write_text(json.dumps({"kind": "ok", "message": ""}))
+
+        t = threading.Thread(target=write_after_delay)
+        t.start()
+        try:
+            result = runner_utils._wait_for_rank_zero_status(path, timeout_s=1.0)
+        finally:
+            t.join()
+
+        assert result == {"kind": "ok", "message": ""}
+
     def test_non_root_re_raises_root_exception_from_status_file(self, monkeypatch, tmp_output_dir):
         output_dir = OutputDir(tmp_output_dir.parent, tmp_output_dir.name).ensure()
         monkeypatch.setattr(runner_utils, "is_root_rank", lambda: False)
