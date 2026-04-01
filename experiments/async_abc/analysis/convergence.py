@@ -1,4 +1,31 @@
-"""Posterior convergence summaries."""
+"""Posterior convergence summaries.
+
+This module computes posterior quality curves and time-to-threshold metrics
+for comparing ABC inference methods.  The central metric is the 1-Wasserstein
+distance between the current posterior approximation and the true parameter
+vector (treated as a point mass).  In the 1-D case this reduces to the mean
+absolute deviation from the truth; in higher dimensions a sliced-Wasserstein
+approximation is used when the POT library is available, falling back to a
+coordinate-wise average otherwise.
+
+Each inference method produces "observable states" at different granularities:
+
+- **async_propulate_abc** (``state_kind='archive_reconstruction'``):
+  After each simulation attempt the current archive is reconstructed from
+  all accepted particles below the running tolerance.  This gives per-event
+  resolution.
+
+- **pyabc_smc / abc_smc_baseline** (``state_kind='generation_population'``):
+  A snapshot of the population is taken at the end of each SMC generation.
+  Resolution equals the number of generations (typically 5-1000).
+
+- **rejection_abc** (``state_kind='accepted_prefix'``):
+  The running prefix of accepted particles grows by one per acceptance.
+
+To compare methods on a common time axis, use ``checkpoint_strategy='time_uniform'``
+which resamples all methods onto an evenly-spaced wall-time grid using
+last-observation-carried-forward (LOCF).
+"""
 
 from __future__ import annotations
 
@@ -54,6 +81,30 @@ def _wasserstein_to_true_params(
     true_params: dict[str, float],
     n_projections: int,
 ) -> float:
+    """Compute the 1-Wasserstein distance between posterior samples and the truth.
+
+    The true parameter vector is treated as a point mass (Dirac delta), so:
+
+    - **1-D case**: W1 = mean |sample_i - true_value|, computed via
+      ``scipy.stats.wasserstein_distance`` (exact).
+    - **Multi-D case**: sliced Wasserstein distance via ``ot.sliced_wasserstein_distance``
+      with *n_projections* random directions.  Falls back to coordinate-wise
+      average W1 when the POT library is not installed.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        Posterior samples with columns matching the keys of *true_params*.
+    true_params : dict
+        Ground-truth parameter values.
+    n_projections : int
+        Number of random projections for the sliced approximation (multi-D only).
+
+    Returns
+    -------
+    float
+        Non-negative distance, or ``nan`` if *frame* is empty.
+    """
     if len(frame) == 0:
         return float("nan")
     param_names = list(true_params.keys())
@@ -326,6 +377,14 @@ def _async_archive_rows(
     archive_size: int | None,
     n_projections: int,
 ) -> list[dict[str, object]]:
+    """Reconstruct the archive at each simulation event for an async method.
+
+    After each event the archive is built from all accepted particles whose
+    loss is below the running (minimum) tolerance at that point.  The archive
+    is optionally truncated to *archive_size* lowest-loss particles.
+
+    Each checkpoint row has ``state_kind='archive_reconstruction'``.
+    """
     ordered = group.sort_values(["wall_time", "sim_end_time", "step"]).reset_index(drop=True).copy()
     if ordered["attempt_count"].isna().all():
         ordered["attempt_count"] = np.arange(1, len(ordered) + 1, dtype=int)
@@ -379,6 +438,14 @@ def _sync_generation_rows(
     axis_kind: str,
     n_projections: int,
 ) -> list[dict[str, object]]:
+    """Emit one checkpoint per SMC generation for a synchronous method.
+
+    Each generation's population is used as-is (no archive reconstruction).
+    Wall-time and attempt_count are taken from the last particle in each
+    generation group.
+
+    Each checkpoint row has ``state_kind='generation_population'``.
+    """
     ordered = group.loc[
         group["record_kind"].isna()
         | (group["record_kind"] == "population_particle")

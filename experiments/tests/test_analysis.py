@@ -403,6 +403,33 @@ def test_time_uniform_async_subset_of_full():
             )
 
 
+def test_quality_row_includes_state_kind():
+    """state_kind column must be present and correct for each method type."""
+    async_records = _make_async_records(10, 2.0)
+    sync_records = _make_sync_records(2, 3, 2.0)
+    all_records = async_records + sync_records
+
+    df = posterior_quality_curve(
+        all_records,
+        true_params={"mu": 0.0},
+        axis_kind="wall_time",
+        checkpoint_strategy="all",
+    )
+
+    assert "state_kind" in df.columns
+    async_kinds = df[df["method"] == "async_propulate_abc"]["state_kind"].unique()
+    sync_kinds = df[df["method"] == "abc_smc_baseline"]["state_kind"].unique()
+    assert "archive_reconstruction" in async_kinds
+    assert "generation_population" in sync_kinds
+
+
+def test_wasserstein_documented_in_quality_curve():
+    """The module docstring should describe the Wasserstein metric semantics."""
+    from async_abc.analysis import convergence
+    assert "wasserstein" in convergence.__doc__.lower()
+    assert "point mass" in convergence.__doc__.lower()
+
+
 def test_posterior_quality_curve_multiparameter():
     """2-parameter posterior exercises the sliced-Wasserstein code path."""
     records = [
