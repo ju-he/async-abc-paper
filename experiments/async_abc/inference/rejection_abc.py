@@ -66,7 +66,7 @@ def run_rejection_abc(
         params   = {p: float(v) for p, v in zip(param_names, vals)}
         sim_seed = int(rng.integers(0, 2**31))
         loss     = float(simulate_fn(params, seed=sim_seed))
-        if loss <= tol_init:
+        if loss < tol_init:
             accepted.append((params, loss, time.time() - run_start, sim_count))
         if progress is not None:
             progress.update(

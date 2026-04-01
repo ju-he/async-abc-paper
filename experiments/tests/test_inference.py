@@ -993,6 +993,34 @@ class TestRejectionAbc:
         # tol_init=100 means everything is accepted → should get exactly k=5
         assert len(records) == 5
 
+    def test_rejection_abc_uses_strict_less_than(self, tmp_path):
+        """A particle with loss == tol_init should NOT be accepted (strict <)."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        od = OutputDir(tmp_path, "rejection_strict_lt").ensure()
+
+        def exact_tol_simulate(params, seed):
+            return 5.0  # exactly equal to tol_init
+
+        cfg = {
+            **_test_inference_cfg(),
+            "max_simulations": 10,
+            "k": 10,
+            "tol_init": 5.0,
+        }
+        records = run_rejection_abc(
+            exact_tol_simulate, {"x": (-1.0, 1.0)}, cfg, od, replicate=0, seed=1,
+        )
+        # loss == tol_init → strict < means none accepted
+        assert len(records) == 0
+
+    def test_method_execution_mode_unknown_raises(self):
+        """method_execution_mode with an unknown name should raise KeyError."""
+        from async_abc.inference.method_registry import method_execution_mode
+        with pytest.raises(KeyError, match="not_a_method"):
+            method_execution_mode("not_a_method")
+
 
 class TestAbcSmcBaseline:
     @pytest.fixture(autouse=True)
@@ -1156,6 +1184,35 @@ class TestBuildPyabcSampler:
 
         with pytest.raises(ValueError, match="parallel_backend"):
             build_pyabc_sampler(n_procs=2, parallel_backend="redis")
+
+
+class TestPyabcCommon:
+    """Tests for shared pyABC utilities in _pyabc_common."""
+
+    def test_db_suffix_empty(self):
+        from async_abc.inference._pyabc_common import db_suffix
+        assert db_suffix("") == ""
+
+    def test_db_suffix_with_tag(self):
+        from async_abc.inference._pyabc_common import db_suffix
+        assert db_suffix("my_tag") == "__my_tag"
+
+    def test_db_suffix_sanitizes_special_chars(self):
+        from async_abc.inference._pyabc_common import db_suffix
+        result = db_suffix("a/b:c")
+        assert "/" not in result
+        assert ":" not in result
+
+    def test_prepare_db_path_matches_old_behavior(self, tmp_output_dir):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference._pyabc_common import prepare_db_path
+
+        od = OutputDir(tmp_output_dir, "test_common").ensure()
+        path = prepare_db_path(
+            od, method_name="pyabc_smc", replicate=0, seed=42, checkpoint_tag="",
+        )
+        assert path.startswith("sqlite:///")
+        assert "pyabc_smc_rep0_seed42" in path
 
 
 class TestPyabcWrapperMpiBackend:

@@ -35,6 +35,6 @@
     "quality_vs_time": true
   },
   "analysis": {
-    "target_wasserstein": 0.5
+    "target_wasserstein": 50.0
   }
 }

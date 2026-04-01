@@ -115,13 +115,11 @@ def method_execution_mode(name: str) -> str:
         return METHOD_EXECUTION_MODE[name]
     if name in METHOD_REGISTRY:
         return "rank_zero"
-    if name not in METHOD_REGISTRY:
-        valid = sorted(METHOD_EXECUTION_MODE.keys())
-        raise KeyError(
-            f"'{name}' is not a registered method. "
-            f"Available methods: {valid}"
-        )
-    return "rank_zero"
+    valid = sorted(METHOD_EXECUTION_MODE.keys())
+    raise KeyError(
+        f"'{name}' is not a registered method. "
+        f"Available methods: {valid}"
+    )
 
 
 def method_execution_mode_for_cfg(

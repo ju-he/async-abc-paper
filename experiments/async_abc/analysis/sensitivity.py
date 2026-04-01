@@ -20,7 +20,6 @@ Key design decisions
 from __future__ import annotations
 
 import csv
-import math
 from pathlib import Path
 from typing import Any
 
