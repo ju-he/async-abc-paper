@@ -7,9 +7,9 @@ Model:
 Observed data are generated once from ``true_mu`` using ``observed_data_seed``.
 The ABC summary statistic is the sample mean.  Distance is |mean(sim) - mean(obs)|.
 
-Analytic posterior (under a broad Gaussian prior N(0, prior_std^2)):
-    posterior_mean = (observed_mean / sigma_obs^2 * n_obs) /
-                     (1/prior_std^2 + n_obs/sigma_obs^2)
+Analytic posterior under the Uniform prior:
+    The posterior mean is the MLE (observed_mean) clipped to the prior bounds,
+    since the uniform prior is flat over its support.
 """
 from typing import Dict, Tuple
 
@@ -29,8 +29,6 @@ class GaussianMean:
         - ``true_mu`` (float, default 0.0) — ground-truth parameter
         - ``sigma_obs`` (float, default 1.0) — known observation noise std
         - ``prior_low`` / ``prior_high`` (float, defaults -5 / 5)
-        - ``prior_std`` (float, default 10.0) — std of the Gaussian prior used
-          for the analytic posterior calculation
     """
 
     def __init__(self, config: dict) -> None:
@@ -39,7 +37,6 @@ class GaussianMean:
         self.true_mu = config.get("true_mu", 0.0)
         self.prior_low = config.get("prior_low", -5.0)
         self.prior_high = config.get("prior_high", 5.0)
-        self.prior_std = config.get("prior_std", 10.0)
 
         rng = np.random.default_rng(config.get("observed_data_seed", 42))
         self.observed_data = rng.normal(self.true_mu, self.sigma_obs, self.n_obs)
@@ -71,17 +68,14 @@ class GaussianMean:
         return abs(sim_mean - self.observed_mean)
 
     def analytic_posterior_mean(self) -> float:
-        """Posterior mean of theta under a N(0, prior_std^2) prior.
+        """Posterior mean of theta under the Uniform(prior_low, prior_high) prior.
+
+        For a flat prior the posterior is proportional to the likelihood, which
+        is Gaussian in the sufficient statistic (sample mean).  The posterior
+        mean is therefore the MLE (observed_mean) clipped to the prior bounds.
 
         Returns
         -------
         float
         """
-        sigma2 = self.sigma_obs ** 2
-        prior_var = self.prior_std ** 2
-        likelihood_precision = self.n_obs / sigma2
-        prior_precision = 1.0 / prior_var
-        posterior_mean = (self.observed_mean * likelihood_precision) / (
-            prior_precision + likelihood_precision
-        )
-        return float(posterior_mean)
+        return float(np.clip(self.observed_mean, self.prior_low, self.prior_high))

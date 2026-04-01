@@ -123,6 +123,7 @@ class LotkaVolterra:
         self.T_max = float(config.get("T_max", 30.0))
         self.x0 = int(config.get("x0", 50))
         self.y0 = int(config.get("y0", 100))
+        self.normalize_stats = bool(config.get("normalize_stats", True))
 
         true_theta = (
             float(config.get("true_theta1", 0.5)),
@@ -132,12 +133,21 @@ class LotkaVolterra:
         )
 
         obs_rng = np.random.default_rng(config.get("observed_data_seed", 42))
+        base_seed = config.get("observed_data_seed", 42)
+        max_retries = int(config.get("max_extinction_retries", 100))
         times, xs, ys = _gillespie(self.x0, self.y0, true_theta, self.T_max, obs_rng)
 
+        retry = 0
+        while (xs[-1] == 0 or ys[-1] == 0) and retry < max_retries:
+            retry += 1
+            retry_rng = np.random.default_rng(base_seed + retry)
+            times, xs, ys = _gillespie(self.x0, self.y0, true_theta, self.T_max, retry_rng)
+
         if xs[-1] == 0 or ys[-1] == 0:
-            # Edge case: true params cause extinction — use a fallback trajectory
-            obs_rng2 = np.random.default_rng(config.get("observed_data_seed", 42) + 1)
-            times, xs, ys = _gillespie(self.x0, self.y0, true_theta, self.T_max, obs_rng2)
+            raise RuntimeError(
+                f"Observed trajectory went extinct after {max_retries} retries. "
+                f"Consider adjusting true parameters or increasing max_extinction_retries."
+            )
 
         self.observed_stats = _summary_stats(xs, ys)
 
@@ -178,4 +188,8 @@ class LotkaVolterra:
             return float(EXTINCTION_LOSS)
 
         sim_stats = _summary_stats(xs, ys)
+        if self.normalize_stats:
+            eps = 1e-8
+            diff = (sim_stats - self.observed_stats) / (np.abs(self.observed_stats) + eps)
+            return float(np.linalg.norm(diff))
         return float(np.linalg.norm(sim_stats - self.observed_stats))

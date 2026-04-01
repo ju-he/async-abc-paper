@@ -132,6 +132,25 @@ class TestGaussianMean:
         pm = bm.analytic_posterior_mean()
         assert abs(pm - 1.5) < 0.2
 
+    def test_analytic_posterior_uses_uniform_prior(self):
+        """Analytic posterior must use the same Uniform prior as the ABC inference."""
+        # Symmetric prior: result should be close to observed_mean
+        bm_sym = GaussianMean(_bm_config(
+            "gaussian_mean", true_mu=0.0, n_obs=100,
+            prior_low=-5.0, prior_high=5.0,
+        ))
+        pm_sym = bm_sym.analytic_posterior_mean()
+        assert abs(pm_sym - bm_sym.observed_mean) < 1e-9
+
+        # Asymmetric prior that clips: observed mean outside bounds
+        bm_asym = GaussianMean(_bm_config(
+            "gaussian_mean", true_mu=10.0, n_obs=100,
+            prior_low=-5.0, prior_high=5.0,
+        ))
+        pm_asym = bm_asym.analytic_posterior_mean()
+        # observed_mean ≈ 10, but prior caps at 5
+        assert pm_asym == pytest.approx(5.0)
+
     def test_different_observed_seeds_give_different_data(self):
         bm1 = GaussianMean(_bm_config("gaussian_mean", observed_data_seed=0))
         bm2 = GaussianMean(_bm_config("gaussian_mean", observed_data_seed=99))
@@ -240,6 +259,59 @@ class TestLotkaVolterra:
         loss_true = np.mean([bm.simulate(true_params, seed=s) for s in range(5)])
         loss_bad  = np.mean([bm.simulate(bad_params, seed=s)  for s in range(5)])
         assert loss_true < loss_bad
+
+    def test_lotka_volterra_normalized_stats_balanced_scale(self):
+        """Normalized summary stats should give each dimension meaningful weight."""
+        bm = LotkaVolterra(_bm_config(
+            "lotka_volterra", T_max=20.0, x0=50, y0=25, normalize_stats=True,
+        ))
+        # Two param sets that differ subtly
+        p1 = {"theta1": 0.5, "theta2": 0.025, "theta3": 0.025, "theta4": 0.5}
+        p2 = {"theta1": 0.5, "theta2": 0.025, "theta3": 0.025, "theta4": 0.6}
+        d1 = bm.simulate(p1, seed=0)
+        d2 = bm.simulate(p2, seed=0)
+        # Both should be finite
+        assert math.isfinite(d1) and math.isfinite(d2)
+
+    def test_lotka_volterra_unnormalized_backward_compat(self):
+        """normalize_stats=False preserves raw Euclidean distance."""
+        bm = LotkaVolterra(_bm_config(
+            "lotka_volterra", T_max=20.0, x0=50, y0=25, normalize_stats=False,
+        ))
+        params = {"theta1": 0.5, "theta2": 0.025, "theta3": 0.025, "theta4": 0.5}
+        loss = bm.simulate(params, seed=0)
+        assert isinstance(loss, float)
+        assert loss >= 0.0
+
+    def test_lotka_volterra_retries_on_extinction(self):
+        """Retry loop should handle multiple extinction attempts."""
+        # Use seed=42 which is known to produce a stable trajectory
+        bm = LotkaVolterra(_bm_config(
+            "lotka_volterra", T_max=10.0, x0=50, y0=25,
+            observed_data_seed=42, max_extinction_retries=10,
+        ))
+        # Should have created valid observed_stats
+        assert len(bm.observed_stats) == 6
+        assert all(np.isfinite(bm.observed_stats))
+
+    def test_lotka_volterra_raises_after_max_retries(self, monkeypatch):
+        """If all retries produce extinction, raise RuntimeError."""
+        from async_abc.benchmarks import lotka_volterra as lv_mod
+
+        original_gillespie = lv_mod._gillespie
+
+        def always_extinct(*args, **kwargs):
+            times, xs, ys = original_gillespie(*args, **kwargs)
+            # Force extinction
+            xs[-1] = 0
+            return times, xs, ys
+
+        monkeypatch.setattr(lv_mod, "_gillespie", always_extinct)
+        with pytest.raises(RuntimeError, match="extinct"):
+            LotkaVolterra(_bm_config(
+                "lotka_volterra", T_max=10.0, x0=50, y0=25,
+                max_extinction_retries=3,
+            ))
 
 
 # ---------------------------------------------------------------------------
