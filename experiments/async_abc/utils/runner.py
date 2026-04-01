@@ -42,10 +42,28 @@ def _configured_propulate_generation_budget(cfg: Dict[str, Any]) -> int:
     return max(1, math.ceil(sims / workers))
 
 
+def _configured_wall_time_limit_s(inference_cfg: Dict[str, Any]) -> float | None:
+    """Return the configured wall-time cap, if any."""
+    value = inference_cfg.get("max_wall_time_s")
+    if value in (None, ""):
+        return None
+    return float(value)
+
+
 def _method_compute_scale(method: str, cfg_full: Dict[str, Any], cfg_test: Dict[str, Any]) -> float:
     """Return the test→full compute multiplier for one inference method."""
     full_inf = cfg_full["inference"]
     test_inf = cfg_test["inference"]
+
+    full_wall_time_s = _configured_wall_time_limit_s(full_inf)
+    test_wall_time_s = _configured_wall_time_limit_s(test_inf)
+    if (
+        full_wall_time_s is not None
+        and test_wall_time_s is not None
+        and test_wall_time_s > 0.0
+        and method in {"async_propulate_abc", "abc_smc_baseline", "pyabc_smc"}
+    ):
+        return full_wall_time_s / test_wall_time_s
 
     full_sims = float(full_inf["max_simulations"])
     full_workers = max(1.0, float(full_inf.get("n_workers", 1)))
@@ -142,15 +160,23 @@ def compute_scaling_factor(
         het = cfg["heterogeneity"]
         mu = float(het.get("mu", 0.0))
         sigmas = het.get("sigma_levels", [het.get("sigma", 1.0)])
-        # Expected sleep per sim: exp(mu + sigma^2/2); multiply by sequential sims per worker
-        sims_per_sigma = full_sims * full_reps / full_workers
-        extra_seconds = sum(
-            math.exp(mu + s ** 2 / 2) * sims_per_sigma for s in sigmas
-        )
-        note = (
-            f"{full_sims} sims × {full_reps} reps, "
-            f"+{format_duration(extra_seconds)} sleep"
-        )
+        wall_time_limit_s = _configured_wall_time_limit_s(cfg["inference"])
+        if wall_time_limit_s is not None:
+            n_methods = len(cfg.get("methods", [])) or 1
+            note = (
+                f"{len(sigmas)} sigma levels × {full_reps} reps × {n_methods} methods, "
+                f"{format_duration(wall_time_limit_s)} wall cap"
+            )
+        else:
+            # Expected sleep per sim: exp(mu + sigma^2/2); multiply by sequential sims per worker
+            sims_per_sigma = full_sims * full_reps / full_workers
+            extra_seconds = sum(
+                math.exp(mu + s ** 2 / 2) * sims_per_sigma for s in sigmas
+            )
+            note = (
+                f"{full_sims} sims × {full_reps} reps, "
+                f"+{format_duration(extra_seconds)} sleep"
+            )
 
     elif "sbc" in cfg:
         full_trials = int(cfg["sbc"].get("n_trials", 1))

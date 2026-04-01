@@ -27,6 +27,7 @@ from ..utils.mpi import get_rank
 
 Propulator = None
 ABCPMC = None
+logger = logging.getLogger(__name__)
 
 
 def _make_propulate_comm():
@@ -154,6 +155,103 @@ def _suppress_propulate_info_logs():
         propulate_logger.setLevel(original_level)
 
 
+def _resolve_max_wall_time_s(inference_cfg: Dict) -> float | None:
+    """Return the configured wall-time cap, if any."""
+    max_wall_time_s = inference_cfg.get("max_wall_time_s")
+    if max_wall_time_s in (None, ""):
+        return None
+    return float(max_wall_time_s)
+
+
+def _collective_stop_requested(propulator, *, run_start: float, max_wall_time_s: float) -> bool:
+    """Return whether any participating worker has exhausted the wall-time budget."""
+    local_stop = (time.time() - float(run_start)) >= float(max_wall_time_s)
+    propulate_comm = getattr(propulator, "propulate_comm", None)
+    if propulate_comm is None:
+        return bool(local_stop)
+    try:
+        from mpi4py import MPI
+
+        return bool(propulate_comm.allreduce(bool(local_stop), op=MPI.LOR))
+    except Exception:
+        return bool(local_stop)
+
+
+def _propulate_with_wall_time_limit(
+    propulator,
+    *,
+    run_start: float,
+    max_wall_time_s: float,
+    logging_interval: int,
+    debug: int = 0,
+) -> None:
+    """Run Propulate until the first worker reaches the configured wall-time cap.
+
+    All workers complete their current evaluation before stopping, so the run may
+    overshoot by at most one in-flight evaluation on the slowest rank.
+    """
+    try:
+        from mpi4py import MPI
+    except Exception:
+        MPI = None
+
+    worker_sub_comm = getattr(propulator, "worker_sub_comm", None)
+    if MPI is not None and worker_sub_comm not in (None, MPI.COMM_SELF):
+        propulator.generation = worker_sub_comm.bcast(propulator.generation, root=0)
+
+    propulate_comm = getattr(propulator, "propulate_comm", None)
+    if propulate_comm is None:
+        while propulator.generations <= -1 or propulator.generation < propulator.generations:
+            if _collective_stop_requested(
+                propulator,
+                run_start=run_start,
+                max_wall_time_s=max_wall_time_s,
+            ):
+                break
+            propulator._evaluate_individual()
+            propulator.generation += 1
+        return
+
+    if getattr(propulator, "island_comm", None) is not None and propulator.island_comm.rank == 0:
+        logger.debug(
+            "Running Propulate with a %.3fs coordinated wall-time cap",
+            float(max_wall_time_s),
+        )
+
+    dump = bool(getattr(getattr(propulator, "island_comm", None), "rank", None) == 0)
+    propulate_comm.barrier()
+
+    while propulator.generations <= -1 or propulator.generation < propulator.generations:
+        if _collective_stop_requested(
+            propulator,
+            run_start=run_start,
+            max_wall_time_s=max_wall_time_s,
+        ):
+            break
+
+        if propulator.generation % int(logging_interval) == 0:
+            logger.debug("Propulate generation=%s", propulator.generation)
+
+        propulator._evaluate_individual()
+        propulator._receive_intra_island_individuals()
+
+        if dump:
+            propulator._dump_checkpoint()
+        dump = propulator._determine_worker_dumping_next()
+        propulator.generation += 1
+
+    propulate_comm.barrier()
+    propulator._receive_intra_island_individuals()
+    propulate_comm.barrier()
+
+    island_comm = getattr(propulator, "island_comm", None)
+    if island_comm is not None and island_comm.rank == 0:
+        propulator._dump_final_checkpoint()
+    propulate_comm.barrier()
+    propulator._determine_worker_dumping_next()
+    propulate_comm.barrier()
+
+
 def run_propulate_abc(
     simulate_fn: Callable,
     limits: Dict,
@@ -191,6 +289,7 @@ def run_propulate_abc(
 
     max_sims = inference_cfg["max_simulations"]
     generation_budget = _effective_generation_budget(max_sims, inference_cfg)
+    max_wall_time_s = _resolve_max_wall_time_s(inference_cfg)
     k = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
@@ -262,7 +361,16 @@ def run_propulate_abc(
     propulate_completed = False
     try:
         with _suppress_propulate_info_logs():
-            propulator.propulate(logging_interval=generation_budget + 1, debug=0)
+            if max_wall_time_s is not None:
+                _propulate_with_wall_time_limit(
+                    propulator,
+                    run_start=run_start,
+                    max_wall_time_s=max_wall_time_s,
+                    logging_interval=generation_budget + 1,
+                    debug=0,
+                )
+            else:
+                propulator.propulate(logging_interval=generation_budget + 1, debug=0)
         propulate_completed = True
     finally:
         if propulate_completed:

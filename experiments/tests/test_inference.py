@@ -169,6 +169,44 @@ class _FakeNoEvaltimePropulator(_FakePropulator):
             self.population.append(ind)
 
 
+class _WallTimeLocalPropulator:
+    clock = None
+
+    def __init__(self, *, loss_fn, propagator, rng, generations, checkpoint_path, **kwargs):
+        self.loss_fn = loss_fn
+        self.propagator = propagator
+        self.rng = rng
+        self.generations = generations
+        self.checkpoint_path = checkpoint_path
+        self.population = []
+        self.extra = kwargs
+        self.generation = 0
+        self.propulate_comm = None
+        self.worker_sub_comm = None
+
+    def _evaluate_individual(self):
+        clock = type(self).clock
+        assert clock is not None
+        params = {
+            key: float(lo + (hi - lo) * self.rng.random())
+            for key, (lo, hi) in self.propagator.limits.items()
+        }
+        start = clock()
+        clock.now += 0.02
+        end = clock()
+        ind = _FakeIndividual(
+            params,
+            generation=self.generation,
+            tolerance=max(0.1, self.propagator.tol - 0.1 * self.generation),
+            evaltime=end,
+            evalperiod=end - start,
+            rank=self.generation % 2,
+            loss=0.0,
+        )
+        ind.loss = self.loss_fn(ind)
+        self.population.append(ind)
+
+
 class _Clock:
     def __init__(self, start: float = 0.0):
         self.now = start
@@ -613,6 +651,35 @@ class TestRunPropulateAbc:
         assert mod._effective_generation_budget(
             100, {"propulate_budget_mode": "total_simulations", "test_mode": False}
         ) == 3
+
+    def test_wall_time_cap_stops_propulate_early(self, tmp_path, monkeypatch):
+        import async_abc.inference.propulate_abc as mod
+        from async_abc.io.paths import OutputDir
+
+        original = (mod.Propulator, mod.ABCPMC)
+        clock = _Clock(start=100.0)
+        _WallTimeLocalPropulator.clock = clock
+        monkeypatch.setattr(mod.time, "time", clock)
+        monkeypatch.setattr(mod, "_make_propulate_comm", lambda: None)
+        mod.Propulator = _WallTimeLocalPropulator
+        mod.ABCPMC = _FakeABCPMC
+        try:
+            bm = _gaussian_bm()
+            od = OutputDir(tmp_path, "propulate_walltime").ensure()
+            records = run_propulate_abc(
+                bm.simulate,
+                bm.limits,
+                {**_test_inference_cfg(), "max_simulations": 50, "max_wall_time_s": 0.05},
+                od,
+                replicate=0,
+                seed=31,
+            )
+        finally:
+            mod.Propulator, mod.ABCPMC = original
+
+        assert 0 < len(records) < 50
+        assert records[-1].wall_time <= 0.06
+        assert [record.step for record in records] == list(range(1, len(records) + 1))
 
     def test_steps_are_monotone(self, propulate_records_default):
         steps = [record.step for record in propulate_records_default]

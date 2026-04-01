@@ -564,7 +564,7 @@ class TestScalingRunner:
             fallback_records=[],
         )
         assert captured["stop_policy_by_method"] == {
-            "async_propulate_abc": "simulation_cap_approx",
+            "async_propulate_abc": "wall_time_exact",
             "abc_smc_baseline": "wall_time_exact",
         }
 
