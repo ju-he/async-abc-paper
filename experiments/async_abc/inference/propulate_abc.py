@@ -163,18 +163,10 @@ def _resolve_max_wall_time_s(inference_cfg: Dict) -> float | None:
     return float(max_wall_time_s)
 
 
-def _collective_stop_requested(propulator, *, run_start: float, max_wall_time_s: float) -> bool:
-    """Return whether any participating worker has exhausted the wall-time budget."""
-    local_stop = (time.time() - float(run_start)) >= float(max_wall_time_s)
-    propulate_comm = getattr(propulator, "propulate_comm", None)
-    if propulate_comm is None:
-        return bool(local_stop)
-    try:
-        from mpi4py import MPI
 
-        return bool(propulate_comm.allreduce(bool(local_stop), op=MPI.LOR))
-    except Exception:
-        return bool(local_stop)
+def _wall_time_exceeded(run_start: float, max_wall_time_s: float) -> bool:
+    """Return whether this rank has locally exceeded the wall-time budget."""
+    return (time.time() - float(run_start)) >= float(max_wall_time_s)
 
 
 def _propulate_with_wall_time_limit(
@@ -185,10 +177,13 @@ def _propulate_with_wall_time_limit(
     logging_interval: int,
     debug: int = 0,
 ) -> None:
-    """Run Propulate until the first worker reaches the configured wall-time cap.
+    """Run Propulate until this worker's local clock exceeds *max_wall_time_s*.
 
-    All workers complete their current evaluation before stopping, so the run may
-    overshoot by at most one in-flight evaluation on the slowest rank.
+    Each rank checks its own clock independently — no collective operations in
+    the hot loop — so workers remain fully asynchronous.  The post-loop barriers
+    ensure population consistency after all ranks have exited.  Results that
+    completed after the deadline are filtered out by the caller
+    (``run_propulate_abc``), giving semantics identical to a hard job abort.
     """
     try:
         from mpi4py import MPI
@@ -202,11 +197,7 @@ def _propulate_with_wall_time_limit(
     propulate_comm = getattr(propulator, "propulate_comm", None)
     if propulate_comm is None:
         while propulator.generations <= -1 or propulator.generation < propulator.generations:
-            if _collective_stop_requested(
-                propulator,
-                run_start=run_start,
-                max_wall_time_s=max_wall_time_s,
-            ):
+            if _wall_time_exceeded(run_start, max_wall_time_s):
                 break
             propulator._evaluate_individual()
             propulator.generation += 1
@@ -214,7 +205,7 @@ def _propulate_with_wall_time_limit(
 
     if getattr(propulator, "island_comm", None) is not None and propulator.island_comm.rank == 0:
         logger.debug(
-            "Running Propulate with a %.3fs coordinated wall-time cap",
+            "Running Propulate with a %.3fs local wall-time cap",
             float(max_wall_time_s),
         )
 
@@ -222,11 +213,7 @@ def _propulate_with_wall_time_limit(
     propulate_comm.barrier()
 
     while propulator.generations <= -1 or propulator.generation < propulator.generations:
-        if _collective_stop_requested(
-            propulator,
-            run_start=run_start,
-            max_wall_time_s=max_wall_time_s,
-        ):
+        if _wall_time_exceeded(run_start, max_wall_time_s):
             break
 
         if propulator.generation % int(logging_interval) == 0:
@@ -425,6 +412,15 @@ def run_propulate_abc(
             time_semantics="event_end",
             attempt_count=step,
         ))
+
+    # Discard results that completed after the wall-time deadline.  This gives
+    # semantics identical to a hard job abort: every rank runs independently and
+    # only work finished before the deadline counts.
+    if max_wall_time_s is not None:
+        records = [
+            r for r in records
+            if r.sim_end_time is None or r.sim_end_time <= max_wall_time_s
+        ]
 
     if progress is not None:
         progress.finish(evaluations=eval_count, records=len(records))
