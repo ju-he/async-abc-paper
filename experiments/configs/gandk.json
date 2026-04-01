@@ -15,7 +15,8 @@
     "n_workers": 48,
     "k": 100,
     "tol_init": 10.0,
-    "n_generations": 5,
+    "n_generations": 1000,
+    "max_wall_time_s": 600,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8,
     "propulate_budget_mode": "total_simulations"

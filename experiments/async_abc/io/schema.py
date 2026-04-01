@@ -82,6 +82,7 @@ _TEST_MODE_OVERRIDES_TEMPLATE = {
             "n_workers": LOCAL_TEST_MAX_WORKERS,
             "max_simulations": 100,
             "n_generations": 2,
+            "max_wall_time_s": 30,
         },
         "execution": {
             "n_replicates": 1,

@@ -321,6 +321,37 @@ class TestCPMConfigValidation:
         assert cfg["inference"]["k"] <= 5
 
 
+class TestWallTimeClamping:
+    """Test-mode clamping for max_wall_time_s."""
+
+    def test_test_mode_clamps_max_wall_time_s(self, tmp_path, minimal_config):
+        minimal_config["inference"]["max_wall_time_s"] = 600
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["max_wall_time_s"] <= 30
+
+    def test_test_mode_injects_wall_time_when_absent(self, tmp_path, minimal_config):
+        """If max_wall_time_s is absent, test mode injects the clamp default (30s)."""
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert cfg["inference"]["max_wall_time_s"] == 30
+
+    @pytest.mark.parametrize("config_name", [
+        "gaussian_mean.json",
+        "gandk.json",
+        "lotka_volterra.json",
+        "cellular_potts.json",
+    ])
+    def test_all_benchmark_configs_have_wall_time(self, config_name):
+        cfg = load_config(f"configs/{config_name}")
+        assert "max_wall_time_s" in cfg["inference"], (
+            f"{config_name} missing max_wall_time_s"
+        )
+        assert cfg["inference"]["max_wall_time_s"] > 0
+
+
 class TestValueValidation:
     """Validate scheduler_type and benchmark.name against allowed values."""
 
