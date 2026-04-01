@@ -40,6 +40,7 @@ from .common import (
     threshold_summary_plot,
     throughput_over_time_plot,
     tolerance_trajectory_plot,
+    _build_state_kind_map,
 )
 from .export import save_figure, write_plot_metadata
 
@@ -1026,12 +1027,14 @@ def plot_quality_by_sigma(
             log_y=False,
             lower_bound=0.0,
         )
+        sk_map = _build_state_kind_map(quality_df)
         for method_idx, (method, group) in enumerate(panel_summary.groupby("method", sort=True)):
             group = group.sort_values("axis_value")
             color = cmap(method_idx % 10)
+            sk_suffix = f" [{sk_map[method]}]" if method in sk_map else ""
             ax.plot(
                 group["axis_value"], group["wasserstein"],
-                linewidth=1.8, label=method, color=color,
+                linewidth=1.8, label=f"{method}{sk_suffix}", color=color,
             )
             valid_ci = (
                 group["wasserstein_ci_low"].notna()
@@ -1313,9 +1316,11 @@ def plot_progress_summary(
         ax.legend(frameon=False, fontsize=8)
     if not quality_summary.empty:
         ax = axes_list[panel_idx]
+        sk_map = _build_state_kind_map(quality_df) if not quality_df.empty else {}
         for method, group in quality_summary.groupby("method", sort=True):
             group = group.sort_values("axis_value")
-            ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=method)
+            sk_suffix = f" [{sk_map[method]}]" if method in sk_map else ""
+            ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=f"{method}{sk_suffix}")
             valid_ci = (
                 group["wasserstein_ci_low"].notna()
                 & group["wasserstein_ci_high"].notna()
@@ -3253,9 +3258,11 @@ def _save_quality_summary_artifact(
         "posterior_samples": "posterior samples",
         "attempt_budget": "simulation attempts",
     }[axis_kind]
+    sk_map = _build_state_kind_map(quality_df)
     for method, group in summary_df.groupby("method", sort=True):
         group = group.sort_values("axis_value")
-        ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=method)
+        sk_suffix = f" [{sk_map[method]}]" if method in sk_map else ""
+        ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=f"{method}{sk_suffix}")
         valid_ci = group["wasserstein_ci_low"].notna() & group["wasserstein_ci_high"].notna() & (group["n_replicates"] >= 2)
         if valid_ci.any():
             ax.fill_between(

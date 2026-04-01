@@ -516,6 +516,28 @@ def quality_vs_time_plot(quality_df: pd.DataFrame, ax=None):
     return posterior_quality_plot(quality_df, axis_kind="wall_time", ax=ax)
 
 
+def _state_kind_short(state_kind: str) -> str:
+    """Compact label for ``state_kind`` used in plot legends."""
+    _MAP = {
+        "archive_reconstruction": "archive",
+        "generation_population": "generation",
+        "accepted_prefix": "prefix",
+    }
+    return _MAP.get(state_kind, state_kind)
+
+
+def _build_state_kind_map(quality_df) -> dict:
+    """Return ``{method: short_state_kind}`` from a quality DataFrame."""
+    if "state_kind" not in quality_df.columns:
+        return {}
+    return (
+        quality_df.groupby("method")["state_kind"]
+        .first()
+        .map(_state_kind_short)
+        .to_dict()
+    )
+
+
 def posterior_quality_plot(quality_df: pd.DataFrame, axis_kind: str, ax=None):
     """Posterior quality curve for a configurable x-axis."""
     created_fig = ax is None
@@ -541,9 +563,16 @@ def posterior_quality_plot(quality_df: pd.DataFrame, axis_kind: str, ax=None):
         ax.set_ylabel("wasserstein")
         return fig
 
+    sk_map = _build_state_kind_map(quality_df)
+
     for (method, replicate), group in quality_df.groupby(["method", "replicate"], sort=True):
         group = group.sort_values("axis_value")
-        label = method if quality_df["replicate"].nunique() == 1 else f"{method} (rep {replicate})"
+        sk_suffix = f" [{sk_map[method]}]" if method in sk_map else ""
+        label = (
+            f"{method}{sk_suffix}"
+            if quality_df["replicate"].nunique() == 1
+            else f"{method}{sk_suffix} (rep {replicate})"
+        )
         x = group["axis_value"].to_numpy(dtype=float)
         y = group["wasserstein"].to_numpy(dtype=float)
         semantics = group["time_semantics"].dropna().unique().tolist()

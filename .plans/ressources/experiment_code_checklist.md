@@ -65,8 +65,6 @@ The codebase should support these guarantees.
 
 ### 3.1 Config loading and validation
 
-Create a small config layer.
-
 Required modules:
 
 - `async_abc/io/config.py`
@@ -75,10 +73,12 @@ Required modules:
 Required functionality:
 
 - load JSON config
-- validate required fields
+- validate required fields (including `scheduler_type` against `VALID_SCHEDULER_TYPES` and `benchmark.name` against `VALID_BENCHMARK_NAMES`)
 - merge user config with defaults
-- apply `--test` overrides cleanly
+- apply `--test` overrides cleanly (including `max_wall_time_s` clamping to 30s)
 - save resolved config into output directory for provenance
+- warn when `max_wall_time_s` is set but `n_generations < 50`
+- default `n_generations` to 1000 when `max_wall_time_s` is present
 
 Recommended functions:
 
@@ -87,6 +87,13 @@ load_config(path: str) -> dict
 merge_with_defaults(user_cfg: dict, default_cfg: dict) -> dict
 apply_test_overrides(cfg: dict) -> dict
 save_resolved_config(cfg: dict, out_path: str) -> None
+```
+
+Valid constants (defined in `schema.py`):
+
+```python
+VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
+VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
 ```
 
 ### 3.2 Output directory management
@@ -193,16 +200,19 @@ Recommended plot metadata fields:
 
 ### 3.6 Method wrappers
 
-Required module:
+Required modules:
 
 - `async_abc/inference/method_registry.py`
+- `async_abc/inference/_pyabc_common.py` — shared utilities extracted from pyABC wrappers
 
-This should standardize calls to:
+`method_registry.py` standardizes calls to:
 
 - asynchronous Propulate ABC
 - pyABC baseline
-- optional classical ABC-SMC baseline implementation
-- optional rejection ABC baseline for small models
+- classical ABC-SMC baseline implementation
+- rejection ABC baseline for small models
+
+`_pyabc_common.py` provides shared `db_suffix()` and `prepare_db_path()` functions imported by both `pyabc_wrapper.py` and `abc_smc_baseline.py`, eliminating prior code duplication.
 
 All benchmark scripts should call methods through a common interface.
 
@@ -226,7 +236,7 @@ Required files:
 Required functionality:
 
 - generate observed data for known ground-truth mean
-- analytic posterior computation for comparison
+- analytic posterior computation under the Uniform prior (clips observed mean to prior bounds)
 - simulator returning Gaussian draws or summary statistics
 - discrepancy function
 - optional runtime delay hook for synthetic runtime studies
@@ -313,10 +323,10 @@ Required files:
 
 Required functionality:
 
-- simulator wrapper
-- observed trajectory generation
-- summary statistics
-- discrepancy function
+- simulator wrapper with Gillespie algorithm
+- observed trajectory generation with extinction retry loop (up to `max_extinction_retries`, default 100; raises `RuntimeError` after exhaustion)
+- summary statistics with optional normalization (`normalize_stats` config flag, default `True`; divides by `|obs_stat| + eps` for balanced scale)
+- discrepancy function (normalized Euclidean when `normalize_stats=True`, raw Euclidean when `False`)
 - optional variable runtime instrumentation
 
 Outputs:
@@ -623,6 +633,17 @@ Benchmark diagnostics use explicit suffixes:
 - `time_to_target_diagnostic`
 - `attempts_to_target_diagnostic`
 
+Quality curves support a `checkpoint_strategy` parameter (in `posterior_quality_curve()`):
+
+- `"all"` (default): emit one checkpoint per native event (backward compatible)
+- `"time_uniform"`: resample all methods onto a shared evenly-spaced time grid using LOCF (last-observation-carried-forward), ensuring equal checkpoint density for fair comparison
+
+Each quality row includes a `state_kind` column:
+
+- `"archive_reconstruction"` for async methods
+- `"generation_population"` for synchronous SMC methods
+- `"accepted_prefix"` for rejection ABC
+
 ### 6.3 Plot metadata JSON
 
 Each plot metadata file should capture:
@@ -647,24 +668,27 @@ Lotka-Volterra additionally emits:
 
 ## 7. Configs That Currently Exist
 
-Current experiment families use one main config plus a `small/` companion where applicable.
+Current experiment families use one main config plus a `small/` companion where applicable. All configs include `max_wall_time_s` as the primary stopping criterion and `n_generations: 1000` to prevent generation-cap binding. Test mode clamps `max_wall_time_s` to 30s via `_TEST_MODE_OVERRIDES_TEMPLATE`.
 
-Key files:
+Key files with wall-time values:
 
 ```text
-experiments/configs/gaussian_mean.json
-experiments/configs/gandk.json
-experiments/configs/lotka_volterra.json
-experiments/configs/cellular_potts.json
-experiments/configs/runtime_heterogeneity.json
-experiments/configs/scaling.json
-experiments/configs/sensitivity.json
-experiments/configs/ablation.json
-experiments/configs/straggler.json
-experiments/configs/sbc.json
-experiments/configs/small/gaussian_mean.json
-experiments/configs/small/gandk.json
-...
+experiments/configs/gaussian_mean.json        (max_wall_time_s: 300)
+experiments/configs/gandk.json                (max_wall_time_s: 600)
+experiments/configs/lotka_volterra.json        (max_wall_time_s: 600)
+experiments/configs/cellular_potts.json        (max_wall_time_s: 3600)
+experiments/configs/runtime_heterogeneity.json (max_wall_time_s: 60)
+experiments/configs/scaling.json              (max_wall_time_s: 900)
+experiments/configs/sensitivity.json          (max_wall_time_s: 300)
+experiments/configs/sensitivity_gandk.json     (max_wall_time_s: 600)
+experiments/configs/ablation.json             (max_wall_time_s: 300)
+experiments/configs/straggler.json            (max_wall_time_s: 300)
+experiments/configs/sbc.json                  (max_wall_time_s: 300)
+experiments/configs/small/gaussian_mean.json   (max_wall_time_s: 120)
+experiments/configs/small/gandk.json           (max_wall_time_s: 300)
+experiments/configs/small/lotka_volterra.json   (max_wall_time_s: 300)
+experiments/configs/small/cellular_potts.json   (max_wall_time_s: 1800)
+...and small/ variants for all other configs
 ```
 
 ## 8. Logging and Provenance

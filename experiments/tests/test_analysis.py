@@ -1,5 +1,6 @@
 """Tests for async_abc.analysis.*"""
 import numpy as np
+import pytest
 
 from async_abc.analysis import (
     barrier_overhead_fraction,
@@ -460,3 +461,35 @@ def test_posterior_quality_curve_multiparameter():
     assert {"method", "replicate", "axis_value", "wall_time", "wasserstein"} <= set(df.columns)
     assert len(df) == 2
     assert (df["wasserstein"] >= 0.0).all()
+
+
+def test_posterior_quality_curve_checkpoint_strategy_parameter():
+    """All valid checkpoint_strategy values are accepted; invalid ones raise ValueError."""
+    records = _make_async_records(20, 5.0)
+    true_params = {"mu": 0.0}
+    common_kwargs = dict(
+        records=records,
+        true_params=true_params,
+        axis_kind="wall_time",
+        archive_size=20,
+    )
+
+    # "all" — default, returns all checkpoints
+    df_all = posterior_quality_curve(**common_kwargs, checkpoint_strategy="all")
+    assert len(df_all) > 0
+
+    # "time_uniform" — resamples onto shared grid
+    df_tu = posterior_quality_curve(
+        **common_kwargs, checkpoint_strategy="time_uniform", checkpoint_count=5,
+    )
+    assert len(df_tu) > 0
+
+    # "quantile" — subsamples at quantile positions
+    df_q = posterior_quality_curve(
+        **common_kwargs, checkpoint_strategy="quantile", checkpoint_count=3,
+    )
+    assert len(df_q) > 0
+
+    # Invalid strategy raises ValueError
+    with pytest.raises(ValueError, match="Unsupported checkpoint_strategy"):
+        posterior_quality_curve(**common_kwargs, checkpoint_strategy="bogus")

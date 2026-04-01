@@ -189,7 +189,7 @@ Goal:
 
 Advantages:
 
-* analytic posterior available
+* analytic posterior available (under Uniform prior: observed mean clipped to prior bounds)
 * easy visualization
 
 ---
@@ -224,6 +224,11 @@ Parameters govern:
 * predator mortality
 
 This model is frequently used in ABC-SMC studies.
+
+Implementation notes:
+
+* Summary statistics are normalized by observed values by default (`normalize_stats=True`), making the distance unitless and balanced across dimensions
+* Observed trajectory generation retries on extinction (up to `max_extinction_retries` attempts with incrementing seed)
 
 Evaluation:
 
@@ -260,7 +265,7 @@ We will compare against:
 
 ### Rejection ABC
 
-Baseline likelihood-free method.
+Baseline likelihood-free method. Supports `max_wall_time_s` for wall-time-limited stopping (consistent with all other methods).
 
 Used only for small problems.
 
@@ -302,7 +307,9 @@ Compare posterior samples using sliced Wasserstein distance for multi-parameter 
 
 ### Wasserstein vs. wall-clock time
 
-Track convergence curves: Wasserstein distance at fixed checkpoints in simulation count and wall time, comparing async and sync methods.
+Track convergence curves: Wasserstein distance (W1-to-point-mass, i.e. mean absolute deviation from truth in 1D; sliced Wasserstein via POT for multi-parameter cases) at fixed checkpoints in simulation count and wall time, comparing async and sync methods.
+
+Checkpoint granularity is equalized across methods via `checkpoint_strategy="time_uniform"` in `posterior_quality_curve()`, which resamples both async and sync records onto a shared evenly-spaced time grid using LOCF (last-observation-carried-forward). This ensures fair comparison between async methods (which produce fine-grained per-event checkpoints) and sync methods (which produce coarse per-generation checkpoints).
 
 ---
 
@@ -570,7 +577,7 @@ Horizontal bar chart with one row per worker; colored blocks show individual sim
 
 ### Posterior quality vs. wall-clock time
 
-Wasserstein distance curves per method over wall time. The paper-facing version is now a summary curve over replicates with pointwise 95% confidence bands where possible. Replicate-level traces are emitted separately as diagnostic plots.
+Wasserstein distance curves per method over wall time. The paper-facing version is now a summary curve over replicates with pointwise 95% confidence bands where possible. Replicate-level traces are emitted separately as diagnostic plots. The convergence module uses `state_kind` labels (`archive_reconstruction`, `generation_population`, `accepted_prefix`) to distinguish the semantics of each method's posterior state at each checkpoint.
 
 ---
 

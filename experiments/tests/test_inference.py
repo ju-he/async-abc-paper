@@ -1128,6 +1128,38 @@ class TestAbcSmcBaseline:
         assert isinstance(records, list)
         assert len(records) > 0
 
+    def test_abc_smc_baseline_uses_high_n_generations_with_wall_time(
+        self, tmp_output_dir, monkeypatch,
+    ):
+        """n_generations resolved to 1000 when max_wall_time_s is set."""
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        captured = {}
+
+        def spy(**kwargs):
+            captured.update(kwargs)
+            return []
+
+        monkeypatch.setattr(baseline_mod, "_run_abc_smc_baseline_with_sampler", spy)
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc_ngen").ensure()
+        cfg = {
+            **_test_inference_cfg(),
+            "max_simulations": 50,
+            "max_wall_time_s": 1.0,
+            # n_generations intentionally absent
+        }
+        run_abc_smc_baseline(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        assert captured["n_generations"] == 1000, (
+            f"Expected n_generations=1000 when max_wall_time_s is set, "
+            f"got {captured['n_generations']}"
+        )
+
 
 class TestBuildPyabcSampler:
     @pytest.fixture(autouse=True)

@@ -556,6 +556,8 @@ proposed individual, making the full algorithm state recoverable from history al
 | Weight staleness in async execution | Accepted approximation; documented in `__call__` docstring |
 | O(n) cost per call over unbounded history | Not addressed; add `max_history` cap if needed for very long runs |
 | Categorical/integer search spaces | Not supported; ABC requires continuous (float) limits only |
+| Checkpoint granularity mismatch (async vs sync) | Addressed via `checkpoint_strategy="time_uniform"` in `posterior_quality_curve()`, which resamples both method types onto a shared time grid using LOCF |
+| Wasserstein metric interpretation | Documented: W1-to-point-mass (mean absolute deviation from truth in 1D); sliced Wasserstein for multi-D |
 
 ---
 
