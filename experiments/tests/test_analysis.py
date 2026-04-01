@@ -277,6 +277,132 @@ def test_barrier_overhead_fraction_returns_fraction(abc_smc_records):
     assert (df["barrier_overhead_fraction"] <= 1.0).all()
 
 
+def _make_async_records(n_events, time_span):
+    """Create n_events async records spread over time_span seconds."""
+    return [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=i + 1,
+            params={"mu": float(i) * 0.05},
+            loss=float(i) * 0.1,
+            tolerance=5.0,
+            wall_time=time_span * (i + 1) / n_events,
+            record_kind="simulation_attempt",
+            time_semantics="event_end",
+            attempt_count=i + 1,
+        )
+        for i in range(n_events)
+    ]
+
+
+def _make_sync_records(n_generations, particles_per_gen, time_span):
+    """Create sync records with n_generations spread over time_span."""
+    records = []
+    step = 0
+    for gen in range(n_generations):
+        gen_time = time_span * (gen + 1) / n_generations
+        for p in range(particles_per_gen):
+            step += 1
+            records.append(
+                ParticleRecord(
+                    method="abc_smc_baseline",
+                    replicate=0,
+                    seed=2,
+                    step=step,
+                    params={"mu": float(gen) * 0.1 + float(p) * 0.01},
+                    loss=float(gen) * 0.1 + float(p) * 0.01,
+                    tolerance=5.0 - gen * 0.5,
+                    wall_time=gen_time,
+                    generation=gen,
+                    record_kind="population_particle",
+                    time_semantics="generation_end",
+                    attempt_count=(gen + 1) * 10,
+                )
+            )
+    return records
+
+
+def test_time_uniform_checkpoints_equal_density_across_methods():
+    """With checkpoint_mode='time_uniform', both methods are resampled onto the same time grid."""
+    time_span = 10.0
+    async_records = _make_async_records(100, time_span)
+    sync_records = _make_sync_records(5, 10, time_span)
+    all_records = async_records + sync_records
+
+    df = posterior_quality_curve(
+        all_records,
+        true_params={"mu": 0.0},
+        axis_kind="wall_time",
+        checkpoint_strategy="time_uniform",
+        checkpoint_count=20,
+    )
+
+    async_df = df[df["method"] == "async_propulate_abc"]
+    sync_df = df[df["method"] == "abc_smc_baseline"]
+
+    # Async has events from t≈0.1 so should get all 20 grid points
+    assert len(async_df) == 20, (
+        f"async: expected 20 checkpoints, got {len(async_df)}"
+    )
+    # Sync has only 5 generation endpoints, so LOCF fills between them.
+    # Grid points before the first generation are skipped.
+    assert len(sync_df) >= 10, (
+        f"sync: expected >= 10 checkpoints (LOCF), got {len(sync_df)}"
+    )
+    # Both should have many more checkpoints than native sync (5 generations)
+    assert len(sync_df) > 5
+
+
+def test_time_uniform_sync_uses_locf():
+    """Between generations, the sync state should use the previous generation's population (LOCF)."""
+    sync_records = _make_sync_records(2, 3, 10.0)  # gen0 at t=5, gen1 at t=10
+
+    df = posterior_quality_curve(
+        sync_records,
+        true_params={"mu": 0.0},
+        axis_kind="wall_time",
+        checkpoint_strategy="time_uniform",
+        checkpoint_count=10,
+    )
+
+    # Checkpoints before t=5 should have no data (or be absent)
+    # Checkpoints between t=5 and t=10 should use gen0's population (LOCF)
+    mid_checkpoints = df[(df["wall_time"] > 5.0) & (df["wall_time"] < 10.0)]
+    if not mid_checkpoints.empty:
+        # LOCF: particles from gen0 (3 particles)
+        assert (mid_checkpoints["n_particles_used"] == 3).all()
+
+
+def test_time_uniform_async_subset_of_full():
+    """Time-uniform checkpoints should produce a subset of the all-events reconstruction."""
+    records = _make_async_records(50, 5.0)
+
+    df_all = posterior_quality_curve(
+        records,
+        true_params={"mu": 0.0},
+        axis_kind="wall_time",
+        checkpoint_strategy="all",
+    )
+    df_uniform = posterior_quality_curve(
+        records,
+        true_params={"mu": 0.0},
+        axis_kind="wall_time",
+        checkpoint_strategy="time_uniform",
+        checkpoint_count=10,
+    )
+
+    assert len(df_uniform) <= len(df_all)
+    # Wasserstein values at matching times should be identical
+    for _, row in df_uniform.iterrows():
+        matching = df_all[np.isclose(df_all["wall_time"], row["wall_time"], atol=1e-9)]
+        if not matching.empty:
+            assert np.isclose(
+                row["wasserstein"], matching.iloc[0]["wasserstein"], rtol=1e-6
+            )
+
+
 def test_posterior_quality_curve_multiparameter():
     """2-parameter posterior exercises the sliced-Wasserstein code path."""
     records = [

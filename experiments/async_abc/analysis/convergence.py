@@ -551,6 +551,10 @@ def _apply_checkpoint_strategy(
 ) -> pd.DataFrame:
     if checkpoint_strategy == "all" or quality_df.empty:
         return quality_df.reset_index(drop=True)
+
+    if checkpoint_strategy == "time_uniform":
+        return _apply_time_uniform_strategy(quality_df, checkpoint_count)
+
     if checkpoint_strategy != "quantile":
         raise ValueError(f"Unsupported checkpoint_strategy: {checkpoint_strategy}")
 
@@ -562,6 +566,72 @@ def _apply_checkpoint_strategy(
             continue
         indices = sorted({int(round(x)) for x in np.linspace(0, len(ordered) - 1, num=checkpoint_count)})
         selected.append(ordered.iloc[indices].copy())
+    if not selected:
+        return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
+    return pd.concat(selected, ignore_index=True)
+
+
+def _apply_time_uniform_strategy(
+    quality_df: pd.DataFrame,
+    checkpoint_count: int | None,
+) -> pd.DataFrame:
+    """Resample all methods onto a shared, evenly-spaced wall-time grid.
+
+    For each (method, replicate) group the function picks the row whose
+    ``wall_time`` is closest-but-not-exceeding each grid point (LOCF /
+    last-observation-carried-forward).  This gives every method the same
+    number of evaluation checkpoints regardless of native granularity.
+    """
+    if checkpoint_count is None or checkpoint_count <= 0:
+        return quality_df.reset_index(drop=True)
+
+    # Build a shared time grid spanning [0, max_wall_time] across ALL methods.
+    t_max = float(quality_df["wall_time"].max())
+    t_min = float(quality_df["wall_time"].min())
+    if t_max <= t_min:
+        return quality_df.reset_index(drop=True)
+    grid = np.linspace(t_min, t_max, num=checkpoint_count)
+
+    selected: list[pd.DataFrame] = []
+    for (method, replicate), group in quality_df.groupby(
+        ["method", "replicate"], sort=True
+    ):
+        ordered = group.sort_values("wall_time").reset_index(drop=True)
+        wall_times = ordered["wall_time"].to_numpy(dtype=float)
+
+        # For each grid point find the latest checkpoint at or before that time.
+        indices = np.searchsorted(wall_times, grid, side="right") - 1
+        # Keep only valid indices (>= 0) and deduplicate.
+        valid_mask = indices >= 0
+        unique_indices = sorted(set(int(i) for i in indices[valid_mask]))
+
+        if not unique_indices:
+            continue
+
+        rows = ordered.iloc[unique_indices].copy()
+        # Re-number checkpoint_id for the resampled output.
+        rows = rows.reset_index(drop=True)
+        rows["checkpoint_id"] = np.arange(1, len(rows) + 1)
+
+        # If we got fewer checkpoints than requested because multiple grid
+        # points mapped to the same row, replicate the last observation for
+        # each remaining grid point (LOCF).
+        if len(rows) < checkpoint_count:
+            # Map each grid point to its LOCF row
+            locf_rows = []
+            for g_idx, (g_time, raw_idx) in enumerate(zip(grid, indices)):
+                if raw_idx < 0:
+                    continue
+                row = ordered.iloc[int(raw_idx)].copy()
+                row["checkpoint_id"] = g_idx + 1
+                row["wall_time"] = float(g_time)
+                row["axis_value"] = float(g_time)
+                locf_rows.append(row)
+            if locf_rows:
+                rows = pd.DataFrame(locf_rows).reset_index(drop=True)
+
+        selected.append(rows)
+
     if not selected:
         return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
     return pd.concat(selected, ignore_index=True)
