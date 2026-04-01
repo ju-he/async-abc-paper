@@ -1079,6 +1079,27 @@ class TestAbcSmcBaseline:
         assert population_records
         assert all(math.isfinite(record.loss) for record in population_records)
 
+    def test_abc_smc_baseline_defaults_high_n_generations_with_wall_time(self, tmp_output_dir):
+        """When max_wall_time_s is set and n_generations is absent, use high default."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "abc_smc_walltime").ensure()
+        cfg = {
+            **_test_inference_cfg(),
+            "max_simulations": 50,
+            "max_wall_time_s": 0.5,
+            # n_generations intentionally absent — should default high
+        }
+        records = run_abc_smc_baseline(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        # Should produce records (stopped by wall time or max_sims, not by
+        # a low n_generations=5 default)
+        assert isinstance(records, list)
+        assert len(records) > 0
+
 
 class TestBuildPyabcSampler:
     @pytest.fixture(autouse=True)

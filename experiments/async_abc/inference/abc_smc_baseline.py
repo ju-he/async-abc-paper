@@ -255,10 +255,13 @@ def run_abc_smc_baseline(
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
-    n_generations = inference_cfg.get("n_generations", 5)
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
+    # When wall-time is the intended stopping criterion, use a high default for
+    # n_generations so it never becomes the binding constraint.
+    _default_n_gen = 1000 if max_wall_time_s is not None else 5
+    n_generations = inference_cfg.get("n_generations", _default_n_gen)
     parallel_backend = resolve_pyabc_parallel_backend(
         inference_cfg,
         method_name="abc_smc_baseline",
