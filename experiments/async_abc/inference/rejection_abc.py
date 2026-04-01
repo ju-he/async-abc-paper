@@ -47,6 +47,7 @@ def run_rejection_abc(
     max_sims = inference_cfg["max_simulations"]
     k        = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
+    max_wall_time_s = inference_cfg.get("max_wall_time_s")
 
     rng = np.random.default_rng(seed)
     param_names = list(limits.keys())
@@ -58,6 +59,8 @@ def run_rejection_abc(
     run_start = time.time()
 
     while sim_count < max_sims and len(accepted) < k:
+        if max_wall_time_s is not None and time.time() - run_start >= max_wall_time_s:
+            break
         sim_count += 1
         vals     = rng.uniform(lows, highs)
         params   = {p: float(v) for p, v in zip(param_names, vals)}

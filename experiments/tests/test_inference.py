@@ -945,6 +945,54 @@ class TestRejectionAbc:
     def test_returns_at_most_k_particles(self, rejection_records_small_k):
         assert len(rejection_records_small_k) <= 3
 
+    def test_rejection_abc_respects_max_wall_time_s(self, tmp_path):
+        """rejection_abc must stop early when max_wall_time_s is exceeded."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_path, "rejection_walltime").ensure()
+
+        def slow_simulate(params, seed):
+            time.sleep(0.05)
+            return 0.0  # always accept
+
+        cfg = {
+            **_test_inference_cfg(),
+            "max_simulations": 10_000,
+            "k": 10_000,
+            "tol_init": 100.0,
+            "max_wall_time_s": 0.2,
+        }
+        records = run_rejection_abc(
+            slow_simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        # With 0.05s sleep per sim and 0.2s budget, expect ~4 accepted
+        # (certainly far fewer than 10_000)
+        assert 0 < len(records) < 100
+        assert records[-1].wall_time <= 0.35  # generous tolerance
+
+    def test_rejection_abc_without_wall_time_runs_full_budget(self, tmp_path):
+        """Without max_wall_time_s, rejection_abc runs until k or max_simulations."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_path, "rejection_no_walltime").ensure()
+
+        cfg = {
+            **_test_inference_cfg(),
+            "max_simulations": 20,
+            "k": 5,
+            "tol_init": 100.0,
+            # no max_wall_time_s
+        }
+        records = run_rejection_abc(
+            bm.simulate, bm.limits, cfg, od, replicate=0, seed=1,
+        )
+        # tol_init=100 means everything is accepted → should get exactly k=5
+        assert len(records) == 5
+
 
 class TestAbcSmcBaseline:
     @pytest.fixture(autouse=True)

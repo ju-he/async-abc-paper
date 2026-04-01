@@ -9,6 +9,8 @@ from .schema import (
     REQUIRED_EXECUTION,
     REQUIRED_INFERENCE,
     REQUIRED_TOP_LEVEL,
+    VALID_BENCHMARK_NAMES,
+    VALID_SCHEDULER_TYPES,
     ValidationError,
     _validate_cpm_benchmark,
     get_test_mode_overrides,
@@ -63,6 +65,22 @@ def _validate(cfg: dict) -> None:
 
     if not isinstance(cfg["methods"], list) or len(cfg["methods"]) == 0:
         raise ValidationError("Config['methods'] must be a non-empty list.")
+
+    # Validate scheduler_type against allowed values.
+    scheduler_type = cfg["inference"].get("scheduler_type")
+    if scheduler_type is not None and scheduler_type not in VALID_SCHEDULER_TYPES:
+        raise ValidationError(
+            f"Config['inference']['scheduler_type'] = {scheduler_type!r} "
+            f"is not valid. Must be one of: {sorted(VALID_SCHEDULER_TYPES)}"
+        )
+
+    # Validate benchmark name against known benchmarks.
+    benchmark_name = cfg["benchmark"].get("name")
+    if benchmark_name is not None and benchmark_name not in VALID_BENCHMARK_NAMES:
+        raise ValidationError(
+            f"Config['benchmark']['name'] = {benchmark_name!r} "
+            f"is not valid. Must be one of: {sorted(VALID_BENCHMARK_NAMES)}"
+        )
 
     if cfg["benchmark"].get("name") == "cellular_potts":
         _validate_cpm_benchmark(cfg["benchmark"])

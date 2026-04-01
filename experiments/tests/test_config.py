@@ -280,6 +280,40 @@ class TestCPMConfigValidation:
         assert cfg["inference"]["k"] <= 5
 
 
+class TestValueValidation:
+    """Validate scheduler_type and benchmark.name against allowed values."""
+
+    def test_invalid_scheduler_type_raises(self, tmp_path, minimal_config):
+        minimal_config["inference"]["scheduler_type"] = "nonexistent_scheduler"
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        with pytest.raises(ValidationError, match="scheduler_type"):
+            load_config(p)
+
+    def test_valid_scheduler_types_accepted(self, tmp_path, minimal_config):
+        for stype in ("quantile", "geometric_decay", "acceptance_rate"):
+            minimal_config["inference"]["scheduler_type"] = stype
+            p = tmp_path / "cfg.json"
+            p.write_text(json.dumps(minimal_config))
+            cfg = load_config(p)
+            assert cfg["inference"]["scheduler_type"] == stype
+
+    def test_invalid_benchmark_name_raises(self, tmp_path, minimal_config):
+        minimal_config["benchmark"]["name"] = "nonexistent_benchmark"
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        with pytest.raises(ValidationError, match="benchmark.*name"):
+            load_config(p)
+
+    def test_valid_benchmark_names_accepted(self, tmp_path, minimal_config):
+        # Only test gaussian_mean here (others need extra benchmark keys)
+        minimal_config["benchmark"]["name"] = "gaussian_mean"
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p)
+        assert cfg["benchmark"]["name"] == "gaussian_mean"
+
+
 class TestSensitivityConfig:
     def test_sensitivity_config_accepts_tol_init_multiplier(self):
         cfg = load_config("configs/sensitivity.json")
