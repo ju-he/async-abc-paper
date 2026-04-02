@@ -277,6 +277,13 @@ def run_propulate_abc(
     max_sims = inference_cfg["max_simulations"]
     generation_budget = _effective_generation_budget(max_sims, inference_cfg)
     max_wall_time_s = _resolve_max_wall_time_s(inference_cfg)
+
+    # When a wall-time cap is set it should be the binding stopping criterion,
+    # not the generation budget.  Use -1 (unlimited) so workers keep running
+    # until the local time check fires; the post-hoc filter discards anything
+    # that completed after the deadline.
+    if max_wall_time_s is not None:
+        generation_budget = -1
     k = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
@@ -346,6 +353,7 @@ def run_propulate_abc(
     )
 
     propulate_completed = False
+    logging_interval = max(1, generation_budget + 1)
     try:
         with _suppress_propulate_info_logs():
             if max_wall_time_s is not None:
@@ -353,11 +361,11 @@ def run_propulate_abc(
                     propulator,
                     run_start=run_start,
                     max_wall_time_s=max_wall_time_s,
-                    logging_interval=generation_budget + 1,
+                    logging_interval=logging_interval,
                     debug=0,
                 )
             else:
-                propulator.propulate(logging_interval=generation_budget + 1, debug=0)
+                propulator.propulate(logging_interval=logging_interval, debug=0)
         propulate_completed = True
     finally:
         if propulate_completed:
