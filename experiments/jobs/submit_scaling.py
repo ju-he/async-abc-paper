@@ -50,6 +50,10 @@ EXPERIMENTS_DIR = SCRIPT_DIR.parent
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 from async_abc.io.config import compose_run_mode, load_config  # noqa: E402
+from async_abc.utils.sharding import make_run_id  # noqa: E402
+
+DEFAULT_ACCOUNT = "tissuetwin"
+DEFAULT_PARTITION = "batch"
 
 
 def _format_time(hours: float) -> str:
@@ -116,6 +120,92 @@ def _pack_small_worker_counts(worker_counts: list[int], *, capacity: int) -> tup
             remaining.append(int(capacity) - n_workers)
 
     return [sorted(bundle) for bundle in bundles], large
+
+
+def _render_packed_script(
+    *,
+    packed_script: Path,
+    config_path: Path,
+    output_dir: Path,
+    workers_csv: str,
+    test_mode: bool,
+    small_mode: bool,
+    extend: bool,
+    account: str,
+    partition: str,
+    time_limit: str,
+    ntasks: int,
+    job_name: str,
+    log_path: Path,
+) -> str:
+    """Render a SBATCH wrapper that delegates to the packed shell script."""
+    flags = []
+    if test_mode:
+        flags.append("--test")
+    if small_mode:
+        flags.append("--small")
+    if extend:
+        flags.append("--extend")
+    flag_str = " ".join(flags)
+    return (
+        f"#!/bin/bash -x\n"
+        f"#SBATCH --account={account}\n"
+        f"#SBATCH --nodes=1\n"
+        f"#SBATCH --ntasks={ntasks}\n"
+        f"#SBATCH --cpus-per-task=1\n"
+        f"#SBATCH --threads-per-core=2\n"
+        f"#SBATCH --time={time_limit}\n"
+        f"#SBATCH --partition={partition}\n"
+        f"#SBATCH --job-name={job_name}\n"
+        f"#SBATCH --output={log_path}\n"
+        f"\n"
+        f"exec {packed_script} {output_dir} --workers {workers_csv}"
+        f" --config {config_path}"
+        f"{' ' + flag_str if flag_str else ''}\n"
+    )
+
+
+def _render_standalone_script(
+    *,
+    scaling_script: Path,
+    config_path: Path,
+    output_dir: Path,
+    test_mode: bool,
+    small_mode: bool,
+    extend: bool,
+    account: str,
+    partition: str,
+    time_limit: str,
+    ntasks: int,
+    nodes: int,
+    job_name: str,
+    log_path: Path,
+) -> str:
+    """Render a SBATCH wrapper that delegates to the standalone shell script."""
+    flags = []
+    if test_mode:
+        flags.append("--test")
+    if small_mode:
+        flags.append("--small")
+    if extend:
+        flags.append("--extend")
+    flag_str = " ".join(flags)
+    return (
+        f"#!/bin/bash -x\n"
+        f"#SBATCH --account={account}\n"
+        f"#SBATCH --nodes={nodes}\n"
+        f"#SBATCH --ntasks={ntasks}\n"
+        f"#SBATCH --cpus-per-task=1\n"
+        f"#SBATCH --threads-per-core=2\n"
+        f"#SBATCH --time={time_limit}\n"
+        f"#SBATCH --partition={partition}\n"
+        f"#SBATCH --job-name={job_name}\n"
+        f"#SBATCH --output={log_path}\n"
+        f"\n"
+        f"exec {scaling_script} {output_dir}"
+        f" --config {config_path}"
+        f"{' ' + flag_str if flag_str else ''}\n"
+    )
 
 
 def main() -> None:
@@ -195,6 +285,16 @@ def main() -> None:
         action="store_true",
         help="Print sbatch commands without submitting.",
     )
+    parser.add_argument(
+        "--account",
+        default=DEFAULT_ACCOUNT,
+        help=f"SLURM account (default: {DEFAULT_ACCOUNT}).",
+    )
+    parser.add_argument(
+        "--partition",
+        default=DEFAULT_PARTITION,
+        help=f"SLURM partition (default: {DEFAULT_PARTITION}).",
+    )
     args = parser.parse_args()
 
     run_mode = compose_run_mode("small" if args.small else "full", args.test)
@@ -251,6 +351,9 @@ def main() -> None:
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    run_id = make_run_id()
+    jobs_dir = output_dir / "_jobs" / "scaling" / run_id
+    jobs_dir.mkdir(parents=True, exist_ok=True)
     scaling_script = SCRIPT_DIR / "scaling_single.sh"
     packed_script = SCRIPT_DIR / "scaling_packed.sh"
     packed_bundles, standalone_counts = _pack_small_worker_counts(
@@ -273,6 +376,7 @@ def main() -> None:
         f"Finalize:  {finalize_slack_s:.1f} s slack\n"
         f"Safety:    {args.safety}×  (min={args.min_time} h, max={args.max_time} h)\n"
         f"Output:    {output_dir}\n"
+        f"Jobs:      {jobs_dir}\n"
     )
 
     for bundle in packed_bundles:
@@ -291,34 +395,38 @@ def main() -> None:
         time_str = _format_time(time_hours)
         bundle_label = "_".join(str(n) for n in bundle)
         workers_csv = ",".join(str(n) for n in bundle)
+        job_name = f"abc_scaling_bundle_{bundle_label}"
+        script_path = jobs_dir / f"scaling_bundle_{bundle_label}.sbatch"
+        log_path = jobs_dir / f"scaling_bundle_{bundle_label}-%j.out"
 
-        cmd = [
-            "sbatch",
-            f"--ntasks={CORES_PER_NODE}",
-            "--nodes=1",
-            f"--time={time_str}",
-            f"--job-name=abc_scaling_bundle_{bundle_label}",
-            f"--output={output_dir}/abc_scaling_bundle_{bundle_label}-%j.out",
-            str(packed_script),
-            str(output_dir),
-            "--workers",
-            workers_csv,
-            "--config",
-            str(config_path),
-            *(["--test"] if args.test else []),
-            *(["--small"] if args.small else []),
-            *(["--extend"] if args.extend else []),
-        ]
+        script_path.write_text(
+            _render_packed_script(
+                packed_script=packed_script,
+                config_path=config_path,
+                output_dir=output_dir,
+                workers_csv=workers_csv,
+                test_mode=args.test,
+                small_mode=args.small,
+                extend=args.extend,
+                account=args.account,
+                partition=args.partition,
+                time_limit=time_str,
+                ntasks=CORES_PER_NODE,
+                job_name=job_name,
+                log_path=log_path,
+            )
+        )
 
-        tag = "(dry run)" if args.dry_run else ""
+        submit_cmd = ["sbatch", str(script_path)]
+        tag = "[dry-run]" if args.dry_run else ""
         print(
             f"  bundle={bundle!r}  ntasks={CORES_PER_NODE}  nodes=1  "
             f"time={time_str}  workload={workload_count}x{wall_time_limit_s:.0f}s+{finalize_slack_s:.0f}s  {tag}"
         )
         if args.dry_run:
-            print(f"    {' '.join(cmd)}")
+            print(f"    {' '.join(submit_cmd)}")
         else:
-            subprocess.run(cmd, check=True)
+            subprocess.run(submit_cmd, check=True)
 
     for n in standalone_counts:
         nodes = math.ceil(n / CORES_PER_NODE)
@@ -331,31 +439,38 @@ def main() -> None:
             finalize_slack_s=finalize_slack_s,
         )
         time_str = _format_time(time_hours)
-        cmd = [
-            "sbatch",
-            f"--ntasks={n}",
-            f"--nodes={nodes}",
-            f"--time={time_str}",
-            f"--job-name=abc_scaling_{n}",
-            f"--output={output_dir}/abc_scaling_{n}-%j.out",
-            str(scaling_script),
-            str(output_dir),
-            "--config",
-            str(config_path),
-            *(["--test"] if args.test else []),
-            *(["--small"] if args.small else []),
-            *(["--extend"] if args.extend else []),
-        ]
+        job_name = f"abc_scaling_{n}"
+        script_path = jobs_dir / f"scaling_{n}.sbatch"
+        log_path = jobs_dir / f"scaling_{n}-%j.out"
 
-        tag = "(dry run)" if args.dry_run else ""
+        script_path.write_text(
+            _render_standalone_script(
+                scaling_script=scaling_script,
+                config_path=config_path,
+                output_dir=output_dir,
+                test_mode=args.test,
+                small_mode=args.small,
+                extend=args.extend,
+                account=args.account,
+                partition=args.partition,
+                time_limit=time_str,
+                ntasks=n,
+                nodes=nodes,
+                job_name=job_name,
+                log_path=log_path,
+            )
+        )
+
+        submit_cmd = ["sbatch", str(script_path)]
+        tag = "[dry-run]" if args.dry_run else ""
         print(
             f"  N={n:3d}  nodes={nodes}  time={time_str}  "
             f"workload={workload_count}x{wall_time_limit_s:.0f}s+{finalize_slack_s:.0f}s  {tag}"
         )
         if args.dry_run:
-            print(f"    {' '.join(cmd)}")
+            print(f"    {' '.join(submit_cmd)}")
         else:
-            subprocess.run(cmd, check=True)
+            subprocess.run(submit_cmd, check=True)
 
     if not args.dry_run:
         print(f"\nAll {len(packed_bundles) + len(standalone_counts)} scaling jobs submitted.")

@@ -1050,10 +1050,12 @@ class TestScalingSubmitter:
         assert "Wall cap:  900.0 s" in out
         assert "Workload:  16 combos per worker-count job" in out
         assert "Finalize:  720.0 s slack" in out
-        assert out.count("sbatch --ntasks=") == 2
-        assert "scaling_packed.sh" in out
-        assert "--workers 1,4" in out
-        assert "--test" in out
+        scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
+        assert len(scripts) == 2
+        all_text = "\n".join(s.read_text() for s in scripts)
+        assert "scaling_packed.sh" in all_text
+        assert "--workers 1,4" in all_text
+        assert "--test" in all_text
 
     def test_submit_scaling_small_uses_small_tier_worker_counts(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
@@ -1081,10 +1083,12 @@ class TestScalingSubmitter:
         assert "Wall cap:  300.0 s" in out
         assert "Workload:  24 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
-        assert out.count("sbatch --ntasks=") == 3
-        assert "--small" in out
-        assert "abc_scaling_96" in out
-        assert "abc_scaling_256" not in out
+        scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
+        assert len(scripts) == 3
+        all_text = "\n".join(s.read_text() for s in scripts)
+        assert "--small" in all_text
+        assert "abc_scaling_96" in all_text
+        assert "abc_scaling_256" not in all_text
 
     def test_submit_scaling_small_test_uses_small_test_run_mode(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
@@ -1112,9 +1116,11 @@ class TestScalingSubmitter:
         assert "Wall cap:  300.0 s" in out
         assert "Workload:  12 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
-        assert out.count("sbatch --ntasks=") == 2
-        assert "--small" in out
-        assert "--test" in out
+        scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
+        assert len(scripts) == 2
+        all_text = "\n".join(s.read_text() for s in scripts)
+        assert "--small" in all_text
+        assert "--test" in all_text
 
     def test_submit_scaling_forwards_custom_config_path(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
@@ -1141,9 +1147,11 @@ class TestScalingSubmitter:
         assert "Workers:   [2]" in out
         assert "Bundles:   [[2]]" in out
         assert "Standalone:[]" in out
-        assert f"--config {config_path.resolve()}" in out
-        assert "--workers 2" in out
-        assert out.count("sbatch --ntasks=") == 1
+        scripts = sorted((tmp_path / "results" / "_jobs" / "scaling").glob("*/*.sbatch"))
+        assert len(scripts) == 1
+        script_text = scripts[0].read_text()
+        assert f"--config {config_path.resolve()}" in script_text
+        assert "--workers 2" in script_text
 
     def test_submit_scaling_warns_and_falls_back_when_timing_run_mode_mismatches(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
