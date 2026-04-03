@@ -247,7 +247,16 @@ def _propulate_with_wall_time_limit(
 
     propulate_comm.barrier()
     propulator._receive_intra_island_individuals()
-    pending_requests = _cleanup_propulate_intra_requests(propulator)
+    # Wait for all intra-island nonblocking sends to complete before the next
+    # barrier.  _receive_intra_island_individuals() has already posted matching
+    # receives, so Waitall cannot deadlock.  This prevents the communicator from
+    # being freed while sends are still in flight (ParaStation pscom assertions).
+    intra_reqs = getattr(propulator, "intra_requests", None)
+    if intra_reqs:
+        from mpi4py import MPI as _MPI
+        _MPI.Request.Waitall(intra_reqs)
+        propulator.intra_requests.clear()
+        propulator.intra_buffers.clear()
     propulate_comm.barrier()
 
     island_comm = getattr(propulator, "island_comm", None)
@@ -256,12 +265,6 @@ def _propulate_with_wall_time_limit(
     propulate_comm.barrier()
     propulator._determine_worker_dumping_next()
     propulate_comm.barrier()
-    if pending_requests:
-        logger.warning(
-            "Propulate finished with %s pending intra-island send requests; "
-            "skipping communicator cleanup for this run to avoid freeing a busy MPI communicator.",
-            pending_requests,
-        )
 
 
 def run_propulate_abc(
@@ -377,7 +380,6 @@ def run_propulate_abc(
         **propulator_kwargs,
     )
 
-    propulate_completed = False
     logging_interval = max(1, generation_budget + 1)
     try:
         with _suppress_propulate_info_logs():
@@ -391,11 +393,28 @@ def run_propulate_abc(
                 )
             else:
                 propulator.propulate(logging_interval=logging_interval, debug=0)
-        propulate_completed = True
     finally:
-        if propulate_completed:
-            if _cleanup_propulate_intra_requests(propulator) == 0:
-                _free_propulate_comm(propulate_comm)
+        # Unconditional cleanup: run whether the run completed, timed out, or
+        # raised.  Any pending intra-island sends left here indicate a bug in
+        # the wall-time cleanup path (they should have been Waitall'd above).
+        pending = _cleanup_propulate_intra_requests(propulator)
+        if pending > 0:
+            logger.error(
+                "Propulate run ended with %d pending intra-island send requests; "
+                "forcing communicator free. This indicates a cleanup bug.",
+                pending,
+            )
+        _free_propulate_comm(propulate_comm)
+        # Synchronize all ranks before the next replicate or runner phase starts.
+        # Without this barrier, lagging ranks can still be in transport teardown
+        # when the next replicate calls _make_propulate_comm() → COMM_WORLD.Barrier(),
+        # causing a hang or ParaStation pscom assertion on the following Dup().
+        try:
+            from mpi4py import MPI as _MPI
+            if _MPI.COMM_WORLD.Get_size() > 1:
+                _MPI.COMM_WORLD.Barrier()
+        except Exception:
+            pass
 
     # Sort by completion time so the record order reflects the observable
     # event stream rather than generation assignment alone.

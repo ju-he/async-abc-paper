@@ -25,6 +25,47 @@ from ._pyabc_common import db_suffix as _db_suffix, prepare_db_path as _prepare_
 logger = logging.getLogger(__name__)
 
 
+class _FutureTracker:
+    """Thin executor wrapper that tracks submitted futures for pre-shutdown draining.
+
+    pyABC's EPSMixin removes futures from its internal tracking list and calls
+    ``future.cancel()`` once enough accepted particles have been collected.  For
+    mpi4py MPI futures ``cancel()`` is a no-op on already-running tasks: workers
+    complete execution and then block in ``comm.send()`` waiting to deliver a
+    result that nobody will receive.  When the ``MPICommExecutor`` context exits,
+    its ``shutdown(wait=True)`` deadlocks because the manager thread is stuck in
+    a blocking ``probe()`` waiting for those orphan results.
+
+    By tracking every submitted future and calling ``concurrent.futures.wait()``
+    before the context exits, we ensure all workers can deliver their results and
+    the manager thread drains cleanly — ``pool.join()`` then completes instantly.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._submitted: list = []
+
+    def submit(self, fn, /, *args, **kwargs):
+        f = self._inner.submit(fn, *args, **kwargs)
+        self._submitted.append(f)
+        return f
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def drain(self) -> None:
+        """Wait for any futures that are still running after sampling returned."""
+        from concurrent.futures import wait as _wait
+        pending = [f for f in self._submitted if not f.done()]
+        if pending:
+            logger.debug(
+                "[pyabc] draining %d orphan futures before MPICommExecutor shutdown",
+                len(pending),
+            )
+            _wait(pending)
+            logger.debug("[pyabc] orphan futures drained")
+
+
 def _run_pyabc_smc_with_sampler(
     *,
     sampler,
@@ -287,12 +328,13 @@ def run_pyabc_smc(
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is None:
                 return []
+            tracker = _FutureTracker(executor)
             sampler = build_pyabc_sampler(
                 n_procs,
                 parallel_backend,
-                cfuture_executor=executor,
+                cfuture_executor=tracker,
             )
-            return _run_pyabc_smc_with_sampler(
+            result = _run_pyabc_smc_with_sampler(
                 sampler=sampler,
                 simulate_fn=simulate_fn,
                 limits=limits,
@@ -306,6 +348,8 @@ def run_pyabc_smc(
                 max_wall_time_s=max_wall_time_s,
                 progress=progress,
             )
+            tracker.drain()
+            return result
 
     sampler = build_pyabc_sampler(n_procs, parallel_backend)
     return _run_pyabc_smc_with_sampler(

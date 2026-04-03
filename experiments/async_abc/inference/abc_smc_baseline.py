@@ -29,6 +29,41 @@ from ._pyabc_common import db_suffix as _db_suffix, prepare_db_path as _prepare_
 logger = logging.getLogger(__name__)
 
 
+class _FutureTracker:
+    """Thin executor wrapper that tracks submitted futures for pre-shutdown draining.
+
+    See the identical class in ``pyabc_wrapper`` for the full explanation.
+    Short version: pyABC discards futures mid-batch when enough accepted particles
+    arrive; MPI futures cannot be cancelled once running, so workers block trying
+    to deliver orphan results, deadlocking ``MPICommExecutor.shutdown(wait=True)``.
+    ``drain()`` consumes those results before the context manager exits.
+    """
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._submitted: list = []
+
+    def submit(self, fn, /, *args, **kwargs):
+        f = self._inner.submit(fn, *args, **kwargs)
+        self._submitted.append(f)
+        return f
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def drain(self) -> None:
+        """Wait for any futures that are still running after sampling returned."""
+        from concurrent.futures import wait as _wait
+        pending = [f for f in self._submitted if not f.done()]
+        if pending:
+            logger.debug(
+                "[abc_smc_baseline] draining %d orphan futures before MPICommExecutor shutdown",
+                len(pending),
+            )
+            _wait(pending)
+            logger.debug("[abc_smc_baseline] orphan futures drained")
+
+
 def _run_abc_smc_baseline_with_sampler(
     *,
     sampler,
@@ -267,12 +302,13 @@ def run_abc_smc_baseline(
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is None:
                 return []
+            tracker = _FutureTracker(executor)
             sampler = build_pyabc_sampler(
                 n_procs,
                 parallel_backend,
-                cfuture_executor=executor,
+                cfuture_executor=tracker,
             )
-            return _run_abc_smc_baseline_with_sampler(
+            result = _run_abc_smc_baseline_with_sampler(
                 sampler=sampler,
                 simulate_fn=simulate_fn,
                 limits=limits,
@@ -287,6 +323,8 @@ def run_abc_smc_baseline(
                 max_wall_time_s=max_wall_time_s,
                 progress=progress,
             )
+            tracker.drain()
+            return result
 
     sampler = build_pyabc_sampler(n_procs, parallel_backend)
     return _run_abc_smc_baseline_with_sampler(
