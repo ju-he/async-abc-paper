@@ -56,6 +56,23 @@ def _free_propulate_comm(comm) -> None:
         pass
 
 
+def _cleanup_propulate_intra_requests(propulator) -> int:
+    """Best-effort cleanup of completed intra-island nonblocking sends."""
+    cleanup = getattr(propulator, "_intra_send_cleanup", None)
+    if callable(cleanup):
+        try:
+            cleanup()
+        except Exception:
+            logger.debug("Propulate intra-request cleanup failed", exc_info=True)
+    requests = getattr(propulator, "intra_requests", None)
+    if not requests:
+        return 0
+    try:
+        return len(requests)
+    except Exception:
+        return 0
+
+
 def _propulate_world_size() -> int:
     """Return the active Propulate world size, or 1 when MPI is unavailable."""
     try:
@@ -221,6 +238,7 @@ def _propulate_with_wall_time_limit(
 
         propulator._evaluate_individual()
         propulator._receive_intra_island_individuals()
+        _cleanup_propulate_intra_requests(propulator)
 
         if dump:
             propulator._dump_checkpoint()
@@ -229,6 +247,7 @@ def _propulate_with_wall_time_limit(
 
     propulate_comm.barrier()
     propulator._receive_intra_island_individuals()
+    pending_requests = _cleanup_propulate_intra_requests(propulator)
     propulate_comm.barrier()
 
     island_comm = getattr(propulator, "island_comm", None)
@@ -237,6 +256,12 @@ def _propulate_with_wall_time_limit(
     propulate_comm.barrier()
     propulator._determine_worker_dumping_next()
     propulate_comm.barrier()
+    if pending_requests:
+        logger.warning(
+            "Propulate finished with %s pending intra-island send requests; "
+            "skipping communicator cleanup for this run to avoid freeing a busy MPI communicator.",
+            pending_requests,
+        )
 
 
 def run_propulate_abc(
@@ -369,7 +394,8 @@ def run_propulate_abc(
         propulate_completed = True
     finally:
         if propulate_completed:
-            _free_propulate_comm(propulate_comm)
+            if _cleanup_propulate_intra_requests(propulator) == 0:
+                _free_propulate_comm(propulate_comm)
 
     # Sort by completion time so the record order reflects the observable
     # event stream rather than generation assignment alone.

@@ -207,6 +207,78 @@ class _WallTimeLocalPropulator:
         self.population.append(ind)
 
 
+class _FakeBarrierComm:
+    def __init__(self):
+        self.rank = 0
+        self.size = 2
+        self.barrier_calls = 0
+
+    def barrier(self):
+        self.barrier_calls += 1
+
+
+class _WallTimeCommPropulator:
+    clock = None
+    last_instance = None
+
+    def __init__(self, *, loss_fn, propagator, rng, generations, checkpoint_path, **kwargs):
+        type(self).last_instance = self
+        self.loss_fn = loss_fn
+        self.propagator = propagator
+        self.rng = rng
+        self.generations = generations
+        self.checkpoint_path = checkpoint_path
+        self.population = []
+        self.extra = kwargs
+        self.generation = 0
+        self.propulate_comm = kwargs.get("propulate_comm")
+        self.island_comm = kwargs.get("island_comm")
+        self.worker_sub_comm = kwargs.get("worker_sub_comm")
+        self.intra_requests = []
+        self.cleanup_calls = 0
+        self.dump_calls = 0
+        self.final_dump_calls = 0
+
+    def _evaluate_individual(self):
+        clock = type(self).clock
+        assert clock is not None
+        params = {
+            key: float(lo + (hi - lo) * self.rng.random())
+            for key, (lo, hi) in self.propagator.limits.items()
+        }
+        start = clock()
+        clock.now += 0.02
+        end = clock()
+        ind = _FakeIndividual(
+            params,
+            generation=self.generation,
+            tolerance=max(0.1, self.propagator.tol - 0.1 * self.generation),
+            evaltime=end,
+            evalperiod=end - start,
+            rank=self.generation % 2,
+            loss=0.0,
+        )
+        ind.loss = self.loss_fn(ind)
+        self.population.append(ind)
+        self.intra_requests.append(object())
+
+    def _receive_intra_island_individuals(self):
+        return None
+
+    def _intra_send_cleanup(self):
+        self.cleanup_calls += 1
+        self.intra_requests.clear()
+
+    def _dump_checkpoint(self):
+        self.dump_calls += 1
+
+    def _determine_worker_dumping_next(self):
+        return False
+
+    def _dump_final_checkpoint(self):
+        self.final_dump_calls += 1
+
+
 class _Clock:
     def __init__(self, start: float = 0.0):
         self.now = start
@@ -738,6 +810,44 @@ class TestRunPropulateAbc:
         assert records
         assert _CapturingPropulator.last_kwargs["island_comm"] is fake_comm
         assert _CapturingPropulator.last_kwargs["propulate_comm"] is fake_comm
+        assert freed == [fake_comm]
+
+    def test_wall_time_parallel_propulate_cleans_up_intra_island_sends(self, tmp_path, monkeypatch):
+        import async_abc.inference.propulate_abc as mod
+        from async_abc.io.paths import OutputDir
+
+        original = (mod.Propulator, mod.ABCPMC)
+        clock = _Clock(start=100.0)
+        fake_comm = _FakeBarrierComm()
+        freed = []
+
+        _WallTimeCommPropulator.clock = clock
+        _WallTimeCommPropulator.last_instance = None
+        monkeypatch.setattr(mod.time, "time", clock)
+        monkeypatch.setattr(mod, "_make_propulate_comm", lambda: fake_comm)
+        monkeypatch.setattr(mod, "_free_propulate_comm", lambda comm: freed.append(comm))
+        mod.Propulator = _WallTimeCommPropulator
+        mod.ABCPMC = _FakeABCPMC
+        try:
+            bm = _gaussian_bm()
+            od = OutputDir(tmp_path, "propulate_walltime_parallel").ensure()
+            records = run_propulate_abc(
+                bm.simulate,
+                bm.limits,
+                {**_test_inference_cfg(), "max_simulations": 50, "max_wall_time_s": 0.05},
+                od,
+                replicate=0,
+                seed=37,
+            )
+        finally:
+            mod.Propulator, mod.ABCPMC = original
+
+        propulator = _WallTimeCommPropulator.last_instance
+        assert records
+        assert propulator is not None
+        assert propulator.cleanup_calls >= len(records)
+        assert propulator.intra_requests == []
+        assert propulator.final_dump_calls == 1
         assert freed == [fake_comm]
 
     def test_incompatible_individual_raises_clear_error(self, fake_propulate_env, tmp_path):
