@@ -342,7 +342,12 @@ def finalize_ablation_experiment(
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
     if cfg.get("plots", {}).get("ablation_comparison"):
-        plot_ablation_summary(tmp_output.data, cfg.get("ablation_variants", []), tmp_output)
+        plot_ablation_summary(
+            tmp_output.data,
+            cfg.get("ablation_variants", []),
+            tmp_output,
+            benchmark_cfg=cfg.get("benchmark", {}),
+        )
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     _rewrite_root_timing_summary(layout.output_root)

@@ -20,7 +20,7 @@ import async_abc.analysis as analysis_mod
 from async_abc.inference.abc_smc_baseline import _prepare_db_path as prepare_abc_db_path
 from async_abc.inference.pyabc_wrapper import _prepare_db_path as prepare_pyabc_db_path
 from async_abc.io.paths import OutputDir
-from async_abc.io.records import ParticleRecord
+from async_abc.io.records import ParticleRecord, write_records
 import async_abc.plotting.export as export_mod
 from async_abc.plotting.export import save_figure, get_git_hash
 from async_abc.plotting.common import (
@@ -455,6 +455,10 @@ class TestPhase3Reporters:
         assert (output_dir.plots / "progress_diagnostic.pdf").exists()
         assert (output_dir.plots / "tolerance_trajectory.pdf").exists()
         assert (output_dir.plots / "tolerance_trajectory_diagnostic.pdf").exists()
+        tol_meta = json.loads((output_dir.plots / "tolerance_trajectory_meta.json").read_text())
+        diag_meta = json.loads((output_dir.plots / "tolerance_trajectory_diagnostic_meta.json").read_text())
+        assert tol_meta["has_wasserstein_panel"] is True
+        assert diag_meta["has_wasserstein_panel"] is True
         assert (output_dir.plots / "time_to_target_diagnostic_meta.json").exists()
 
     def test_plot_benchmark_diagnostics_writes_skip_metadata_when_true_params_missing(self, tmp_path, sample_records):
@@ -608,11 +612,13 @@ class TestPhase3Reporters:
 
     def test_plot_tolerance_trajectory_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
-        plot_tolerance_trajectory(sample_records, output_dir)
+        plot_tolerance_trajectory(sample_records, output_dir, true_params={"mu": 0.0})
         assert (output_dir.plots / "tolerance_trajectory.pdf").exists()
         assert (output_dir.plots / "tolerance_trajectory.png").exists()
         assert (output_dir.plots / "tolerance_trajectory_data.csv").exists()
         assert (output_dir.plots / "tolerance_trajectory_meta.json").exists()
+        rows = _read_csv(output_dir.plots / "tolerance_trajectory_data.csv")
+        assert {row["metric"] for row in rows} >= {"tolerance", "wasserstein"}
 
     def test_plot_generation_timeline_exports_files(self, tmp_path, abc_smc_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
@@ -665,21 +671,109 @@ class TestPhase3Reporters:
     def test_plot_ablation_summary_exports_complete_metadata(self, tmp_path):
         output_dir = OutputDir(tmp_path, "plots").ensure()
         data_dir = output_dir.data
-        for name in ("baseline", "variant"):
-            with open(data_dir / f"ablation_{name}.csv", "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=["tolerance"])
-                writer.writeheader()
-                writer.writerows([{"tolerance": "2.0"}, {"tolerance": "1.0"}])
+        write_records(
+            data_dir / "ablation_baseline.csv",
+            [
+                ParticleRecord(
+                    method="async_propulate_abc__baseline",
+                    replicate=0,
+                    seed=0,
+                    step=1,
+                    params={"mu": 0.2},
+                    loss=0.2,
+                    tolerance=1.0,
+                    wall_time=0.1,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__baseline",
+                    replicate=0,
+                    seed=0,
+                    step=2,
+                    params={"mu": 0.1},
+                    loss=0.1,
+                    tolerance=0.5,
+                    wall_time=0.2,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__baseline",
+                    replicate=1,
+                    seed=1,
+                    step=1,
+                    params={"mu": -0.3},
+                    loss=0.3,
+                    tolerance=1.0,
+                    wall_time=0.1,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__baseline",
+                    replicate=1,
+                    seed=1,
+                    step=2,
+                    params={"mu": -0.1},
+                    loss=0.1,
+                    tolerance=0.5,
+                    wall_time=0.2,
+                ),
+            ],
+        )
+        write_records(
+            data_dir / "ablation_variant.csv",
+            [
+                ParticleRecord(
+                    method="async_propulate_abc__variant",
+                    replicate=0,
+                    seed=0,
+                    step=1,
+                    params={"mu": 1.0},
+                    loss=1.0,
+                    tolerance=1.0,
+                    wall_time=0.1,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__variant",
+                    replicate=0,
+                    seed=0,
+                    step=2,
+                    params={"mu": 0.8},
+                    loss=0.8,
+                    tolerance=0.5,
+                    wall_time=0.2,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__variant",
+                    replicate=1,
+                    seed=1,
+                    step=1,
+                    params={"mu": -1.2},
+                    loss=1.2,
+                    tolerance=1.0,
+                    wall_time=0.1,
+                ),
+                ParticleRecord(
+                    method="async_propulate_abc__variant",
+                    replicate=1,
+                    seed=1,
+                    step=2,
+                    params={"mu": -0.9},
+                    loss=0.9,
+                    tolerance=0.5,
+                    wall_time=0.2,
+                ),
+            ],
+        )
         plot_ablation_summary(
             data_dir,
             variants=[{"name": "baseline"}, {"name": "variant"}],
             output_dir=output_dir,
+            benchmark_cfg={"true_mu": 0.0},
         )
         meta = json.loads((output_dir.plots / "ablation_comparison_meta.json").read_text())
         assert meta["plot_name"] == "ablation_comparison"
         assert meta["summary_plot"] is True
         assert meta["experiment_name"] == "plots"
         assert meta["benchmark"] is False
+        rows = _read_csv(output_dir.plots / "ablation_comparison_data.csv")
+        assert "mean_final_wasserstein" in rows[0]
 
 
 class TestSensitivityVariantParsing:

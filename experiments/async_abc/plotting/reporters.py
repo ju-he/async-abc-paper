@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from ..io.paths import OutputDir
-from ..io.records import ParticleRecord
+from ..io.records import ParticleRecord, load_records
 from ..analysis import (
     benchmark_plot_audit,
     barrier_overhead_fraction,
@@ -112,6 +112,25 @@ def _attempt_timing_records(records: List[ParticleRecord]) -> List[ParticleRecor
         else:
             selected.extend([record for record in group if record.worker_id is not None])
     return selected
+
+
+def _configured_max_wall_time_s(output_dir: OutputDir) -> float | None:
+    """Return the configured wall-time budget from metadata, if available."""
+    meta_path = output_dir.data / "metadata.json"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text())
+        value = meta.get("config", {}).get("inference", {}).get("max_wall_time_s")
+    except Exception:
+        return None
+    if value in (None, ""):
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if np.isfinite(value) and value > 0.0 else None
 
 
 def _runtime_debug_frame(records: List[ParticleRecord]) -> pd.DataFrame:
@@ -765,6 +784,8 @@ def plot_throughput_over_time(
     if frame.empty:
         return
 
+    max_wall_time_s = _configured_max_wall_time_s(output_dir)
+
     frame["relative_end_time"] = 0.0
     for _, group in frame.groupby(["sigma", "base_method", "replicate"], sort=False):
         frame.loc[group.index, "relative_end_time"] = (
@@ -785,6 +806,8 @@ def plot_throughput_over_time(
         ax = axes[sigma_idx, 0]
         sigma_frame = frame.loc[frame["sigma"] == sigma].copy()
         max_time = float(sigma_frame["relative_end_time"].max())
+        if max_wall_time_s is not None:
+            max_time = min(max_time, float(max_wall_time_s))
         if not np.isfinite(max_time) or max_time <= 0:
             continue
         edges = np.linspace(0.0, max_time, n_bins + 1)
@@ -794,7 +817,10 @@ def plot_throughput_over_time(
             method_frame = sigma_frame.loc[sigma_frame["base_method"] == base_method]
             replicate_curves: list[np.ndarray] = []
             for _, rep_group in method_frame.groupby("replicate", sort=True):
-                counts, _ = np.histogram(rep_group["relative_end_time"].to_numpy(dtype=float), bins=edges)
+                end_times = rep_group["relative_end_time"].to_numpy(dtype=float)
+                if max_wall_time_s is not None:
+                    end_times = end_times[end_times <= max_time]
+                counts, _ = np.histogram(end_times, bins=edges)
                 replicate_curves.append(counts.astype(float) / max(bin_width, 1e-12))
             if not replicate_curves:
                 continue
@@ -832,7 +858,10 @@ def plot_throughput_over_time(
             title="Throughput over time by heterogeneity and method",
             methods=sorted(summary_df["base_method"].dropna().unique().tolist()),
             summary_plot=True,
-            extra={"facet_by": "sigma"},
+            extra={
+                "facet_by": "sigma",
+                "max_wall_time_s": None if max_wall_time_s is None else float(max_wall_time_s),
+            },
         ),
     )
 
@@ -1918,13 +1947,24 @@ def plot_tolerance_trajectory(
     records: List[ParticleRecord],
     output_dir: OutputDir,
     *,
+    true_params: Dict[str, float] | None = None,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
     ci_level: float = 0.95,
 ) -> None:
-    """Paper summary: tolerance schedule over wall-clock time."""
-    from ..analysis import tolerance_over_wall_time
+    """Paper summary: tolerance and Wasserstein progress over wall-clock time."""
+    from ..analysis import posterior_quality_curve, tolerance_over_wall_time
 
     trajectory_df = tolerance_over_wall_time(records)
-    if trajectory_df.empty:
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params or {},
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if trajectory_df.empty and quality_df.empty:
         return
 
     import matplotlib
@@ -1932,62 +1972,146 @@ def plot_tolerance_trajectory(
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    summary_df = _step_curve_summary(
-        trajectory_df,
-        x_col="wall_time",
-        y_col="tolerance",
-        ci_level=ci_level,
-        log_y=True,
-    )
-    if summary_df.empty:
+    tolerance_summary = pd.DataFrame()
+    if not trajectory_df.empty:
+        tolerance_summary = _step_curve_summary(
+            trajectory_df,
+            x_col="wall_time",
+            y_col="tolerance",
+            ci_level=ci_level,
+            log_y=True,
+        )
+    quality_summary = pd.DataFrame()
+    if not quality_df.empty:
+        quality_summary = _step_curve_summary(
+            quality_df,
+            x_col="axis_value",
+            y_col="wasserstein",
+            ci_level=ci_level,
+            log_y=False,
+            lower_bound=0.0,
+        )
+    if tolerance_summary.empty and quality_summary.empty:
         return
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    for method, group in summary_df.groupby("method", sort=True):
-        group = group.sort_values("wall_time")
-        ax.plot(group["wall_time"], group["tolerance"], linewidth=1.8, label=method)
-        valid_ci = group["tolerance_ci_low"].notna() & group["tolerance_ci_high"].notna() & (group["n_replicates"] >= 2)
-        if valid_ci.any():
-            ax.fill_between(
-                group.loc[valid_ci, "wall_time"],
-                group.loc[valid_ci, "tolerance_ci_low"],
-                group.loc[valid_ci, "tolerance_ci_high"],
-                alpha=0.2,
-            )
-    ax.set_xlabel("wall-clock time")
-    ax.set_ylabel("tolerance")
-    ax.set_yscale("log")
-    ax.set_title("Tolerance trajectory")
-    ax.legend(frameon=False, fontsize=8)
+    n_panels = int(not tolerance_summary.empty) + int(not quality_summary.empty)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6.2 * n_panels, 4), squeeze=False)
+    axes_list = list(axes.ravel())
+    panel_idx = 0
+    if not tolerance_summary.empty:
+        ax = axes_list[panel_idx]
+        panel_idx += 1
+        for method, group in tolerance_summary.groupby("method", sort=True):
+            group = group.sort_values("wall_time")
+            ax.plot(group["wall_time"], group["tolerance"], linewidth=1.8, label=method)
+            valid_ci = group["tolerance_ci_low"].notna() & group["tolerance_ci_high"].notna() & (group["n_replicates"] >= 2)
+            if valid_ci.any():
+                ax.fill_between(
+                    group.loc[valid_ci, "wall_time"],
+                    group.loc[valid_ci, "tolerance_ci_low"],
+                    group.loc[valid_ci, "tolerance_ci_high"],
+                    alpha=0.2,
+                )
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("tolerance")
+        ax.set_yscale("log")
+        ax.set_title("Tolerance trajectory")
+        ax.legend(frameon=False, fontsize=8)
+    if not quality_summary.empty:
+        ax = axes_list[panel_idx]
+        sk_map = _build_state_kind_map(quality_df) if not quality_df.empty else {}
+        for method, group in quality_summary.groupby("method", sort=True):
+            group = group.sort_values("axis_value")
+            sk_suffix = f" [{sk_map[method]}]" if method in sk_map else ""
+            ax.plot(group["axis_value"], group["wasserstein"], linewidth=1.8, label=f"{method}{sk_suffix}")
+            valid_ci = group["wasserstein_ci_low"].notna() & group["wasserstein_ci_high"].notna() & (group["n_replicates"] >= 2)
+            if valid_ci.any():
+                ax.fill_between(
+                    group.loc[valid_ci, "axis_value"],
+                    group.loc[valid_ci, "wasserstein_ci_low"],
+                    group.loc[valid_ci, "wasserstein_ci_high"],
+                    alpha=0.2,
+                )
+        ax.set_xlabel("wall-clock time")
+        ax.set_ylabel("wasserstein")
+        ax.set_title("Wasserstein trajectory")
+        ax.legend(frameon=False, fontsize=8)
     fig.tight_layout()
     missing_methods = sorted({record.method for record in records if record.tolerance is None})
+    export_df = _progress_export_frame(
+        tolerance_df=tolerance_summary,
+        quality_df=quality_summary,
+    )
     save_figure(
         fig,
         output_dir.plots / "tolerance_trajectory",
-        data={col: summary_df[col].tolist() for col in summary_df.columns},
+        data={col: export_df[col].tolist() for col in export_df.columns},
         metadata={
             "missing_tolerance_methods": missing_methods,
             "summary_plot": True,
             "ci_level": float(ci_level),
+            "has_tolerance_panel": bool(not tolerance_summary.empty),
+            "has_wasserstein_panel": bool(not quality_summary.empty),
         },
     )
 
 
-def plot_tolerance_trajectory_diagnostic(records: List[ParticleRecord], output_dir: OutputDir) -> None:
-    """Diagnostic replicate-level tolerance schedule over wall-clock time."""
-    from ..analysis import tolerance_over_wall_time
+def plot_tolerance_trajectory_diagnostic(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    true_params: Dict[str, float] | None = None,
+    archive_size: int | None = None,
+    checkpoint_count: int = 8,
+) -> None:
+    """Diagnostic replicate-level tolerance and Wasserstein progress over wall-clock time."""
+    from ..analysis import posterior_quality_curve, tolerance_over_wall_time
 
     trajectory_df = tolerance_over_wall_time(records)
-    if trajectory_df.empty:
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params or {},
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=checkpoint_count,
+        archive_size=archive_size,
+    )
+    if trajectory_df.empty and quality_df.empty:
         return
 
-    fig = tolerance_trajectory_plot(trajectory_df)
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    n_panels = int(not trajectory_df.empty) + int(not quality_df.empty)
+    fig, axes = plt.subplots(1, n_panels, figsize=(6.2 * n_panels, 4), squeeze=False)
+    axes_list = list(axes.ravel())
+    panel_idx = 0
+    if not trajectory_df.empty:
+        tolerance_trajectory_plot(trajectory_df, ax=axes_list[panel_idx])
+        axes_list[panel_idx].set_title("Tolerance trajectory")
+        panel_idx += 1
+    if not quality_df.empty:
+        posterior_quality_plot(quality_df, axis_kind="wall_time", ax=axes_list[panel_idx])
+        axes_list[panel_idx].set_title("Wasserstein trajectory")
+    fig.tight_layout()
+
     missing_methods = sorted({record.method for record in records if record.tolerance is None})
+    export_df = _progress_export_frame(
+        tolerance_df=trajectory_df,
+        quality_df=quality_df,
+    )
     save_figure(
         fig,
         output_dir.plots / "tolerance_trajectory_diagnostic",
-        data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
-        metadata={"missing_tolerance_methods": missing_methods, "diagnostic_plot": True},
+        data={col: export_df[col].tolist() for col in export_df.columns},
+        metadata={
+            "missing_tolerance_methods": missing_methods,
+            "diagnostic_plot": True,
+            "has_tolerance_panel": bool(not trajectory_df.empty),
+            "has_wasserstein_panel": bool(not quality_df.empty),
+        },
     )
 
 
@@ -2867,14 +2991,17 @@ def plot_ablation_summary(
     data_dir: Path,
     variants: List[Dict[str, Any]],
     output_dir: OutputDir,
+    benchmark_cfg: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Bar chart comparing mean final tolerance across ablation variants."""
+    """Bar chart comparing final posterior quality across ablation variants."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     variant_names = [v.get("name", f"v{i}") for i, v in enumerate(variants)]
-    mean_tols = []
+    benchmark_cfg = benchmark_cfg or {}
+    variant_cfg_by_name = {v.get("name", f"v{i}"): v for i, v in enumerate(variants)}
+    mean_wass = []
     ci_lows = []
     ci_highs = []
     n_values = []
@@ -2882,33 +3009,69 @@ def plot_ablation_summary(
     for name in variant_names:
         csv_path = data_dir / f"ablation_{name}.csv"
         if not csv_path.exists():
-            mean_tols.append(float("nan"))
+            mean_wass.append(float("nan"))
             ci_lows.append(float("nan"))
             ci_highs.append(float("nan"))
             n_values.append(0)
             continue
-        rows = _read_csv(csv_path)
-        tolerances = [
-            float(r["tolerance"]) for r in rows
-            if r.get("tolerance") not in ("", None)
-        ]
-        if tolerances:
-            tail = np.asarray(tolerances[-max(1, len(tolerances) // 10):], dtype=float)
-            mean, ci_low, ci_high = _summarize_scalar(tail, ci_level=0.95)
-            mean_tols.append(mean)
+        records = load_records(csv_path)
+        true_params = _true_params_from_cfg(records, benchmark_cfg)
+        archive_size = variant_cfg_by_name.get(name, {}).get("k")
+        if not records or not true_params:
+            mean_wass.append(float("nan"))
+            ci_lows.append(float("nan"))
+            ci_highs.append(float("nan"))
+            n_values.append(0)
+            continue
+
+        wass_per_rep: list[float] = []
+        for result in final_state_results(records, archive_size=archive_size):
+            samples = []
+            for record in result.records:
+                if all(param in record.params for param in true_params):
+                    samples.append([float(record.params[param]) for param in true_params])
+            if not samples:
+                continue
+            sample_arr = np.asarray(samples, dtype=float)
+            target = np.tile(
+                np.asarray([float(true_params[param]) for param in true_params], dtype=float),
+                (len(sample_arr), 1),
+            )
+            if sample_arr.shape[1] == 1:
+                from scipy.stats import wasserstein_distance
+
+                quality = float(wasserstein_distance(sample_arr[:, 0], target[:, 0]))
+            else:
+                try:
+                    import ot
+
+                    quality = float(ot.sliced_wasserstein_distance(sample_arr, target, n_projections=50))
+                except ImportError:
+                    from scipy.stats import wasserstein_distance
+
+                    quality = float(np.mean([
+                        wasserstein_distance(sample_arr[:, idx], target[:, idx])
+                        for idx in range(sample_arr.shape[1])
+                    ]))
+            wass_per_rep.append(quality)
+
+        if wass_per_rep:
+            values = np.asarray(wass_per_rep, dtype=float)
+            mean, ci_low, ci_high = _summarize_scalar(values, ci_level=0.95)
+            mean_wass.append(mean)
             ci_lows.append(ci_low)
             ci_highs.append(ci_high)
-            n_values.append(int(np.isfinite(tail).sum()))
+            n_values.append(int(np.isfinite(values).sum()))
         else:
-            mean_tols.append(float("nan"))
+            mean_wass.append(float("nan"))
             ci_lows.append(float("nan"))
             ci_highs.append(float("nan"))
             n_values.append(0)
 
     fig, ax = plt.subplots(figsize=(max(5, len(variant_names) * 1.2), 4))
     x = np.arange(len(variant_names))
-    ax.bar(x, mean_tols, color="steelblue", alpha=0.8)
-    for idx, (mean, ci_low, ci_high, n_obs) in enumerate(zip(mean_tols, ci_lows, ci_highs, n_values)):
+    ax.bar(x, mean_wass, color="steelblue", alpha=0.8)
+    for idx, (mean, ci_low, ci_high, n_obs) in enumerate(zip(mean_wass, ci_lows, ci_highs, n_values)):
         if np.isfinite(mean) and np.isfinite(ci_low) and np.isfinite(ci_high) and n_obs >= 2:
             ax.errorbar(
                 idx,
@@ -2921,15 +3084,15 @@ def plot_ablation_summary(
             )
     ax.set_xticks(x)
     ax.set_xticklabels(variant_names, rotation=30, ha="right")
-    ax.set_ylabel("mean final tolerance ε")
+    ax.set_ylabel("mean final Wasserstein")
     ax.set_title("Ablation comparison")
     fig.tight_layout()
 
     data = {
         "variant": variant_names,
-        "mean_final_tolerance": mean_tols,
-        "mean_final_tolerance_ci_low": ci_lows,
-        "mean_final_tolerance_ci_high": ci_highs,
+        "mean_final_wasserstein": mean_wass,
+        "mean_final_wasserstein_ci_low": ci_lows,
+        "mean_final_wasserstein_ci_high": ci_highs,
         "n_observations": n_values,
     }
     stem = output_dir.plots / "ablation_comparison"
@@ -2987,9 +3150,22 @@ def plot_benchmark_diagnostics(
             archive_size=archive_size,
         )
     if plots_cfg.get("tolerance_trajectory") and emit_paper:
-        plot_tolerance_trajectory(records, output_dir, ci_level=ci_level)
+        plot_tolerance_trajectory(
+            records,
+            output_dir,
+            true_params=true_params,
+            archive_size=archive_size,
+            checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
+            ci_level=ci_level,
+        )
     if plots_cfg.get("tolerance_trajectory") and emit_diagnostics:
-        plot_tolerance_trajectory_diagnostic(records, output_dir)
+        plot_tolerance_trajectory_diagnostic(
+            records,
+            output_dir,
+            true_params=true_params,
+            archive_size=archive_size,
+            checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
+        )
     if plots_cfg.get("quality_vs_time"):
         target = float(analysis_cfg.get("target_wasserstein", 1.0))
         checkpoint_count = len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8

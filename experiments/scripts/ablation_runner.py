@@ -229,7 +229,7 @@ def main(argv: list[str] | None = None) -> None:
     if plots_cfg.get("ablation_comparison"):
         from async_abc.plotting.reporters import plot_ablation_summary
 
-        plot_ablation_summary(output_dir.data, variants, output_dir)
+        plot_ablation_summary(output_dir.data, variants, output_dir, benchmark_cfg=cfg.get("benchmark", {}))
 
     write_metadata(output_dir, cfg)
 

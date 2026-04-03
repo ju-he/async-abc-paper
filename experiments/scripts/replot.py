@@ -135,7 +135,12 @@ def _replot_sensitivity(name: str, output_dir: OutputDir, cfg: dict) -> None:
 def _replot_ablation(name: str, output_dir: OutputDir, cfg: dict) -> None:
     """Ablation: bar chart from per-variant CSVs."""
     if cfg.get("plots", {}).get("ablation_comparison"):
-        plot_ablation_summary(output_dir.data, cfg.get("ablation_variants", []), output_dir)
+        plot_ablation_summary(
+            output_dir.data,
+            cfg.get("ablation_variants", []),
+            output_dir,
+            benchmark_cfg=cfg.get("benchmark", {}),
+        )
 
 
 def _replot_scaling(name: str, output_dir: OutputDir, cfg: dict) -> None:
