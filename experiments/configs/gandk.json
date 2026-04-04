@@ -34,5 +34,14 @@
   },
   "analysis": {
     "target_wasserstein": 1.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
   }
 }

@@ -181,6 +181,7 @@ _REPLOT_DISPATCH = {
     "runtime_heterogeneity": _replot_runtime_heterogeneity,
     "straggler": _replot_straggler,
     "sensitivity": _replot_sensitivity,
+    "sensitivity_gandk": _replot_sensitivity,
     "ablation": _replot_ablation,
     "sbc": _replot_sbc,
     "scaling": _replot_scaling,

@@ -693,17 +693,9 @@ def rebuild_scaling_outputs(
                 _TIME_TO_QUALITY_FIELDNAMES,
             )
 
-    plots_cfg = cfg.get("plots", {})
-    should_plot = bool(plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"))
-    if should_plot and aggregate_rows and budget_rows:
-        plot_scaling_grid(
-            throughput_rows=aggregate_rows,
-            budget_rows=budget_rows,
-            output_dir=output_dir,
-        )
-
     worker_counts = sorted({int(row["n_workers"]) for row in aggregate_rows}) if aggregate_rows else []
     k_values = sorted({int(row["k"]) for row in aggregate_rows}) if aggregate_rows else []
+    replicate_count = len({(row["base_method"], int(row["replicate"])) for row in aggregate_rows}) if aggregate_rows else 0
     scaling_cfg = cfg.get("scaling", {})
     wall_time_budgets_s = [float(value) for value in scaling_cfg.get("wall_time_budgets_s", [])]
     wall_time_limit_s = scaling_cfg.get("wall_time_limit_s")
@@ -718,12 +710,21 @@ def rebuild_scaling_outputs(
             "wall_time_budgets_s": wall_time_budgets_s,
             "wall_time_limit_s": wall_time_limit_s,
             "max_simulations_policy": scaling_cfg.get("max_simulations_policy", {}),
+            "n_replicates_observed": replicate_count,
             "stop_policy_by_method": {
                 str(method): _stop_policy_for_method(str(method))
                 for method in cfg.get("methods", [])
             },
         },
     )
+    plots_cfg = cfg.get("plots", {})
+    should_plot = bool(plots_cfg.get("scaling_curve") or plots_cfg.get("efficiency"))
+    if should_plot and aggregate_rows and budget_rows:
+        plot_scaling_grid(
+            throughput_rows=aggregate_rows,
+            budget_rows=budget_rows,
+            output_dir=output_dir,
+        )
     return aggregate_rows
 
 

@@ -66,5 +66,11 @@
   ],
   "plots": {
     "ablation_comparison": true
+  },
+  "paper": {
+    "experiment_role": "method_analysis",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method"
+    }
   }
 }

@@ -36,5 +36,13 @@
     "idle_fraction_comparison": true,
     "gantt": true,
     "quality_by_sigma": true
+  },
+  "paper": {
+    "experiment_role": "hpc_performance",
+    "stop_policy": "fixed_walltime",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
   }
 }

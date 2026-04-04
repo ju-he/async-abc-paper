@@ -134,6 +134,9 @@ class TestGaussianMeanRunner:
         assert "experiment_name" in data
         assert "timestamp" in data
         assert "config" in data
+        assert data["experiment_role"] == "validity"
+        assert data["stop_policy"] == "fixed_walltime"
+        assert data["method_comparison_roles"]["rejection_abc"] == "small_model_reference"
 
     def test_rerun_is_idempotent(self, gaussian_runner_artifact, tmp_path):
         test_helpers.copy_output_tree(gaussian_runner_artifact["root"], tmp_path)
@@ -1007,6 +1010,22 @@ class TestRuntimeHeterogeneityRunner:
         assert {"sigma", "base_method", "median_completion_time_s",
                 "speedup_vs_abc_smc_baseline"} <= set(rows[0].keys())
 
+    def test_writes_runtime_performance_summary_csv(self, runtime_heterogeneity_runner_artifact):
+        data_dir = runtime_heterogeneity_runner_artifact["root"] / "runtime_heterogeneity" / "data"
+        rows = _rows(data_dir / "runtime_performance_summary.csv")
+        assert rows
+        assert {
+            "sigma",
+            "base_method",
+            "replicate",
+            "elapsed_wall_time_s",
+            "total_attempts",
+            "final_posterior_size",
+            "final_quality_wasserstein",
+            "throughput_sims_per_s",
+            "utilization_loss_fraction",
+        } <= set(rows[0].keys())
+
     # ── Phase 5: no cluttered combined benchmark diagnostics ──────────────────
 
     def test_no_cluttered_benchmark_diagnostics_plot(self, runtime_heterogeneity_runner_artifact):
@@ -1125,6 +1144,8 @@ class TestStragglerRunner:
         assert "active_wall_time_s" in rows[0]
         assert "elapsed_wall_time_s" in rows[0]
         assert "effective_straggler_worker_id" in rows[0]
+        assert "final_quality_wasserstein" in rows[0]
+        assert "utilization_loss_fraction" in rows[0]
 
     def test_throughput_plot_metadata_is_complete(self, straggler_runner_artifact):
         meta_path = (
@@ -1138,6 +1159,8 @@ class TestStragglerRunner:
         assert meta["summary_plot"] is True
         assert meta["experiment_name"] == "straggler"
         assert meta["benchmark"] is False
+        assert meta["paper_primary"] is True
+        assert meta["summary_source"] == "throughput_vs_slowdown_summary.csv"
 
     def test_writes_runtime_debug_summary(self, straggler_runner_artifact):
         csv_path = (

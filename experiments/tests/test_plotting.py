@@ -461,6 +461,31 @@ class TestPhase3Reporters:
         assert diag_meta["has_wasserstein_panel"] is True
         assert (output_dir.plots / "time_to_target_diagnostic_meta.json").exists()
 
+    def test_plot_benchmark_diagnostics_writes_gaussian_analytic_summary(self, tmp_path, sample_records):
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        cfg = {
+            "experiment_name": "gaussian_mean",
+            "benchmark": {
+                "name": "gaussian_mean",
+                "observed_data_seed": 42,
+                "n_obs": 100,
+                "true_mu": 0.0,
+                "sigma_obs": 1.0,
+                "prior_low": -5.0,
+                "prior_high": 5.0,
+            },
+            "inference": {"k": 20, "max_wall_time_s": 10.0},
+            "analysis": {"target_wasserstein": 1.0, "min_particles_for_threshold": 5},
+            "plots": {"posterior": True, "quality_vs_time": True, "emit_paper_summaries": True, "emit_diagnostics": False},
+        }
+        plot_benchmark_diagnostics(sample_records, cfg, output_dir)
+        summary_rows = _read_csv(output_dir.data / "gaussian_analytic_summary.csv")
+        assert summary_rows
+        assert {"posterior_mean", "analytic_posterior_mean", "analytic_posterior_mean_abs_error"} <= set(summary_rows[0].keys())
+        progress_meta = json.loads((output_dir.plots / "progress_summary_meta.json").read_text())
+        assert progress_meta["validity_metric"] == "analytic_posterior_mean_error"
+        assert progress_meta["performance_metric"] == "wall_clock_progress_supporting"
+
     def test_plot_benchmark_diagnostics_writes_skip_metadata_when_true_params_missing(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()
         cfg = {

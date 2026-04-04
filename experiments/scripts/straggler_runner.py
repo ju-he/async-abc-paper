@@ -18,6 +18,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis import base_method_name
+from async_abc.analysis import final_state_results
 from async_abc.benchmarks import make_benchmark
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
@@ -43,6 +44,7 @@ from async_abc.utils.sharding import (
 )
 from async_abc.utils.runner import compute_scaling_factor, find_completed_combinations, format_duration, make_arg_parser, run_method_distributed, write_timing_comparison_csv, write_timing_csv
 from async_abc.utils.seeding import make_seeds
+from async_abc.plotting.reporters import _compute_idle_fraction
 
 logger = logging.getLogger(__name__)
 
@@ -213,8 +215,36 @@ def _plot_throughput_vs_slowdown(throughput_rows, output_dir: OutputDir) -> None
             "experiment_name": output_dir.root.name,
             "benchmark": False,
             "methods": methods,
+            "paper_primary": True,
+            "evidence_role": "hpc_primary",
+            "performance_metric": "throughput_vs_straggler_slowdown",
+            "summary_source": "throughput_vs_slowdown_summary.csv",
         },
     )
+
+
+def _final_quality_wasserstein(records, benchmark_cfg: dict, archive_size: int | None) -> float:
+    from async_abc.analysis import posterior_quality_curve
+
+    true_params = {
+        key.removeprefix("true_"): float(value)
+        for key, value in benchmark_cfg.items()
+        if key.startswith("true_")
+    }
+    if not true_params:
+        return float("nan")
+    quality_df = posterior_quality_curve(
+        records,
+        true_params=true_params,
+        axis_kind="wall_time",
+        checkpoint_strategy="quantile",
+        checkpoint_count=8,
+        archive_size=archive_size,
+    )
+    if quality_df.empty:
+        return float("nan")
+    ordered = quality_df.sort_values("axis_value")
+    return float(ordered.iloc[-1]["wasserstein"])
 
 
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
@@ -375,12 +405,20 @@ def main(argv: list[str] | None = None) -> None:
                     attempt_rows = _attempt_records(records)
                     active_wall_time = _active_wall_time(attempt_rows)
                     throughput_wall_time = active_wall_time if active_wall_time > 0 else elapsed
+                    final_results = final_state_results(records, archive_size=cfg["inference"].get("k"))
+                    final_posterior_size = int(final_results[0].n_particles_used) if final_results else 0
+                    final_quality = _final_quality_wasserstein(
+                        records,
+                        cfg["benchmark"],
+                        cfg["inference"].get("k"),
+                    )
                     for record in records:
                         record.method = tagged_method
                     if is_root_rank():
                         writer.write(records)
                         all_records.extend(records)
                         factor_records.extend(records)
+                        utilization_map = _compute_idle_fraction(records)
                         throughput_rows.append(
                             {
                                 "slowdown_factor": slowdown_factor,
@@ -393,6 +431,12 @@ def main(argv: list[str] | None = None) -> None:
                                 "active_wall_time_s": throughput_wall_time,
                                 "elapsed_wall_time_s": elapsed,
                                 "throughput_sims_per_s": len(attempt_rows) / throughput_wall_time if throughput_wall_time > 0 else float("nan"),
+                                "total_attempts": len(attempt_rows),
+                                "final_posterior_size": final_posterior_size,
+                                "final_quality_wasserstein": final_quality,
+                                "utilization_loss_fraction": float(
+                                    utilization_map.get(method, {}).get(replicate, float("nan"))
+                                ),
                                 "test_mode": test_mode,
                             }
                         )
@@ -477,6 +521,17 @@ def main(argv: list[str] | None = None) -> None:
 
     write_timing_csv(output_dir.data / "timing.csv", name, elapsed, estimated, test_mode, run_mode)
     write_timing_comparison_csv(Path(args.output_dir))
+    write_metadata(
+        output_dir,
+        cfg,
+        extra={
+            "slowdown_factors": slowdown_factors,
+            "straggler_rank": straggler_rank,
+            "straggler_rank_semantics": "active_simulation_worker_slot",
+            "base_sleep_s": base_sleep_s,
+            "paper_primary_performance_plots": ["throughput_vs_slowdown"],
+        },
+    )
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("throughput_vs_slowdown"):
@@ -512,17 +567,6 @@ def main(argv: list[str] | None = None) -> None:
     from async_abc.plotting.reporters import write_runtime_debug_summary
 
     write_runtime_debug_summary(all_records, output_dir)
-
-    write_metadata(
-        output_dir,
-        cfg,
-        extra={
-            "slowdown_factors": slowdown_factors,
-            "straggler_rank": straggler_rank,
-            "straggler_rank_semantics": "active_simulation_worker_slot",
-            "base_sleep_s": base_sleep_s,
-        },
-    )
 
 
 if __name__ == "__main__":

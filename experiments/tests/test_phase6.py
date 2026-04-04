@@ -25,6 +25,7 @@ CONFIG_FILES = [
     "runtime_heterogeneity.json",
     "scaling.json",
     "sensitivity.json",
+    "sensitivity_gandk.json",
     "ablation.json",
 ]
 
@@ -41,6 +42,7 @@ EXPERIMENT_NAMES = [
     "runtime_heterogeneity",
     "scaling",
     "sensitivity",
+    "sensitivity_gandk",
     "ablation",
 ]
 
@@ -143,6 +145,14 @@ class TestRunAll:
         """metadata.json should be produced inside data/."""
         meta = run_all_gaussian["output_dir"] / "gaussian_mean" / "data" / "metadata.json"
         assert meta.exists()
+
+    def test_run_all_metadata_includes_paper_role_and_stop_policy(self, run_all_gaussian):
+        meta = json.loads(
+            (run_all_gaussian["output_dir"] / "gaussian_mean" / "data" / "metadata.json").read_text()
+        )
+        assert meta["experiment_role"] == "validity"
+        assert meta["stop_policy"] == "fixed_walltime"
+        assert meta["method_comparison_roles"]["rejection_abc"] == "small_model_reference"
 
     def test_run_all_help_flag(self):
         """--help should exit 0 and print usage."""

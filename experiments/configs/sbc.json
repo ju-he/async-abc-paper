@@ -49,5 +49,12 @@
   "plots": {
     "rank_histogram": true,
     "coverage_table": true
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
   }
 }

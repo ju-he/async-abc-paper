@@ -65,6 +65,7 @@ EXPERIMENT_REGISTRY = {
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),
     "scaling": ("scaling_runner.py", "scaling.json"),
     "sensitivity": ("sensitivity_runner.py", "sensitivity.json"),
+    "sensitivity_gandk": ("sensitivity_runner.py", "sensitivity_gandk.json"),
     "ablation": ("ablation_runner.py", "ablation.json"),
 }
 

@@ -17,6 +17,7 @@ import pandas as pd
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, load_records
+from ..utils.metadata import infer_experiment_role
 from ..analysis import (
     benchmark_plot_audit,
     barrier_overhead_fraction,
@@ -76,6 +77,13 @@ def _nonbenchmark_plot_metadata(
     skip_reason: str | None = None,
     extra: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    meta_path = output_dir.data / "metadata.json"
+    persisted_meta: Dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            persisted_meta = json.loads(meta_path.read_text())
+        except Exception:
+            persisted_meta = {}
     metadata: Dict[str, Any] = {
         "plot_name": plot_name,
         "title": title,
@@ -84,9 +92,48 @@ def _nonbenchmark_plot_metadata(
         "experiment_name": output_dir.root.name,
         "benchmark": False,
         "methods": sorted(methods or []),
+        "experiment_role": persisted_meta.get("experiment_role", _infer_experiment_role_from_name(output_dir.root.name)),
+        "stop_policy": persisted_meta.get("stop_policy"),
+        "stop_policy_by_method": persisted_meta.get("stop_policy_by_method", {}),
+        "wall_time_limit_s": persisted_meta.get("wall_time_limit_s"),
+        "wall_time_budgets_s": persisted_meta.get("wall_time_budgets_s"),
+        "n_replicates_observed": persisted_meta.get("n_replicates_observed"),
     }
     if skip_reason:
         metadata["skip_reason"] = skip_reason
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def _infer_experiment_role_from_name(name: str) -> str:
+    return infer_experiment_role({"experiment_name": str(name)})
+
+
+def _benchmark_plot_metadata(
+    cfg: Dict[str, Any],
+    *,
+    plot_name: str,
+    summary_plot: bool = False,
+    diagnostic_plot: bool = False,
+    paper_primary: bool = False,
+    validity_metric: str | None = None,
+    performance_metric: str | None = None,
+    extra: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {
+        "plot_name": plot_name,
+        "benchmark": True,
+        "summary_plot": bool(summary_plot),
+        "diagnostic_plot": bool(diagnostic_plot),
+        "experiment_name": cfg.get("experiment_name"),
+        "experiment_role": infer_experiment_role(cfg),
+        "wall_time_limit_s": cfg.get("inference", {}).get("max_wall_time_s"),
+        "validity_metric": validity_metric,
+        "performance_metric": performance_metric,
+        "paper_primary": bool(paper_primary),
+        "evidence_role": "validity_primary" if paper_primary else "validity_supporting",
+    }
     if extra:
         metadata.update(extra)
     return metadata
@@ -351,6 +398,211 @@ def _write_lotka_tol_init_diagnostic(
     }
     with open(output_dir.data / "lotka_tol_init_diagnostic.json", "w") as f:
         json.dump(summary_payload, f, indent=2)
+
+
+def _write_gaussian_analytic_summary(
+    records: List[ParticleRecord],
+    *,
+    cfg: Dict[str, Any],
+    output_dir: OutputDir,
+    archive_size: int | None = None,
+) -> None:
+    """Write per-method Gaussian posterior mean errors relative to the analytic target."""
+    benchmark_cfg = cfg.get("benchmark", {})
+    if benchmark_cfg.get("name") != "gaussian_mean":
+        return
+
+    try:
+        from ..benchmarks.gaussian_mean import GaussianMean
+    except Exception:
+        return
+
+    analytic_mean = float(GaussianMean(benchmark_cfg).analytic_posterior_mean())
+    rows: list[dict[str, object]] = []
+    for result in final_state_results(records, archive_size=archive_size):
+        sample_values = [float(record.params["mu"]) for record in result.records if "mu" in record.params]
+        if not sample_values:
+            continue
+        posterior_mean = float(np.mean(np.asarray(sample_values, dtype=float)))
+        rows.append(
+            {
+                "method": str(result.method),
+                "replicate": int(result.replicate),
+                "posterior_mean": posterior_mean,
+                "analytic_posterior_mean": analytic_mean,
+                "analytic_posterior_mean_abs_error": abs(posterior_mean - analytic_mean),
+                "n_particles_used": int(result.n_particles_used),
+            }
+        )
+    if not rows:
+        return
+
+    pd.DataFrame(rows).sort_values(["method", "replicate"]).to_csv(
+        output_dir.data / "gaussian_analytic_summary.csv",
+        index=False,
+    )
+    summary = {
+        "analytic_posterior_mean": analytic_mean,
+        "mean_abs_error": float(np.mean([float(row["analytic_posterior_mean_abs_error"]) for row in rows])),
+        "max_abs_error": float(np.max([float(row["analytic_posterior_mean_abs_error"]) for row in rows])),
+        "n_rows": len(rows),
+    }
+    with open(output_dir.data / "gaussian_analytic_summary.json", "w") as f:
+        json.dump(summary, f, indent=2)
+
+
+def _annotate_benchmark_plot_metadata(
+    output_dir: OutputDir,
+    *,
+    cfg: Dict[str, Any],
+) -> None:
+    """Post-process benchmark metadata files with paper-facing semantics."""
+    benchmark_name = str(cfg.get("benchmark", {}).get("name", ""))
+    by_name = {
+        "posterior": _benchmark_plot_metadata(
+            cfg,
+            plot_name="posterior",
+            summary_plot=True,
+            paper_primary=True,
+            validity_metric="posterior_recovery",
+        ),
+        "corner": _benchmark_plot_metadata(
+            cfg,
+            plot_name="corner",
+            summary_plot=True,
+            paper_primary=True,
+            validity_metric="posterior_recovery",
+        ),
+        "archive_evolution": _benchmark_plot_metadata(
+            cfg,
+            plot_name="archive_evolution",
+            summary_plot=True,
+            validity_metric="tolerance_progress",
+            performance_metric="attempt_budget_progress",
+        ),
+        "archive_evolution_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="archive_evolution_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="tolerance_progress",
+            performance_metric="attempt_budget_progress",
+        ),
+        "tolerance_trajectory": _benchmark_plot_metadata(
+            cfg,
+            plot_name="tolerance_trajectory",
+            summary_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "tolerance_trajectory_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="tolerance_trajectory_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "progress_summary": _benchmark_plot_metadata(
+            cfg,
+            plot_name="progress_summary",
+            summary_plot=True,
+            paper_primary=True,
+            validity_metric="final_posterior_quality",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "progress_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="progress_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="final_posterior_quality",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "quality_vs_wall_time": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_wall_time",
+            summary_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "quality_vs_wall_time_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_wall_time_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "quality_vs_posterior_samples": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_posterior_samples",
+            summary_plot=True,
+            paper_primary=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="posterior_sample_efficiency",
+        ),
+        "quality_vs_posterior_samples_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_posterior_samples_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="posterior_sample_efficiency",
+        ),
+        "quality_vs_attempt_budget": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_attempt_budget",
+            summary_plot=True,
+            paper_primary=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="attempt_budget_progress",
+        ),
+        "quality_vs_attempt_budget_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="quality_vs_attempt_budget_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="wasserstein_to_true_params",
+            performance_metric="attempt_budget_progress",
+        ),
+        "time_to_target_summary": _benchmark_plot_metadata(
+            cfg,
+            plot_name="time_to_target_summary",
+            summary_plot=True,
+            validity_metric="time_to_target_wasserstein",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "time_to_target_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="time_to_target_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="time_to_target_wasserstein",
+            performance_metric="wall_clock_progress_supporting",
+        ),
+        "attempts_to_target_summary": _benchmark_plot_metadata(
+            cfg,
+            plot_name="attempts_to_target_summary",
+            summary_plot=True,
+            validity_metric="attempts_to_target_wasserstein",
+            performance_metric="attempt_budget_progress",
+        ),
+        "attempts_to_target_diagnostic": _benchmark_plot_metadata(
+            cfg,
+            plot_name="attempts_to_target_diagnostic",
+            diagnostic_plot=True,
+            validity_metric="attempts_to_target_wasserstein",
+            performance_metric="attempt_budget_progress",
+        ),
+    }
+    if benchmark_name == "gaussian_mean":
+        gaussian_extra = {
+            "analytic_reference_available": (output_dir.data / "gaussian_analytic_summary.csv").exists(),
+            "validity_metric": "analytic_posterior_mean_error",
+        }
+        for key in ("posterior", "corner", "progress_summary"):
+            by_name[key].update(gaussian_extra)
+
+    for meta_path in output_dir.plots.glob("*_meta.json"):
+        stem_name = meta_path.name.removesuffix("_meta.json")
+        if stem_name in by_name:
+            _merge_metadata(meta_path, by_name[stem_name])
+        elif stem_name.startswith("posterior_"):
+            _merge_metadata(meta_path, by_name["posterior"])
 
 
 def _paper_plot_allowed(audit_df: pd.DataFrame, column: str) -> bool:
@@ -641,14 +893,22 @@ def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
     return result
 
 
-def plot_idle_fraction(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+def plot_idle_fraction(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    summary_df: pd.DataFrame | None = None,
+) -> None:
     """Bar chart of utilization-loss fraction per method/sigma level."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    summary_df = _runtime_utilization_rows(records)
+    if summary_df is None:
+        summary_df = _runtime_utilization_rows(records)
+    else:
+        summary_df = summary_df.copy()
     if summary_df.empty:
         return
     mean_rows: list[dict[str, object]] = []
@@ -866,14 +1126,22 @@ def plot_throughput_over_time(
     )
 
 
-def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+def plot_idle_fraction_comparison(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    summary_df: pd.DataFrame | None = None,
+) -> None:
     """Utilization-loss fraction vs. sigma with per-replicate scatter and mean line."""
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    summary_df = _runtime_utilization_rows(records)
+    if summary_df is None:
+        summary_df = _runtime_utilization_rows(records)
+    else:
+        summary_df = summary_df.copy()
     if summary_df.empty:
         return
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -943,6 +1211,12 @@ def plot_idle_fraction_comparison(records: List[ParticleRecord], output_dir: Out
             title="Utilization loss vs. heterogeneity and method",
             methods=sorted(summary_df["base_method"].dropna().unique().tolist()),
             summary_plot=True,
+            extra={
+                "paper_primary": True,
+                "evidence_role": "hpc_primary",
+                "performance_metric": "utilization_loss_vs_heterogeneity",
+                "summary_source": "runtime_performance_summary.csv" if summary_df is not None else None,
+            },
         ),
     )
 
@@ -951,15 +1225,84 @@ def plot_quality_by_sigma(
     records: List[ParticleRecord],
     cfg: Dict[str, Any],
     output_dir: OutputDir,
+    *,
+    summary_df: pd.DataFrame | None = None,
 ) -> None:
-    """Wasserstein-vs-wall-time faceted by sigma level — headline heterogeneity figure.
+    """Headline heterogeneity figure.
 
-    One panel per sigma level; each panel overlays async vs. sync methods.
+    When ``summary_df`` is provided, plot final quality at the fixed wall-clock
+    budget versus ``sigma`` using aggregate per-replicate summaries. Otherwise
+    fall back to the richer raw-record wall-time traces.
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from ..analysis import posterior_quality_curve
+
+    if summary_df is not None and not summary_df.empty:
+        df = summary_df.copy()
+        df = df.dropna(subset=["sigma", "base_method", "final_quality_wasserstein"])
+        if not df.empty:
+            fig, ax = plt.subplots(figsize=(6.5, 4.2))
+            rows: list[dict[str, object]] = []
+            for method, group in df.groupby("base_method", sort=True):
+                sigma_rows = []
+                for sigma, sigma_group in group.groupby("sigma", sort=True):
+                    mean, ci_low, ci_high = _summarize_scalar(
+                        sigma_group["final_quality_wasserstein"].to_numpy(dtype=float),
+                        ci_level=0.95,
+                    )
+                    n_replicates = int(sigma_group["replicate"].nunique())
+                    sigma_rows.append((float(sigma), mean, ci_low, ci_high, n_replicates))
+                    rows.append(
+                        {
+                            "sigma": float(sigma),
+                            "base_method": str(method),
+                            "final_quality_wasserstein": mean,
+                            "final_quality_wasserstein_ci_low": ci_low,
+                            "final_quality_wasserstein_ci_high": ci_high,
+                            "n_replicates": n_replicates,
+                        }
+                    )
+                sigma_rows.sort(key=lambda item: item[0])
+                ax.plot(
+                    [row[0] for row in sigma_rows],
+                    [row[1] for row in sigma_rows],
+                    marker="o",
+                    label=str(method),
+                )
+                if any(np.isfinite(row[2]) and np.isfinite(row[3]) for row in sigma_rows):
+                    ax.fill_between(
+                        [row[0] for row in sigma_rows],
+                        [row[2] for row in sigma_rows],
+                        [row[3] for row in sigma_rows],
+                        alpha=0.15,
+                    )
+            ax.set_xlabel("heterogeneity (σ)")
+            ax.set_ylabel("final quality at fixed wall-clock budget (Wasserstein)")
+            ax.set_title("Posterior quality at fixed wall-clock budget by heterogeneity")
+            ax.legend(frameon=False, fontsize="small")
+            fig.tight_layout()
+            save_figure(
+                fig,
+                output_dir.plots / "quality_by_sigma",
+                data={col: [row[col] for row in rows] for col in rows[0].keys()} if rows else None,
+                metadata=_nonbenchmark_plot_metadata(
+                    output_dir,
+                    plot_name="quality_by_sigma",
+                    title="Posterior quality at fixed wall-clock budget by σ",
+                    methods=sorted(df["base_method"].dropna().unique().tolist()),
+                    summary_plot=True,
+                    extra={
+                        "paper_primary": True,
+                        "evidence_role": "hpc_primary",
+                        "performance_metric": "quality_at_fixed_wallclock_budget",
+                        "summary_source": "runtime_performance_summary.csv",
+                        "n_sigma_levels": int(df["sigma"].nunique()),
+                    },
+                ),
+            )
+            return
 
     benchmark_cfg = cfg.get("benchmark", {})
     inference_cfg = cfg.get("inference", {})
@@ -2395,7 +2738,7 @@ def plot_scaling_grid(
                     title=f"Throughput vs workers: {method}",
                     methods=[method],
                     summary_plot=True,
-                    extra={"group_by": "k"},
+                    extra={"group_by": "k", "paper_primary": True, "evidence_role": "hpc_primary"},
                 ),
                 yerr_col="throughput_sims_per_s_std",
                 ideal_y_col="ideal_throughput",
@@ -2416,7 +2759,7 @@ def plot_scaling_grid(
                     title=f"Efficiency vs workers: {method}",
                     methods=[method],
                     summary_plot=True,
-                    extra={"group_by": "k"},
+                    extra={"group_by": "k", "paper_primary": True, "evidence_role": "hpc_primary"},
                 ),
                 yerr_col="efficiency_std",
                 hline=1.0,
@@ -2438,7 +2781,7 @@ def plot_scaling_grid(
                         title=f"Worker utilization vs workers: {method}",
                         methods=[method],
                         summary_plot=True,
-                        extra={"group_by": "k"},
+                        extra={"group_by": "k", "paper_primary": True, "evidence_role": "hpc_primary"},
                     ),
                     yerr_col="worker_utilization_std",
                     hline=1.0,
@@ -2458,15 +2801,21 @@ def plot_scaling_grid(
                 series_col="k",
                 xlabel="workers",
                 ylabel="quality (Wasserstein)",
-                title=f"Quality at T={budget_s:g}s: {method}",
+                title=f"Quality at fixed wall-clock budget T={budget_s:g}s: {method}",
                 stem=output_dir.plots / f"quality_at_budget__{safe_method}__T{budget_label}",
                 metadata=_nonbenchmark_plot_metadata(
                     output_dir,
                     plot_name=f"quality_at_budget__{safe_method}__T{budget_label}",
-                    title=f"Quality at T={budget_s:g}s: {method}",
+                    title=f"Quality at fixed wall-clock budget T={budget_s:g}s: {method}",
                     methods=[method],
                     summary_plot=True,
-                    extra={"budget_s": float(budget_s), "group_by": "k"},
+                    extra={
+                        "budget_s": float(budget_s),
+                        "group_by": "k",
+                        "paper_primary": True,
+                        "evidence_role": "hpc_primary",
+                        "performance_metric": "quality_at_fixed_wallclock_budget",
+                    },
                 ),
                 yerr_col="quality_wasserstein_by_budget_std",
                 log_x=True,
@@ -2486,7 +2835,13 @@ def plot_scaling_grid(
                     title=f"Attempts at T={budget_s:g}s: {method}",
                     methods=[method],
                     summary_plot=True,
-                    extra={"budget_s": float(budget_s), "group_by": "k"},
+                    extra={
+                        "budget_s": float(budget_s),
+                        "group_by": "k",
+                        "paper_primary": True,
+                        "evidence_role": "hpc_primary",
+                        "performance_metric": "attempts_at_fixed_wallclock_budget",
+                    },
                 ),
                 yerr_col="attempts_by_budget_std",
                 log_x=True,
@@ -2578,15 +2933,21 @@ def plot_scaling_grid(
                 series_col="n_workers",
                 xlabel="wall-clock budget (s)",
                 ylabel="quality (Wasserstein)",
-                title=f"Quality vs budget: {method}, k={int(k_val)}",
+                title=f"Quality vs fixed wall-clock budget: {method}, k={int(k_val)}",
                 stem=output_dir.plots / f"quality_vs_budget_by_workers__{safe_method}__k{k_label}",
                 metadata=_nonbenchmark_plot_metadata(
                     output_dir,
                     plot_name=f"quality_vs_budget_by_workers__{safe_method}__k{k_label}",
-                    title=f"Quality vs budget: {method}, k={int(k_val)}",
+                    title=f"Quality vs fixed wall-clock budget: {method}, k={int(k_val)}",
                     methods=[method],
                     summary_plot=True,
-                    extra={"k": int(k_val), "group_by": "n_workers"},
+                    extra={
+                        "k": int(k_val),
+                        "group_by": "n_workers",
+                        "paper_primary": True,
+                        "evidence_role": "hpc_primary",
+                        "performance_metric": "quality_at_fixed_wallclock_budget",
+                    },
                 ),
                 yerr_col="quality_wasserstein_by_budget_std",
             )
@@ -2632,12 +2993,12 @@ def plot_scaling_grid(
             series_col="series",
             xlabel="workers",
             ylabel="quality (Wasserstein)",
-            title=f"Quality at T={budget_s:g}s: all methods, all k",
+            title=f"Quality at fixed wall-clock budget T={budget_s:g}s: all methods, all k",
             stem=output_dir.plots / f"quality_at_budget__all_methods_all_k__T{budget_label}",
             metadata=_nonbenchmark_plot_metadata(
                 output_dir,
                 plot_name=f"quality_at_budget__all_methods_all_k__T{budget_label}",
-                title=f"Quality at T={budget_s:g}s: all methods, all k",
+                title=f"Quality at fixed wall-clock budget T={budget_s:g}s: all methods, all k",
                 methods=methods,
                 summary_plot=True,
                 extra={"budget_s": float(budget_s), "group_by": "method,k"},
@@ -3127,6 +3488,13 @@ def plot_benchmark_diagnostics(
     min_particles_for_threshold = int(analysis_cfg.get("min_particles_for_threshold", archive_size or 100))
     if benchmark_cfg.get("name") == "lotka_volterra":
         _write_lotka_tol_init_diagnostic(records, cfg=cfg, output_dir=output_dir)
+    if benchmark_cfg.get("name") == "gaussian_mean":
+        _write_gaussian_analytic_summary(
+            records,
+            cfg=cfg,
+            output_dir=output_dir,
+            archive_size=archive_size,
+        )
     audit_df = _write_benchmark_audit(
         records,
         true_params=true_params,
@@ -3270,6 +3638,7 @@ def plot_benchmark_diagnostics(
                 archive_size=archive_size,
                 min_particles_for_threshold=min_particles_for_threshold,
             )
+    _annotate_benchmark_plot_metadata(output_dir, cfg=cfg)
 
 
 # ---------------------------------------------------------------------------

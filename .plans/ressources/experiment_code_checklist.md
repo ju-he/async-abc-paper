@@ -57,9 +57,20 @@ The codebase should support these guarantees.
   - an image file, preferably `.pdf` and `.png`
   - a plot CSV with the plotted data
   - a metadata JSON describing how the plot was created
+- Performance experiments treat fixed-walltime outputs as first-class paper artifacts.
+- Required paper-facing aggregate outputs for performance experiments include:
+  - quality at budget
+  - attempts at budget
+  - throughput at budget or vs. workers
+  - worker utilization, idle fraction, or barrier-overhead summaries
 - Benchmark plots support a paper-facing summary mode and, where useful, a replicate-level diagnostic mode.
 - Paper-facing plots may be intentionally skipped when audit checks fail; this must still emit metadata documenting the skip.
 - Plot regeneration from saved outputs is supported by `experiments/scripts/replot.py`.
+- Benchmark-style posterior plots are validity evidence; scaling and heterogeneity plots are the paper-primary HPC evidence.
+- Baseline semantics must be explicit in code and metadata:
+  - `pyabc_smc` = pyABC native-style epsilon-targeted reference
+  - `abc_smc_baseline` = pyABC-based synchronous fixed-generation baseline for controlled walltime comparisons
+- Paper-facing performance plots must export the compared walltime budget, number of replicates, and stopping-policy semantics in metadata.
 
 ## 3. Shared Infrastructure That Must Exist
 

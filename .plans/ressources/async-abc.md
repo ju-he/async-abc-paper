@@ -218,6 +218,35 @@ Given the reconstructed proposal:
 
 Note: there is **no inline rejection step**. The loss is evaluated externally by Propulate
 and the candidate enters history regardless of whether `loss < epsilon_n`. Archive selection
+
+---
+
+# 4. Evaluation Framing
+
+For the paper, the primary systems comparison is **quality achieved under a fixed wall-clock budget**,
+not only quality after an equal number of simulations.
+
+This matches the intended HPC use case:
+
+* jobs are frequently constrained by queue limits or allocation wall times
+* heterogeneous runtimes and persistent stragglers make equal-simulation comparisons less representative
+* asynchronous advantage should appear when synchronization barriers create idle time and lost throughput
+
+Fixed-walltime comparisons intentionally measure **end-to-end practical efficiency**:
+
+* simulator throughput
+* scheduling overhead
+* synchronization overhead
+* framework overhead
+
+This is desirable for the paper because the claim is about practical HPC performance, not an abstract sampler in isolation.
+
+Statistical validity remains a separate evaluation axis and must still be checked explicitly via:
+
+* posterior recovery on benchmark models
+* simulation-based calibration (SBC)
+
+Walltime alone is therefore **not** treated as a validity metric.
 in future calls handles filtering.
 
 ---

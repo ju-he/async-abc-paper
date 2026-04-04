@@ -7,10 +7,13 @@ The goal of the paper is to introduce and evaluate an **asynchronous steady-stat
 The paper must demonstrate three main points:
 
 1. **Statistical validity** – the method produces posterior estimates comparable to established ABC algorithms.
-2. **Computational advantages** – asynchronous steady-state execution improves resource utilization.
+2. **Computational advantages** – asynchronous steady-state execution achieves better posterior quality per wall-clock budget and better utilization under heterogeneous workloads.
 3. **Practical usability** – the algorithm works on realistic simulator-based models.
 
-The most important comparison baseline will be **pyABC**, a widely used distributed ABC-SMC framework.
+The most important comparison baseline will be **pyABC**, used in two roles:
+
+* `abc_smc_baseline` as the main synchronous pyABC-based comparator for fixed-walltime HPC experiments
+* `pyabc_smc` as the external-framework reference for benchmark-validity comparisons
 
 ---
 
@@ -159,14 +162,26 @@ The experimental section should evaluate both:
 1. **statistical accuracy**
 2. **computational performance**
 
-The full experimental suite consists of:
+The suite should be presented in two groups.
 
-* Benchmark model evaluations (Gaussian mean, g-and-k, Lotka-Volterra, Cellular Potts)
-* Simulation-based calibration (SBC) for posterior validity
+Validity evidence:
+
+* Benchmark posterior recovery (Gaussian mean, g-and-k, Lotka-Volterra, Cellular Potts)
+* Gaussian sanity check against the analytic posterior target
+* Simulation-based calibration (SBC)
+
+HPC performance evidence:
+
 * Runtime heterogeneity experiment (stochastic runtime noise)
-* Straggler tolerance experiment (persistent slow-worker fault mode)
-* Scaling experiments (1–256 cores)
+* Straggler robustness experiment (persistent slow-worker fault mode)
+* Scaling experiments under fixed wall-clock budgets (1–256 cores)
+
+Method-analysis / appendix:
+
 * Sensitivity / hyperparameter analysis (archive size, perturbation scale, tolerance schedule, initial tolerance)
+* Ablation analysis
+
+For the walltime-limited HPC experiments, the synchronous baseline uses fixed populations / generations because this yields more interpretable comparisons than contrasting methods that stop according to different epsilon rules.
 
 ---
 
@@ -185,7 +200,7 @@ $$
 Goal:
 
 * verify posterior correctness
-* compare convergence behavior
+* compare posterior recovery and quality-vs-time behavior
 
 Advantages:
 
@@ -233,7 +248,7 @@ Implementation notes:
 Evaluation:
 
 * posterior recovery
-* number of simulations required
+* quality-vs-time behavior under fixed wall-clock budgets
 
 ---
 
@@ -452,7 +467,7 @@ Metrics:
 
 # 11. Scaling Experiments
 
-Run experiments on increasing numbers of cores:
+Run experiments on increasing numbers of cores under fixed wall-clock budgets:
 
 ```
 1
@@ -464,13 +479,19 @@ Run experiments on increasing numbers of cores:
 
 Evaluate:
 
-* parallel speedup
-* scaling efficiency
+* posterior quality at fixed budget
+* attempts at fixed budget
+* throughput vs. workers
+* efficiency / utilization vs. workers
 
-Plot:
+Core figure family:
 
 ```
-efficiency vs cores
+quality at fixed budget
+attempts at fixed budget
+throughput vs workers
+efficiency vs workers
+worker utilization vs workers
 ```
 
 ---
