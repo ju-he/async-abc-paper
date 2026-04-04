@@ -57,20 +57,32 @@ def _free_propulate_comm(comm) -> None:
 
 
 def _cleanup_propulate_intra_requests(propulator) -> int:
-    """Best-effort cleanup of completed intra-island nonblocking sends."""
-    cleanup = getattr(propulator, "_intra_send_cleanup", None)
-    if callable(cleanup):
-        try:
-            cleanup()
-        except Exception:
-            logger.debug("Propulate intra-request cleanup failed", exc_info=True)
+    """Prune completed intra-island nonblocking sends.
+
+    Without periodic pruning, ``intra_requests`` grows unboundedly during a
+    wall-time-limited run.  High-throughput configurations (e.g. ablation with
+    k=10) can accumulate tens of thousands of outstanding ``isend`` requests,
+    exhausting ParaStationMPI/pscom internal resources and causing ``isend`` to
+    block.  Calling ``Testsome`` each iteration retires completed sends so the
+    outstanding count stays bounded.
+    """
     requests = getattr(propulator, "intra_requests", None)
     if not requests:
         return 0
     try:
+        from mpi4py import MPI as _MPI
+        indices = _MPI.Request.Testsome(requests)
+        if indices is not None:
+            # Remove completed entries in reverse order to preserve indices.
+            buffers = getattr(propulator, "intra_buffers", None)
+            for idx in sorted(indices, reverse=True):
+                del requests[idx]
+                if buffers is not None and idx < len(buffers):
+                    del buffers[idx]
         return len(requests)
     except Exception:
-        return 0
+        logger.debug("Propulate intra-request cleanup failed", exc_info=True)
+        return len(requests)
 
 
 def _propulate_world_size() -> int:
