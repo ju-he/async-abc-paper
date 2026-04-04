@@ -1025,6 +1025,14 @@ class TestRuntimeHeterogeneityRunner:
             "throughput_sims_per_s",
             "utilization_loss_fraction",
         } <= set(rows[0].keys())
+        util_values = [
+            float(row["utilization_loss_fraction"])
+            for row in rows
+            if row.get("utilization_loss_fraction") not in ("", "nan", "NaN")
+        ]
+        assert util_values
+        assert all(math.isfinite(value) for value in util_values)
+        assert all(0.0 <= value <= 1.0 for value in util_values)
 
     # ── Phase 5: no cluttered combined benchmark diagnostics ──────────────────
 
@@ -1146,6 +1154,14 @@ class TestStragglerRunner:
         assert "effective_straggler_worker_id" in rows[0]
         assert "final_quality_wasserstein" in rows[0]
         assert "utilization_loss_fraction" in rows[0]
+        util_values = [
+            float(row["utilization_loss_fraction"])
+            for row in rows
+            if row.get("utilization_loss_fraction") not in ("", "nan", "NaN")
+        ]
+        assert util_values
+        assert all(math.isfinite(value) for value in util_values)
+        assert all(0.0 <= value <= 1.0 for value in util_values)
 
     def test_throughput_plot_metadata_is_complete(self, straggler_runner_artifact):
         meta_path = (

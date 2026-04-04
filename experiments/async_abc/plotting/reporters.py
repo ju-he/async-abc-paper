@@ -17,10 +17,16 @@ import pandas as pd
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord, load_records
-from ..utils.metadata import infer_experiment_role
+from ..reporting import (
+    benchmark_plot_metadata,
+    nonbenchmark_plot_metadata as _nonbenchmark_plot_metadata,
+    runtime_utilization_rows as _runtime_utilization_rows,
+    compute_idle_fraction as _compute_idle_fraction,
+    normalize_runtime_utilization_summary,
+    write_gaussian_analytic_summary,
+)
 from ..analysis import (
     benchmark_plot_audit,
-    barrier_overhead_fraction,
     base_method_name,
     final_state_records,
     final_state_results,
@@ -64,79 +70,6 @@ def _merge_metadata(meta_path: Path, extra: Dict[str, Any]) -> None:
     meta = json.loads(meta_path.read_text())
     meta.update(extra)
     meta_path.write_text(json.dumps(meta, indent=2))
-
-
-def _nonbenchmark_plot_metadata(
-    output_dir: OutputDir,
-    *,
-    plot_name: str,
-    title: str,
-    methods: List[str] | None = None,
-    summary_plot: bool = False,
-    diagnostic_plot: bool = False,
-    skip_reason: str | None = None,
-    extra: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    meta_path = output_dir.data / "metadata.json"
-    persisted_meta: Dict[str, Any] = {}
-    if meta_path.exists():
-        try:
-            persisted_meta = json.loads(meta_path.read_text())
-        except Exception:
-            persisted_meta = {}
-    metadata: Dict[str, Any] = {
-        "plot_name": plot_name,
-        "title": title,
-        "summary_plot": bool(summary_plot),
-        "diagnostic_plot": bool(diagnostic_plot),
-        "experiment_name": output_dir.root.name,
-        "benchmark": False,
-        "methods": sorted(methods or []),
-        "experiment_role": persisted_meta.get("experiment_role", _infer_experiment_role_from_name(output_dir.root.name)),
-        "stop_policy": persisted_meta.get("stop_policy"),
-        "stop_policy_by_method": persisted_meta.get("stop_policy_by_method", {}),
-        "wall_time_limit_s": persisted_meta.get("wall_time_limit_s"),
-        "wall_time_budgets_s": persisted_meta.get("wall_time_budgets_s"),
-        "n_replicates_observed": persisted_meta.get("n_replicates_observed"),
-    }
-    if skip_reason:
-        metadata["skip_reason"] = skip_reason
-    if extra:
-        metadata.update(extra)
-    return metadata
-
-
-def _infer_experiment_role_from_name(name: str) -> str:
-    return infer_experiment_role({"experiment_name": str(name)})
-
-
-def _benchmark_plot_metadata(
-    cfg: Dict[str, Any],
-    *,
-    plot_name: str,
-    summary_plot: bool = False,
-    diagnostic_plot: bool = False,
-    paper_primary: bool = False,
-    validity_metric: str | None = None,
-    performance_metric: str | None = None,
-    extra: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    metadata: Dict[str, Any] = {
-        "plot_name": plot_name,
-        "benchmark": True,
-        "summary_plot": bool(summary_plot),
-        "diagnostic_plot": bool(diagnostic_plot),
-        "experiment_name": cfg.get("experiment_name"),
-        "experiment_role": infer_experiment_role(cfg),
-        "wall_time_limit_s": cfg.get("inference", {}).get("max_wall_time_s"),
-        "validity_metric": validity_metric,
-        "performance_metric": performance_metric,
-        "paper_primary": bool(paper_primary),
-        "evidence_role": "validity_primary" if paper_primary else "validity_supporting",
-    }
-    if extra:
-        metadata.update(extra)
-    return metadata
 
 
 def _attempt_timing_records(records: List[ParticleRecord]) -> List[ParticleRecord]:
@@ -400,211 +333,6 @@ def _write_lotka_tol_init_diagnostic(
         json.dump(summary_payload, f, indent=2)
 
 
-def _write_gaussian_analytic_summary(
-    records: List[ParticleRecord],
-    *,
-    cfg: Dict[str, Any],
-    output_dir: OutputDir,
-    archive_size: int | None = None,
-) -> None:
-    """Write per-method Gaussian posterior mean errors relative to the analytic target."""
-    benchmark_cfg = cfg.get("benchmark", {})
-    if benchmark_cfg.get("name") != "gaussian_mean":
-        return
-
-    try:
-        from ..benchmarks.gaussian_mean import GaussianMean
-    except Exception:
-        return
-
-    analytic_mean = float(GaussianMean(benchmark_cfg).analytic_posterior_mean())
-    rows: list[dict[str, object]] = []
-    for result in final_state_results(records, archive_size=archive_size):
-        sample_values = [float(record.params["mu"]) for record in result.records if "mu" in record.params]
-        if not sample_values:
-            continue
-        posterior_mean = float(np.mean(np.asarray(sample_values, dtype=float)))
-        rows.append(
-            {
-                "method": str(result.method),
-                "replicate": int(result.replicate),
-                "posterior_mean": posterior_mean,
-                "analytic_posterior_mean": analytic_mean,
-                "analytic_posterior_mean_abs_error": abs(posterior_mean - analytic_mean),
-                "n_particles_used": int(result.n_particles_used),
-            }
-        )
-    if not rows:
-        return
-
-    pd.DataFrame(rows).sort_values(["method", "replicate"]).to_csv(
-        output_dir.data / "gaussian_analytic_summary.csv",
-        index=False,
-    )
-    summary = {
-        "analytic_posterior_mean": analytic_mean,
-        "mean_abs_error": float(np.mean([float(row["analytic_posterior_mean_abs_error"]) for row in rows])),
-        "max_abs_error": float(np.max([float(row["analytic_posterior_mean_abs_error"]) for row in rows])),
-        "n_rows": len(rows),
-    }
-    with open(output_dir.data / "gaussian_analytic_summary.json", "w") as f:
-        json.dump(summary, f, indent=2)
-
-
-def _annotate_benchmark_plot_metadata(
-    output_dir: OutputDir,
-    *,
-    cfg: Dict[str, Any],
-) -> None:
-    """Post-process benchmark metadata files with paper-facing semantics."""
-    benchmark_name = str(cfg.get("benchmark", {}).get("name", ""))
-    by_name = {
-        "posterior": _benchmark_plot_metadata(
-            cfg,
-            plot_name="posterior",
-            summary_plot=True,
-            paper_primary=True,
-            validity_metric="posterior_recovery",
-        ),
-        "corner": _benchmark_plot_metadata(
-            cfg,
-            plot_name="corner",
-            summary_plot=True,
-            paper_primary=True,
-            validity_metric="posterior_recovery",
-        ),
-        "archive_evolution": _benchmark_plot_metadata(
-            cfg,
-            plot_name="archive_evolution",
-            summary_plot=True,
-            validity_metric="tolerance_progress",
-            performance_metric="attempt_budget_progress",
-        ),
-        "archive_evolution_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="archive_evolution_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="tolerance_progress",
-            performance_metric="attempt_budget_progress",
-        ),
-        "tolerance_trajectory": _benchmark_plot_metadata(
-            cfg,
-            plot_name="tolerance_trajectory",
-            summary_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "tolerance_trajectory_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="tolerance_trajectory_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "progress_summary": _benchmark_plot_metadata(
-            cfg,
-            plot_name="progress_summary",
-            summary_plot=True,
-            paper_primary=True,
-            validity_metric="final_posterior_quality",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "progress_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="progress_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="final_posterior_quality",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "quality_vs_wall_time": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_wall_time",
-            summary_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "quality_vs_wall_time_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_wall_time_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "quality_vs_posterior_samples": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_posterior_samples",
-            summary_plot=True,
-            paper_primary=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="posterior_sample_efficiency",
-        ),
-        "quality_vs_posterior_samples_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_posterior_samples_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="posterior_sample_efficiency",
-        ),
-        "quality_vs_attempt_budget": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_attempt_budget",
-            summary_plot=True,
-            paper_primary=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="attempt_budget_progress",
-        ),
-        "quality_vs_attempt_budget_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="quality_vs_attempt_budget_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="wasserstein_to_true_params",
-            performance_metric="attempt_budget_progress",
-        ),
-        "time_to_target_summary": _benchmark_plot_metadata(
-            cfg,
-            plot_name="time_to_target_summary",
-            summary_plot=True,
-            validity_metric="time_to_target_wasserstein",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "time_to_target_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="time_to_target_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="time_to_target_wasserstein",
-            performance_metric="wall_clock_progress_supporting",
-        ),
-        "attempts_to_target_summary": _benchmark_plot_metadata(
-            cfg,
-            plot_name="attempts_to_target_summary",
-            summary_plot=True,
-            validity_metric="attempts_to_target_wasserstein",
-            performance_metric="attempt_budget_progress",
-        ),
-        "attempts_to_target_diagnostic": _benchmark_plot_metadata(
-            cfg,
-            plot_name="attempts_to_target_diagnostic",
-            diagnostic_plot=True,
-            validity_metric="attempts_to_target_wasserstein",
-            performance_metric="attempt_budget_progress",
-        ),
-    }
-    if benchmark_name == "gaussian_mean":
-        gaussian_extra = {
-            "analytic_reference_available": (output_dir.data / "gaussian_analytic_summary.csv").exists(),
-            "validity_metric": "analytic_posterior_mean_error",
-        }
-        for key in ("posterior", "corner", "progress_summary"):
-            by_name[key].update(gaussian_extra)
-
-    for meta_path in output_dir.plots.glob("*_meta.json"):
-        stem_name = meta_path.name.removesuffix("_meta.json")
-        if stem_name in by_name:
-            _merge_metadata(meta_path, by_name[stem_name])
-        elif stem_name.startswith("posterior_"):
-            _merge_metadata(meta_path, by_name["posterior"])
-
-
 def _paper_plot_allowed(audit_df: pd.DataFrame, column: str) -> bool:
     if audit_df.empty or column not in audit_df.columns:
         return True
@@ -635,6 +363,7 @@ def plot_posterior(
     records: List[ParticleRecord],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
 ) -> None:
     """Posterior histogram for each parameter from the final population."""
@@ -650,7 +379,7 @@ def plot_posterior(
     for param in _param_names(final):
         if len(methods) <= 1:
             samples = np.array([r.params[param] for r in final], dtype=float)
-            posterior_plot(samples, param_name=param, path_stem=output_dir.plots / f"posterior_{param}")
+            save_paths = posterior_plot(samples, param_name=param, path_stem=output_dir.plots / f"posterior_{param}")
         else:
             method_samples = {
                 m: np.array([r.params[param] for r in final if r.method == m], dtype=float)
@@ -666,6 +395,18 @@ def plot_posterior(
                 meta = json.loads(meta_path.read_text())
                 meta["sample_counts"] = sample_counts
                 meta_path.write_text(json.dumps(meta, indent=2))
+        if cfg is not None:
+            meta_path = save_paths.get("meta")
+            if meta_path is not None:
+                _merge_metadata(
+                    meta_path,
+                    benchmark_plot_metadata(
+                        cfg,
+                        plot_name=f"posterior_{param}",
+                        output_dir=output_dir,
+                        extra={"sample_counts": sample_counts},
+                    ),
+                )
 
 
 def _archive_evolution_frame(records: List[ParticleRecord]) -> pd.DataFrame:
@@ -693,7 +434,13 @@ def _archive_evolution_frame(records: List[ParticleRecord]) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values(["method", "replicate", "attempt_count"]).reset_index(drop=True)
 
 
-def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir, *, ci_level: float = 0.95) -> None:
+def plot_archive_evolution(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    cfg: Dict[str, Any] | None = None,
+    ci_level: float = 0.95,
+) -> None:
     """Paper summary: tolerance versus simulation attempts with mean + CI."""
     import matplotlib
 
@@ -735,11 +482,21 @@ def plot_archive_evolution(records: List[ParticleRecord], output_dir: OutputDir,
         fig,
         output_dir.plots / "archive_evolution",
         data={col: summary_df[col].tolist() for col in summary_df.columns},
-        metadata={"plot_name": "tolerance_vs_simulations", "summary_plot": True, "ci_level": float(ci_level)},
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="archive_evolution",
+            output_dir=output_dir,
+            extra={"ci_level": float(ci_level)},
+        ) if cfg is not None else {"plot_name": "tolerance_vs_simulations", "summary_plot": True, "ci_level": float(ci_level)},
     )
 
 
-def plot_archive_evolution_diagnostic(records: List[ParticleRecord], output_dir: OutputDir) -> None:
+def plot_archive_evolution_diagnostic(
+    records: List[ParticleRecord],
+    output_dir: OutputDir,
+    *,
+    cfg: Dict[str, Any] | None = None,
+) -> None:
     """Diagnostic replicate-level tolerance versus attempts plot."""
     import matplotlib
 
@@ -764,7 +521,11 @@ def plot_archive_evolution_diagnostic(records: List[ParticleRecord], output_dir:
         fig,
         output_dir.plots / "archive_evolution_diagnostic",
         data={col: trajectory_df[col].tolist() for col in trajectory_df.columns},
-        metadata={"plot_name": "tolerance_vs_simulations_diagnostic", "diagnostic_plot": True},
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="archive_evolution_diagnostic",
+            output_dir=output_dir,
+        ) if cfg is not None else {"plot_name": "tolerance_vs_simulations_diagnostic", "diagnostic_plot": True},
     )
 
 
@@ -863,36 +624,6 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
         ),
     )
 
-
-def _compute_idle_fraction(records: List[ParticleRecord]) -> Dict[str, Dict]:
-    """Compute per-method, per-replicate idle fractions from timing data.
-
-    Returns ``{method: {replicate: idle_fraction}}``."""
-    timed = [r for r in _attempt_timing_records(records) if r.worker_id is not None]
-    if not timed:
-        return {}
-
-    by_method_rep: Dict[str, Dict[int, List[ParticleRecord]]] = {}
-    for r in timed:
-        by_method_rep.setdefault(r.method, {}).setdefault(r.replicate, []).append(r)
-
-    result: Dict[str, Dict] = {}
-    for method, by_rep in by_method_rep.items():
-        result[method] = {}
-        for rep, recs in by_rep.items():
-            workers = {r.worker_id for r in recs}
-            n_workers = len(workers)
-            span = max(r.sim_end_time for r in recs) - min(r.sim_start_time for r in recs)
-            if span <= 0 or n_workers == 0:
-                result[method][rep] = float("nan")
-                continue
-            total_busy = sum(
-                float(r.sim_end_time) - float(r.sim_start_time) for r in recs
-            )
-            result[method][rep] = 1.0 - total_busy / (n_workers * span)
-    return result
-
-
 def plot_idle_fraction(
     records: List[ParticleRecord],
     output_dir: OutputDir,
@@ -906,9 +637,9 @@ def plot_idle_fraction(
     import matplotlib.pyplot as plt
 
     if summary_df is None:
-        summary_df = _runtime_utilization_rows(records)
+        summary_df = normalize_runtime_utilization_summary(records)
     else:
-        summary_df = summary_df.copy()
+        summary_df = normalize_runtime_utilization_summary(records, summary_df=summary_df)
     if summary_df.empty:
         return
     mean_rows: list[dict[str, object]] = []
@@ -1139,9 +870,9 @@ def plot_idle_fraction_comparison(
     import matplotlib.pyplot as plt
 
     if summary_df is None:
-        summary_df = _runtime_utilization_rows(records)
+        summary_df = normalize_runtime_utilization_summary(records)
     else:
-        summary_df = summary_df.copy()
+        summary_df = normalize_runtime_utilization_summary(records, summary_df=summary_df)
     if summary_df.empty:
         return
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -1462,6 +1193,7 @@ def plot_quality_vs_wall_time_diagnostic(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     emit_legacy_alias: bool = False,
@@ -1481,7 +1213,15 @@ def plot_quality_vs_wall_time_diagnostic(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_wall_time_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_wall_time_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_wall_time_diagnostic",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1489,7 +1229,17 @@ def plot_quality_vs_wall_time_diagnostic(
         )
         return
 
-    metadata = {
+    metadata = benchmark_plot_metadata(
+        cfg or {},
+        plot_name="quality_vs_wall_time_diagnostic",
+        output_dir=output_dir,
+        extra={
+            "axis_kind": "wall_time",
+            "state_kind": "observable_posterior_state",
+            "checkpoint_strategy": "quantile",
+            "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        },
+    ) if cfg is not None else {
         "plot_name": "quality_vs_wall_time_diagnostic",
         "axis_kind": "wall_time",
         "state_kind": "observable_posterior_state",
@@ -1516,6 +1266,7 @@ def plot_quality_vs_wall_time(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     ci_level: float = 0.95,
@@ -1528,7 +1279,17 @@ def plot_quality_vs_wall_time(
     if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
         write_plot_metadata(
             output_dir.plots / "quality_vs_wall_time",
-            metadata=_audit_skip_metadata(
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_wall_time",
+                output_dir=output_dir,
+                extra=_audit_skip_metadata(
+                    plot_name="quality_vs_wall_time",
+                    audit_df=audit_df,
+                    gate_column="paper_quality_plots_allowed",
+                    extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+                ),
+            ) if cfg is not None else _audit_skip_metadata(
                 plot_name="quality_vs_wall_time",
                 audit_df=audit_df,
                 gate_column="paper_quality_plots_allowed",
@@ -1548,7 +1309,15 @@ def plot_quality_vs_wall_time(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_wall_time",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_wall_time",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_wall_time",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1560,7 +1329,16 @@ def plot_quality_vs_wall_time(
         quality_df,
         axis_kind="wall_time",
         ci_level=ci_level,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="quality_vs_wall_time",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "wall_time",
+                "ci_level": float(ci_level),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "quality_vs_wall_time",
             "axis_kind": "wall_time",
             "summary_plot": True,
@@ -1596,6 +1374,7 @@ def plot_progress_summary(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     ci_level: float = 0.95,
@@ -1651,7 +1430,15 @@ def plot_progress_summary(
     if tolerance_summary.empty and quality_summary.empty:
         write_plot_metadata(
             output_dir.plots / "progress_summary",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="progress_summary",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_tolerance_and_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "progress_summary",
                 "skip_reason": "missing_tolerance_and_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1719,7 +1506,18 @@ def plot_progress_summary(
         fig,
         output_dir.plots / "progress_summary",
         data={col: export_df[col].tolist() for col in export_df.columns},
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="progress_summary",
+            output_dir=output_dir,
+            extra={
+                "ci_level": float(ci_level),
+                "has_tolerance_panel": bool(not tolerance_summary.empty),
+                "has_wasserstein_panel": bool(not quality_summary.empty),
+                "quality_skip_reason": quality_skip_reason,
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "progress_summary",
             "summary_plot": True,
             "ci_level": float(ci_level),
@@ -1736,6 +1534,7 @@ def plot_quality_vs_posterior_samples(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     ci_level: float = 0.95,
@@ -1748,7 +1547,17 @@ def plot_quality_vs_posterior_samples(
     if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
         write_plot_metadata(
             output_dir.plots / "quality_vs_posterior_samples",
-            metadata=_audit_skip_metadata(
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_posterior_samples",
+                output_dir=output_dir,
+                extra=_audit_skip_metadata(
+                    plot_name="quality_vs_posterior_samples",
+                    audit_df=audit_df,
+                    gate_column="paper_quality_plots_allowed",
+                    extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+                ),
+            ) if cfg is not None else _audit_skip_metadata(
                 plot_name="quality_vs_posterior_samples",
                 audit_df=audit_df,
                 gate_column="paper_quality_plots_allowed",
@@ -1768,7 +1577,15 @@ def plot_quality_vs_posterior_samples(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_posterior_samples",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_posterior_samples",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_posterior_samples",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1781,7 +1598,16 @@ def plot_quality_vs_posterior_samples(
         quality_df,
         axis_kind="posterior_samples",
         ci_level=ci_level,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="quality_vs_posterior_samples",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "posterior_samples",
+                "ci_level": float(ci_level),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "quality_vs_posterior_samples",
             "axis_kind": "posterior_samples",
             "summary_plot": True,
@@ -1796,6 +1622,7 @@ def plot_quality_vs_posterior_samples_diagnostic(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
 ) -> None:
@@ -1813,7 +1640,15 @@ def plot_quality_vs_posterior_samples_diagnostic(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_posterior_samples_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_posterior_samples_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_posterior_samples_diagnostic",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1824,7 +1659,15 @@ def plot_quality_vs_posterior_samples_diagnostic(
         output_dir.plots / "quality_vs_posterior_samples_diagnostic",
         quality_df,
         axis_kind="posterior_samples",
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="quality_vs_posterior_samples_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "posterior_samples",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "quality_vs_posterior_samples_diagnostic",
             "axis_kind": "posterior_samples",
             "diagnostic_plot": True,
@@ -1838,6 +1681,7 @@ def plot_quality_vs_attempt_budget(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
     ci_level: float = 0.95,
@@ -1850,7 +1694,17 @@ def plot_quality_vs_attempt_budget(
     if true_params and not _paper_plot_allowed(audit_df, "paper_quality_plots_allowed"):
         write_plot_metadata(
             output_dir.plots / "quality_vs_attempt_budget",
-            metadata=_audit_skip_metadata(
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_attempt_budget",
+                output_dir=output_dir,
+                extra=_audit_skip_metadata(
+                    plot_name="quality_vs_attempt_budget",
+                    audit_df=audit_df,
+                    gate_column="paper_quality_plots_allowed",
+                    extra={"source_raw_files": [str(output_dir.data / "raw_results.csv")]},
+                ),
+            ) if cfg is not None else _audit_skip_metadata(
                 plot_name="quality_vs_attempt_budget",
                 audit_df=audit_df,
                 gate_column="paper_quality_plots_allowed",
@@ -1870,7 +1724,15 @@ def plot_quality_vs_attempt_budget(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_attempt_budget",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_attempt_budget",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_attempt_budget",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1883,7 +1745,16 @@ def plot_quality_vs_attempt_budget(
         quality_df,
         axis_kind="attempt_budget",
         ci_level=ci_level,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="quality_vs_attempt_budget",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "attempt_budget",
+                "ci_level": float(ci_level),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "quality_vs_attempt_budget",
             "axis_kind": "attempt_budget",
             "summary_plot": True,
@@ -1898,6 +1769,7 @@ def plot_quality_vs_attempt_budget_diagnostic(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
 ) -> None:
@@ -1915,7 +1787,15 @@ def plot_quality_vs_attempt_budget_diagnostic(
     if quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "quality_vs_attempt_budget_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="quality_vs_attempt_budget_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "quality_vs_attempt_budget_diagnostic",
                 "skip_reason": "missing_true_params_or_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1926,7 +1806,15 @@ def plot_quality_vs_attempt_budget_diagnostic(
         output_dir.plots / "quality_vs_attempt_budget_diagnostic",
         quality_df,
         axis_kind="attempt_budget",
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="quality_vs_attempt_budget_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "attempt_budget",
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "quality_vs_attempt_budget_diagnostic",
             "axis_kind": "attempt_budget",
             "diagnostic_plot": True,
@@ -1940,6 +1828,7 @@ def plot_progress_diagnostic(
     true_params: Dict[str, float],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
 ) -> None:
@@ -1963,7 +1852,15 @@ def plot_progress_diagnostic(
     if tolerance_df.empty and quality_df.empty:
         write_plot_metadata(
             output_dir.plots / "progress_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="progress_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_tolerance_and_quality_rows",
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "progress_diagnostic",
                 "skip_reason": "missing_tolerance_and_quality_rows",
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -1992,7 +1889,16 @@ def plot_progress_diagnostic(
         fig,
         output_dir.plots / "progress_diagnostic",
         data={col: export_df[col].tolist() for col in export_df.columns},
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="progress_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "has_tolerance_panel": bool(not tolerance_df.empty),
+                "has_wasserstein_panel": bool(not quality_df.empty),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "progress_diagnostic",
             "diagnostic_plot": True,
             "has_tolerance_panel": bool(not tolerance_df.empty),
@@ -2008,6 +1914,7 @@ def plot_time_to_target_summary(
     target_wasserstein: float,
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     ci_level: float = 0.95,
     min_particles_for_threshold: int = 1,
@@ -2020,7 +1927,20 @@ def plot_time_to_target_summary(
     if true_params and not _paper_plot_allowed(audit_df, "paper_threshold_plots_allowed"):
         write_plot_metadata(
             output_dir.plots / "time_to_target_summary",
-            metadata=_audit_skip_metadata(
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="time_to_target_summary",
+                output_dir=output_dir,
+                extra=_audit_skip_metadata(
+                    plot_name="time_to_target_summary",
+                    audit_df=audit_df,
+                    gate_column="paper_threshold_plots_allowed",
+                    extra={
+                        "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                        "target_wasserstein": float(target_wasserstein),
+                    },
+                ),
+            ) if cfg is not None else _audit_skip_metadata(
                 plot_name="time_to_target_summary",
                 audit_df=audit_df,
                 gate_column="paper_threshold_plots_allowed",
@@ -2043,7 +1963,16 @@ def plot_time_to_target_summary(
     if summary_df.empty:
         write_plot_metadata(
             output_dir.plots / "time_to_target_summary",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="time_to_target_summary",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_threshold_rows",
+                    "target_wasserstein": float(target_wasserstein),
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "time_to_target_summary",
                 "skip_reason": "missing_true_params_or_threshold_rows",
                 "target_wasserstein": float(target_wasserstein),
@@ -2057,7 +1986,18 @@ def plot_time_to_target_summary(
         summary_df,
         axis_kind="wall_time",
         include_replicates=False,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="time_to_target_summary",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "wall_time",
+                "target_wasserstein": float(target_wasserstein),
+                "ci_level": float(ci_level),
+                "min_particles_for_threshold": int(min_particles_for_threshold),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "time_to_target_summary",
             "axis_kind": "wall_time",
             "target_wasserstein": float(target_wasserstein),
@@ -2075,6 +2015,7 @@ def plot_time_to_target_diagnostic(
     target_wasserstein: float,
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     min_particles_for_threshold: int = 1,
 ) -> None:
@@ -2092,7 +2033,16 @@ def plot_time_to_target_diagnostic(
     if summary_df.empty:
         write_plot_metadata(
             output_dir.plots / "time_to_target_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="time_to_target_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_threshold_rows",
+                    "target_wasserstein": float(target_wasserstein),
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "time_to_target_diagnostic",
                 "skip_reason": "missing_true_params_or_threshold_rows",
                 "target_wasserstein": float(target_wasserstein),
@@ -2105,7 +2055,17 @@ def plot_time_to_target_diagnostic(
         summary_df,
         axis_kind="wall_time",
         include_replicates=True,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="time_to_target_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "wall_time",
+                "target_wasserstein": float(target_wasserstein),
+                "min_particles_for_threshold": int(min_particles_for_threshold),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "time_to_target_diagnostic",
             "axis_kind": "wall_time",
             "target_wasserstein": float(target_wasserstein),
@@ -2122,6 +2082,7 @@ def plot_attempts_to_target_summary(
     target_wasserstein: float,
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     ci_level: float = 0.95,
     min_particles_for_threshold: int = 1,
@@ -2134,7 +2095,20 @@ def plot_attempts_to_target_summary(
     if true_params and not _paper_plot_allowed(audit_df, "paper_threshold_plots_allowed"):
         write_plot_metadata(
             output_dir.plots / "attempts_to_target_summary",
-            metadata=_audit_skip_metadata(
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="attempts_to_target_summary",
+                output_dir=output_dir,
+                extra=_audit_skip_metadata(
+                    plot_name="attempts_to_target_summary",
+                    audit_df=audit_df,
+                    gate_column="paper_threshold_plots_allowed",
+                    extra={
+                        "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                        "target_wasserstein": float(target_wasserstein),
+                    },
+                ),
+            ) if cfg is not None else _audit_skip_metadata(
                 plot_name="attempts_to_target_summary",
                 audit_df=audit_df,
                 gate_column="paper_threshold_plots_allowed",
@@ -2157,7 +2131,16 @@ def plot_attempts_to_target_summary(
     if summary_df.empty:
         write_plot_metadata(
             output_dir.plots / "attempts_to_target_summary",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="attempts_to_target_summary",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_threshold_rows",
+                    "target_wasserstein": float(target_wasserstein),
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "attempts_to_target_summary",
                 "skip_reason": "missing_true_params_or_threshold_rows",
                 "target_wasserstein": float(target_wasserstein),
@@ -2171,7 +2154,18 @@ def plot_attempts_to_target_summary(
         summary_df,
         axis_kind="attempt_budget",
         include_replicates=False,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="attempts_to_target_summary",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "attempt_budget",
+                "target_wasserstein": float(target_wasserstein),
+                "ci_level": float(ci_level),
+                "min_particles_for_threshold": int(min_particles_for_threshold),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "attempts_to_target_summary",
             "axis_kind": "attempt_budget",
             "target_wasserstein": float(target_wasserstein),
@@ -2189,6 +2183,7 @@ def plot_attempts_to_target_diagnostic(
     target_wasserstein: float,
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
     min_particles_for_threshold: int = 1,
 ) -> None:
@@ -2206,7 +2201,16 @@ def plot_attempts_to_target_diagnostic(
     if summary_df.empty:
         write_plot_metadata(
             output_dir.plots / "attempts_to_target_diagnostic",
-            metadata={
+            metadata=benchmark_plot_metadata(
+                cfg or {},
+                plot_name="attempts_to_target_diagnostic",
+                output_dir=output_dir,
+                extra={
+                    "skip_reason": "missing_true_params_or_threshold_rows",
+                    "target_wasserstein": float(target_wasserstein),
+                    "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+                },
+            ) if cfg is not None else {
                 "plot_name": "attempts_to_target_diagnostic",
                 "skip_reason": "missing_true_params_or_threshold_rows",
                 "target_wasserstein": float(target_wasserstein),
@@ -2219,7 +2223,17 @@ def plot_attempts_to_target_diagnostic(
         summary_df,
         axis_kind="attempt_budget",
         include_replicates=True,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="attempts_to_target_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "axis_kind": "attempt_budget",
+                "target_wasserstein": float(target_wasserstein),
+                "min_particles_for_threshold": int(min_particles_for_threshold),
+                "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+            },
+        ) if cfg is not None else {
             "plot_name": "attempts_to_target_diagnostic",
             "axis_kind": "attempt_budget",
             "target_wasserstein": float(target_wasserstein),
@@ -2258,6 +2272,7 @@ def plot_corner(
     output_dir: OutputDir,
     true_params: Optional[Dict[str, float]] = None,
     *,
+    cfg: Dict[str, Any] | None = None,
     archive_size: int | None = None,
 ) -> None:
     """Corner plot for the final population."""
@@ -2277,7 +2292,17 @@ def plot_corner(
         fig,
         output_dir.plots / "corner",
         data=data,
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="corner",
+            output_dir=output_dir,
+            extra={
+                "sample_counts": {
+                    result.method: result.n_particles_used
+                    for result in final_state_results(records, archive_size=archive_size)
+                },
+            },
+        ) if cfg is not None else {
             "sample_counts": {
                 result.method: result.n_particles_used
                 for result in final_state_results(records, archive_size=archive_size)
@@ -2290,6 +2315,7 @@ def plot_tolerance_trajectory(
     records: List[ParticleRecord],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     true_params: Dict[str, float] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
@@ -2389,7 +2415,17 @@ def plot_tolerance_trajectory(
         fig,
         output_dir.plots / "tolerance_trajectory",
         data={col: export_df[col].tolist() for col in export_df.columns},
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="tolerance_trajectory",
+            output_dir=output_dir,
+            extra={
+                "missing_tolerance_methods": missing_methods,
+                "ci_level": float(ci_level),
+                "has_tolerance_panel": bool(not tolerance_summary.empty),
+                "has_wasserstein_panel": bool(not quality_summary.empty),
+            },
+        ) if cfg is not None else {
             "missing_tolerance_methods": missing_methods,
             "summary_plot": True,
             "ci_level": float(ci_level),
@@ -2403,6 +2439,7 @@ def plot_tolerance_trajectory_diagnostic(
     records: List[ParticleRecord],
     output_dir: OutputDir,
     *,
+    cfg: Dict[str, Any] | None = None,
     true_params: Dict[str, float] | None = None,
     archive_size: int | None = None,
     checkpoint_count: int = 8,
@@ -2449,7 +2486,16 @@ def plot_tolerance_trajectory_diagnostic(
         fig,
         output_dir.plots / "tolerance_trajectory_diagnostic",
         data={col: export_df[col].tolist() for col in export_df.columns},
-        metadata={
+        metadata=benchmark_plot_metadata(
+            cfg or {},
+            plot_name="tolerance_trajectory_diagnostic",
+            output_dir=output_dir,
+            extra={
+                "missing_tolerance_methods": missing_methods,
+                "has_tolerance_panel": bool(not trajectory_df.empty),
+                "has_wasserstein_panel": bool(not quality_df.empty),
+            },
+        ) if cfg is not None else {
             "missing_tolerance_methods": missing_methods,
             "diagnostic_plot": True,
             "has_tolerance_panel": bool(not trajectory_df.empty),
@@ -3489,7 +3535,7 @@ def plot_benchmark_diagnostics(
     if benchmark_cfg.get("name") == "lotka_volterra":
         _write_lotka_tol_init_diagnostic(records, cfg=cfg, output_dir=output_dir)
     if benchmark_cfg.get("name") == "gaussian_mean":
-        _write_gaussian_analytic_summary(
+        write_gaussian_analytic_summary(
             records,
             cfg=cfg,
             output_dir=output_dir,
@@ -3504,23 +3550,25 @@ def plot_benchmark_diagnostics(
     )
 
     if plots_cfg.get("posterior"):
-        plot_posterior(records, output_dir, archive_size=archive_size)
+        plot_posterior(records, output_dir, cfg=cfg, archive_size=archive_size)
     if plots_cfg.get("archive_evolution") and emit_paper:
-        plot_archive_evolution(records, output_dir)
+        plot_archive_evolution(records, output_dir, cfg=cfg)
     if plots_cfg.get("archive_evolution") and emit_diagnostics:
-        plot_archive_evolution_diagnostic(records, output_dir)
+        plot_archive_evolution_diagnostic(records, output_dir, cfg=cfg)
     if plots_cfg.get("corner"):
         plot_corner(
             records,
             param_names=_param_names(records),
             output_dir=output_dir,
             true_params=true_params,
+            cfg=cfg,
             archive_size=archive_size,
         )
     if plots_cfg.get("tolerance_trajectory") and emit_paper:
         plot_tolerance_trajectory(
             records,
             output_dir,
+            cfg=cfg,
             true_params=true_params,
             archive_size=archive_size,
             checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
@@ -3530,6 +3578,7 @@ def plot_benchmark_diagnostics(
         plot_tolerance_trajectory_diagnostic(
             records,
             output_dir,
+            cfg=cfg,
             true_params=true_params,
             archive_size=archive_size,
             checkpoint_count=len(_default_checkpoint_steps(records)) if _default_checkpoint_steps(records) else 8,
@@ -3542,6 +3591,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
                 ci_level=ci_level,
@@ -3551,6 +3601,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
                 ci_level=ci_level,
@@ -3560,6 +3611,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 ci_level=ci_level,
                 audit_df=audit_df,
@@ -3568,6 +3620,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 ci_level=ci_level,
                 audit_df=audit_df,
@@ -3577,6 +3630,7 @@ def plot_benchmark_diagnostics(
                 true_params=true_params,
                 target_wasserstein=target,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 ci_level=ci_level,
                 min_particles_for_threshold=min_particles_for_threshold,
@@ -3587,6 +3641,7 @@ def plot_benchmark_diagnostics(
                 true_params=true_params,
                 target_wasserstein=target,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 ci_level=ci_level,
                 min_particles_for_threshold=min_particles_for_threshold,
@@ -3597,6 +3652,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
             )
@@ -3604,6 +3660,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
                 audit_df=audit_df,
@@ -3612,6 +3669,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
             )
@@ -3619,6 +3677,7 @@ def plot_benchmark_diagnostics(
                 records,
                 true_params=true_params,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 checkpoint_count=checkpoint_count,
             )
@@ -3627,6 +3686,7 @@ def plot_benchmark_diagnostics(
                 true_params=true_params,
                 target_wasserstein=target,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 min_particles_for_threshold=min_particles_for_threshold,
             )
@@ -3635,11 +3695,11 @@ def plot_benchmark_diagnostics(
                 true_params=true_params,
                 target_wasserstein=target,
                 output_dir=output_dir,
+                cfg=cfg,
                 archive_size=archive_size,
                 min_particles_for_threshold=min_particles_for_threshold,
             )
-    _annotate_benchmark_plot_metadata(output_dir, cfg=cfg)
-
+ 
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -3648,56 +3708,6 @@ def plot_benchmark_diagnostics(
 def _read_csv(path: Path) -> List[Dict[str, str]]:
     with open(path, newline="") as f:
         return list(csv.DictReader(f))
-
-
-def _runtime_utilization_rows(records: List[ParticleRecord]) -> pd.DataFrame:
-    """Return per-replicate utilization-loss rows for runtime heterogeneity sweeps."""
-    rows: list[dict[str, object]] = []
-    idle_data = _compute_idle_fraction(records)
-    for method, by_replicate in sorted(idle_data.items()):
-        if "__sigma" not in method:
-            continue
-        try:
-            sigma = float(method.split("__sigma", 1)[1])
-        except ValueError:
-            continue
-        for replicate, value in sorted(by_replicate.items()):
-            rows.append(
-                {
-                    "sigma": sigma,
-                    "method": method,
-                    "base_method": base_method_name(method),
-                    "replicate": int(replicate),
-                    "measurement_method": "worker_idle",
-                    "utilization_loss_fraction": float(value),
-                }
-            )
-
-    barrier_df = barrier_overhead_fraction(records)
-    if not barrier_df.empty:
-        for row in barrier_df.itertuples(index=False):
-            method = str(row.method)
-            base_method = base_method_name(method)
-            if base_method not in {"abc_smc_baseline", "pyabc_smc"}:
-                continue
-            if "__sigma" not in method:
-                continue
-            try:
-                sigma = float(method.split("__sigma", 1)[1])
-            except ValueError:
-                continue
-            rows.append(
-                {
-                    "sigma": sigma,
-                    "method": method,
-                    "base_method": base_method,
-                    "replicate": int(row.replicate),
-                    "measurement_method": "barrier_overhead",
-                    "utilization_loss_fraction": float(row.barrier_overhead_fraction),
-                }
-            )
-
-    return pd.DataFrame(rows).sort_values(["sigma", "base_method", "replicate"]) if rows else pd.DataFrame()
 
 
 def plot_generation_timeline(

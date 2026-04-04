@@ -47,7 +47,10 @@ def _installed_packages() -> Dict[str, str]:
 
 
 def infer_experiment_role(cfg: Dict[str, Any]) -> str:
-    """Return the paper-facing role for an experiment config."""
+    """Return the paper-facing role for an experiment config.
+
+    Precedence: explicit ``paper.experiment_role`` overrides inferred defaults.
+    """
     paper_cfg = cfg.get("paper", {})
     explicit = paper_cfg.get("experiment_role")
     if isinstance(explicit, str) and explicit:
@@ -64,7 +67,10 @@ def infer_experiment_role(cfg: Dict[str, Any]) -> str:
 
 
 def infer_method_comparison_roles(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """Return the configured or inferred comparison role for each method."""
+    """Return the configured or inferred comparison role for each method.
+
+    Precedence: explicit ``paper.method_comparison_roles`` overrides inferred defaults.
+    """
     paper_cfg = cfg.get("paper", {})
     explicit = paper_cfg.get("method_comparison_roles")
     if isinstance(explicit, dict):
@@ -87,7 +93,10 @@ def infer_method_comparison_roles(cfg: Dict[str, Any]) -> Dict[str, str]:
 
 
 def infer_stop_policy_by_method(cfg: Dict[str, Any]) -> Dict[str, str]:
-    """Return the effective stop-policy semantics for each configured method."""
+    """Return the effective stop-policy semantics for each configured method.
+
+    Precedence: explicit ``paper.stop_policy_by_method`` overrides inferred defaults.
+    """
     paper_cfg = cfg.get("paper", {})
     explicit = paper_cfg.get("stop_policy_by_method")
     if isinstance(explicit, dict):
@@ -110,7 +119,10 @@ def infer_stop_policy_by_method(cfg: Dict[str, Any]) -> Dict[str, str]:
 
 
 def infer_stop_policy(cfg: Dict[str, Any]) -> str:
-    """Return the experiment-level stopping policy."""
+    """Return the experiment-level stopping policy.
+
+    Precedence: explicit ``paper.stop_policy`` overrides inferred defaults.
+    """
     paper_cfg = cfg.get("paper", {})
     explicit = paper_cfg.get("stop_policy")
     if isinstance(explicit, str) and explicit:

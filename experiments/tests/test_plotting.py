@@ -1073,6 +1073,31 @@ class TestIdleFractionPlot:
         assert {row["sigma"] for row in rows} == {"1.0", "2.0"}
         assert (output_dir.plots / "idle_fraction.pdf").exists()
 
+    def test_plot_idle_fraction_accepts_runtime_performance_summary_shape(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        summary_df = pd.DataFrame(
+            [
+                {
+                    "sigma": 1.0,
+                    "base_method": "async_propulate_abc",
+                    "replicate": 0,
+                    "utilization_loss_fraction": 0.2,
+                    "elapsed_wall_time_s": 1.0,
+                },
+                {
+                    "sigma": 1.0,
+                    "base_method": "async_propulate_abc",
+                    "replicate": 1,
+                    "utilization_loss_fraction": 0.4,
+                    "elapsed_wall_time_s": 1.2,
+                },
+            ]
+        )
+        plot_idle_fraction([], output_dir, summary_df=summary_df)
+        rows = _read_csv(output_dir.plots / "idle_fraction_data.csv")
+        assert rows
+        assert {row["measurement_method"] for row in rows} == {"worker_idle"}
+
     def test_plot_idle_fraction_clips_exported_confidence_intervals_to_unit_interval(self, tmp_path):
         output_dir = OutputDir(tmp_path, "test").ensure()
         records = _mixed_runtime_records_multi_sigma() + [
@@ -1162,6 +1187,29 @@ class TestIdleFractionComparisonPlot:
         rows = _read_csv(output_dir.plots / "idle_fraction_comparison_data.csv")
         assert {row["measurement_method"] for row in rows} == {"worker_idle", "barrier_overhead"}
 
+    def test_plot_idle_fraction_comparison_accepts_runtime_performance_summary_shape(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test").ensure()
+        summary_df = pd.DataFrame(
+            [
+                {
+                    "sigma": 1.0,
+                    "base_method": "async_propulate_abc",
+                    "replicate": 0,
+                    "utilization_loss_fraction": 0.2,
+                },
+                {
+                    "sigma": 2.0,
+                    "base_method": "abc_smc_baseline",
+                    "replicate": 0,
+                    "utilization_loss_fraction": 0.1,
+                },
+            ]
+        )
+        plot_idle_fraction_comparison([], output_dir, summary_df=summary_df)
+        rows = _read_csv(output_dir.plots / "idle_fraction_comparison_data.csv")
+        assert rows
+        assert {row["measurement_method"] for row in rows} == {"worker_idle"}
+
 
 class TestComputeIdleFraction:
     def test_returns_per_method_per_replicate(self):
@@ -1244,6 +1292,42 @@ class TestQualityBySigmaPlot:
         meta = json.loads((plots_dir / "quality_by_sigma_meta.json").read_text())
         assert "n_sigma_levels" in meta
         assert int(meta["n_sigma_levels"]) >= 1
+
+    def test_summary_df_path_records_fixed_walltime_metadata(self, tmp_path):
+        output_dir = OutputDir(tmp_path, "test_quality").ensure()
+        summary_df = pd.DataFrame(
+            [
+                {
+                    "sigma": 1.0,
+                    "base_method": "async_propulate_abc",
+                    "replicate": 0,
+                    "final_quality_wasserstein": 0.25,
+                },
+                {
+                    "sigma": 1.0,
+                    "base_method": "async_propulate_abc",
+                    "replicate": 1,
+                    "final_quality_wasserstein": 0.35,
+                },
+                {
+                    "sigma": 2.0,
+                    "base_method": "abc_smc_baseline",
+                    "replicate": 0,
+                    "final_quality_wasserstein": 0.45,
+                },
+            ]
+        )
+        cfg = {
+            "benchmark": {"name": "gaussian_mean", "true_mu": 0.0},
+            "inference": {"k": 5},
+        }
+        plot_quality_by_sigma([], cfg, output_dir, summary_df=summary_df)
+        meta = json.loads((output_dir.plots / "quality_by_sigma_meta.json").read_text())
+        assert meta["performance_metric"] == "quality_at_fixed_wallclock_budget"
+        assert meta["summary_source"] == "runtime_performance_summary.csv"
+        rows = _read_csv(output_dir.plots / "quality_by_sigma_data.csv")
+        assert rows
+        assert {row["base_method"] for row in rows} == {"async_propulate_abc", "abc_smc_baseline"}
 
     def test_unit_returns_pdf_without_quality_data(self, tmp_path):
         """plot_quality_by_sigma creates output even when quality curves are empty."""

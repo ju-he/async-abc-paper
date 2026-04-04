@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord
+from async_abc.reporting import runtime_performance_summary
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
@@ -145,85 +146,6 @@ def _compute_speedup_summary(records):
         axis=1,
     )
     return summary
-
-
-def _runtime_performance_summary(records, cfg: dict):
-    """Return one aggregate row per (sigma, base_method, replicate)."""
-    import pandas as pd
-
-    from async_abc.analysis import final_state_results, posterior_quality_curve
-    from async_abc.plotting.reporters import _compute_idle_fraction
-
-    benchmark_cfg = cfg.get("benchmark", {})
-    true_params = {}
-    for key, value in benchmark_cfg.items():
-        if key.startswith("true_"):
-            true_params[key.removeprefix("true_")] = float(value)
-
-    archive_size = cfg.get("inference", {}).get("k")
-    idle_map = _compute_idle_fraction(records)
-    rows = []
-    for tagged_method in sorted({record.method for record in records if "__sigma" in record.method}):
-        try:
-            sigma = float(tagged_method.split("__sigma", 1)[1])
-        except ValueError:
-            continue
-        base_method = tagged_method.split("__sigma", 1)[0]
-        method_records = [record for record in records if record.method == tagged_method]
-        for replicate in sorted({int(record.replicate) for record in method_records}):
-            subset = [record for record in method_records if int(record.replicate) == replicate]
-            if not subset:
-                continue
-            attempts = [
-                record for record in subset
-                if record.record_kind == "simulation_attempt"
-            ]
-            if not attempts:
-                attempts = subset
-            start_times = [float(record.sim_start_time) for record in attempts if record.sim_start_time is not None]
-            end_times = [float(record.sim_end_time) for record in attempts if record.sim_end_time is not None]
-            elapsed = (
-                float(max(end_times) - min(start_times))
-                if start_times and end_times and max(end_times) > min(start_times)
-                else max((float(record.wall_time) for record in attempts), default=0.0)
-            )
-            final_size = 0
-            for result in final_state_results(subset, archive_size=archive_size):
-                final_size = int(result.n_particles_used)
-                break
-            final_quality = float("nan")
-            if true_params:
-                quality_df = posterior_quality_curve(
-                    subset,
-                    true_params=true_params,
-                    axis_kind="wall_time",
-                    checkpoint_strategy="quantile",
-                    checkpoint_count=8,
-                    archive_size=archive_size,
-                )
-                if not quality_df.empty:
-                    ordered = quality_df.sort_values("axis_value")
-                    final_quality = float(ordered.iloc[-1]["wasserstein"])
-            rows.append(
-                {
-                    "sigma": sigma,
-                    "base_method": base_method,
-                    "method": tagged_method,
-                    "replicate": int(replicate),
-                    "elapsed_wall_time_s": float(elapsed),
-                    "total_attempts": int(len(attempts)),
-                    "final_posterior_size": int(final_size),
-                    "final_quality_wasserstein": final_quality,
-                    "throughput_sims_per_s": (
-                        float(len(attempts) / elapsed) if elapsed > 0 else float("nan")
-                    ),
-                    "utilization_loss_fraction": float(
-                        idle_map.get(tagged_method, {}).get(replicate, float("nan"))
-                    ),
-                }
-            )
-    return pd.DataFrame(rows).sort_values(["sigma", "base_method", "replicate"]).reset_index(drop=True) if rows else pd.DataFrame()
-
 
 def _finalize_sharded(cfg: dict, layout: ShardLayout, actual_num_shards: int) -> None:
     owner_id = f"{os.getenv('SLURM_JOB_ID', 'manual')}:{layout.shard_index}"
@@ -468,7 +390,7 @@ def main(argv: list[str] | None = None) -> None:
         write_timing_csv(output_dir.data / "timing.csv", name, experiment_elapsed, estimated, test_mode, run_mode)
         write_timing_comparison_csv(Path(args.output_dir))
 
-    runtime_summary_df = _runtime_performance_summary(all_records, cfg) if is_root_rank() else None
+    runtime_summary_df = runtime_performance_summary(all_records, cfg) if is_root_rank() else None
     if is_root_rank():
         runtime_summary_df.to_csv(output_dir.data / "runtime_performance_summary.csv", index=False)
         write_metadata(
