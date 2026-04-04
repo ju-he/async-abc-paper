@@ -785,17 +785,6 @@ def main(argv: list[str] | None = None) -> None:
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
 
-    if not args.extend and is_root_rank():
-        for n_workers in worker_counts:
-            for k in k_values:
-                _cleanup_combo_artifacts(
-                    output_dir,
-                    methods=list(cfg["methods"]),
-                    n_workers=int(n_workers),
-                    k=int(k),
-                    seeds=seeds,
-                )
-
     done = (
         _find_completed_scaling(output_dir, ["n_workers", "k", "base_method", "replicate"])
         if args.extend

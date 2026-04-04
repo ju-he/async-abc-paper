@@ -31,9 +31,9 @@ METHOD_REGISTRY: Dict[str, Callable] = {
 
 METHOD_EXECUTION_MODE: Dict[str, str] = {
     "async_propulate_abc": "all_ranks",
-    "pyabc_smc": "rank_parallel",
+    "pyabc_smc": "rank_zero",
     "rejection_abc": "rank_parallel",
-    "abc_smc_baseline": "rank_parallel",
+    "abc_smc_baseline": "rank_zero",
 }
 
 

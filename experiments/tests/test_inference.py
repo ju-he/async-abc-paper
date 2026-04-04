@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from async_abc.benchmarks.gaussian_mean import GaussianMean
-from async_abc.inference.method_registry import METHOD_REGISTRY, run_method
+from async_abc.inference.method_registry import METHOD_REGISTRY, method_execution_mode, run_method
 from async_abc.inference.propulate_abc import run_propulate_abc
 from async_abc.io.records import ParticleRecord
 from async_abc.utils.progress import MethodProgressReporter
@@ -1144,6 +1144,9 @@ class TestAbcSmcBaseline:
 
     def test_in_registry(self):
         assert "abc_smc_baseline" in METHOD_REGISTRY
+
+    def test_static_execution_mode_defaults_to_rank_zero(self):
+        assert method_execution_mode("abc_smc_baseline") == "rank_zero"
 
     def test_returns_particle_records(self, abc_smc_baseline_records_default):
         assert all(isinstance(record, ParticleRecord) for record in abc_smc_baseline_records_default)

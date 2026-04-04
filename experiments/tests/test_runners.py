@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -603,6 +604,54 @@ class TestScalingRunner:
         assert (data_dir / "throughput_summary_w1_k10.csv").exists()
         assert not (data_dir / "throughput_summary.csv").exists()
         assert not (data_dir / "raw_results.csv").exists()
+
+    def test_scaling_runner_does_not_preclean_combo_artifacts(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        cfg = test_helpers.make_fast_runner_config(
+            "scaling.json",
+            methods=[],
+            inference_overrides={"max_simulations": 10, "k": 10},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={"scaling_curve": False, "efficiency": False},
+            top_level_updates={
+                "scaling": {
+                    "worker_counts": [1],
+                    "test_worker_counts": [1],
+                    "k_values": [10],
+                    "test_k_values": [10],
+                    "wall_time_budgets_s": [0.05],
+                    "wall_time_limit_s": 0.05,
+                    "max_simulations_policy": {"min_total": 10, "per_worker": 10, "k_factor": 1},
+                }
+            },
+        )
+
+        cleanup_calls = []
+        monkeypatch.setattr(module, "configure_logging", lambda: None)
+        monkeypatch.setattr(module, "load_config", lambda *args, **kwargs: cfg)
+        monkeypatch.setattr(module, "is_root_rank", lambda: True)
+        monkeypatch.setattr(
+            module,
+            "make_benchmark",
+            lambda benchmark_cfg: types.SimpleNamespace(
+                simulate=lambda params, seed: 0.0,
+                limits={"x": (-1.0, 1.0)},
+            ),
+        )
+        monkeypatch.setattr(module, "_cleanup_combo_artifacts", lambda *args, **kwargs: cleanup_calls.append(1))
+
+        module.main(
+            [
+                "--config",
+                str(tmp_path / "scaling_no_preclean.json"),
+                "--output-dir",
+                str(tmp_path),
+                "--test",
+                "--skip-finalize",
+            ]
+        )
+
+        assert cleanup_calls == []
 
     def test_scaling_runner_writes_grid_plots(self, tmp_path):
         cfg = test_helpers.make_fast_runner_config(
