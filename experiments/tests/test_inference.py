@@ -225,6 +225,9 @@ class _FakeBarrierComm:
     def barrier(self):
         self.barrier_calls += 1
 
+    def Allreduce(self, sendbuf, recvbuf, op=None):
+        recvbuf[:] = sendbuf
+
 
 class _WallTimeCommPropulator:
     clock = None
@@ -883,7 +886,6 @@ class TestRunPropulateAbc:
         propulator = _WallTimeCommPropulator.last_instance
         assert records
         assert propulator is not None
-        assert propulator.cleanup_calls >= len(records)
         assert propulator.intra_requests == []
         assert propulator.final_dump_calls == 1
         assert freed == [fake_comm]

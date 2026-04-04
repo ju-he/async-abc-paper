@@ -779,6 +779,12 @@ def main(argv: list[str] | None = None) -> None:
     wall_time_limit_s = None if wall_time_limit_s in (None, "") else float(wall_time_limit_s)
     if not wall_time_budgets_s and wall_time_limit_s is not None:
         wall_time_budgets_s = [float(wall_time_limit_s)]
+    if test_mode and wall_time_limit_s is not None:
+        test_wall_limit = float(cfg["inference"].get("max_wall_time_s", 30.0))
+        wall_time_limit_s = min(wall_time_limit_s, test_wall_limit)
+        wall_time_budgets_s = [b for b in wall_time_budgets_s if b <= wall_time_limit_s]
+        if not wall_time_budgets_s:
+            wall_time_budgets_s = [wall_time_limit_s]
     max_simulations_policy = dict(scaling_cfg.get("max_simulations_policy", {}))
 
     n_replicates = cfg["execution"]["n_replicates"]

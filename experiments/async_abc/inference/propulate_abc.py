@@ -274,19 +274,32 @@ def _propulate_with_wall_time_limit(
 
     propulate_comm.barrier()
     # Drain remaining intra-island messages and wait for all outgoing sends.
-    # A single drain + Waitall deadlocks under high message volume (e.g.
-    # ablation with k=10) because MPI rendezvous-mode sends only complete
-    # when the receiver posts a matching recv.  Loop drain-and-test so each
-    # rank keeps consuming incoming messages while waiting for its own sends.
+    # ALL ranks must participate in the drain loop collectively.  If only ranks
+    # with pending sends loop (the previous approach), ranks whose send lists
+    # were already pruned escape to a barrier while senders still need them to
+    # post matching recvs — deadlocking under MPI rendezvous mode.
     intra_reqs = getattr(propulator, "intra_requests", None)
-    if intra_reqs:
-        from mpi4py import MPI as _MPI
-        while not _MPI.Request.Testall(intra_reqs):
-            propulator._receive_intra_island_individuals()
-        propulator.intra_requests.clear()
-        propulator.intra_buffers.clear()
-    else:
+    from mpi4py import MPI as _MPI
+
+    while True:
         propulator._receive_intra_island_individuals()
+        try:
+            sends_done = not intra_reqs or _MPI.Request.Testall(intra_reqs)
+        except TypeError:
+            sends_done = True
+        local_done = 1 if sends_done else 0
+        global_done = np.zeros(1, dtype=np.int32)
+        propulate_comm.Allreduce(
+            np.array([local_done], dtype=np.int32), global_done, op=_MPI.MIN,
+        )
+        if global_done[0]:
+            break
+
+    if intra_reqs:
+        propulator.intra_requests.clear()
+        buffers = getattr(propulator, "intra_buffers", None)
+        if buffers is not None:
+            buffers.clear()
     propulate_comm.barrier()
 
     island_comm = getattr(propulator, "island_comm", None)
