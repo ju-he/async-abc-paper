@@ -1294,6 +1294,7 @@ class TestQualityBySigmaPlot:
         assert int(meta["n_sigma_levels"]) >= 1
 
     def test_summary_df_path_records_fixed_walltime_metadata(self, tmp_path):
+        from async_abc.plotting.reporters import plot_quality_by_sigma
         output_dir = OutputDir(tmp_path, "test_quality").ensure()
         summary_df = pd.DataFrame(
             [

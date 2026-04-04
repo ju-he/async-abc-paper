@@ -136,7 +136,7 @@ class TestGaussianMeanRunner:
         assert "timestamp" in data
         assert "config" in data
         assert data["experiment_role"] == "validity"
-        assert data["stop_policy"] == "fixed_walltime"
+        assert data["stop_policy"] == "fixed_budget"
         assert data["method_comparison_roles"]["rejection_abc"] == "small_model_reference"
 
     def test_rerun_is_idempotent(self, gaussian_runner_artifact, tmp_path):

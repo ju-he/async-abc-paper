@@ -151,7 +151,7 @@ class TestRunAll:
             (run_all_gaussian["output_dir"] / "gaussian_mean" / "data" / "metadata.json").read_text()
         )
         assert meta["experiment_role"] == "validity"
-        assert meta["stop_policy"] == "fixed_walltime"
+        assert meta["stop_policy"] == "fixed_budget"
         assert meta["method_comparison_roles"]["rejection_abc"] == "small_model_reference"
 
     def test_run_all_help_flag(self):

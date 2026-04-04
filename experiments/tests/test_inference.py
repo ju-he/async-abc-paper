@@ -981,7 +981,7 @@ class TestPyabcWrapperFixes:
             wrapper_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1418,7 +1418,7 @@ class TestPyabcWrapperMpiBackend:
             wrapper_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1462,7 +1462,7 @@ class TestPyabcWrapperMpiBackend:
             wrapper_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1492,7 +1492,7 @@ class TestPyabcWrapperMpiBackend:
             wrapper_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1524,7 +1524,7 @@ class TestPyabcWrapperMpiBackend:
             wrapper_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((n_procs, parallel_backend, cfuture_executor is executor)),
+                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1580,7 +1580,7 @@ class TestAbcSmcBaselineMpiBackend:
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1631,7 +1631,7 @@ class TestAbcSmcBaselineMpiBackend:
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1661,7 +1661,7 @@ class TestAbcSmcBaselineMpiBackend:
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1698,7 +1698,7 @@ class TestAbcSmcBaselineMpiBackend:
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((n_procs, parallel_backend, cfuture_executor is executor)),
+                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
