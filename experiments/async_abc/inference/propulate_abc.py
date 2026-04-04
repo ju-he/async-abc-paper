@@ -246,17 +246,20 @@ def _propulate_with_wall_time_limit(
         propulator.generation += 1
 
     propulate_comm.barrier()
-    propulator._receive_intra_island_individuals()
-    # Wait for all intra-island nonblocking sends to complete before the next
-    # barrier.  _receive_intra_island_individuals() has already posted matching
-    # receives, so Waitall cannot deadlock.  This prevents the communicator from
-    # being freed while sends are still in flight (ParaStation pscom assertions).
+    # Drain remaining intra-island messages and wait for all outgoing sends.
+    # A single drain + Waitall deadlocks under high message volume (e.g.
+    # ablation with k=10) because MPI rendezvous-mode sends only complete
+    # when the receiver posts a matching recv.  Loop drain-and-test so each
+    # rank keeps consuming incoming messages while waiting for its own sends.
     intra_reqs = getattr(propulator, "intra_requests", None)
     if intra_reqs:
         from mpi4py import MPI as _MPI
-        _MPI.Request.Waitall(intra_reqs)
+        while not _MPI.Request.Testall(intra_reqs):
+            propulator._receive_intra_island_individuals()
         propulator.intra_requests.clear()
         propulator.intra_buffers.clear()
+    else:
+        propulator._receive_intra_island_individuals()
     propulate_comm.barrier()
 
     island_comm = getattr(propulator, "island_comm", None)
