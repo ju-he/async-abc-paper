@@ -15,6 +15,7 @@ import json
 import logging
 import math
 import random
+import shutil
 import time
 from contextlib import contextmanager
 from typing import Callable, Dict, List
@@ -23,7 +24,7 @@ import numpy as np
 
 from ..io.paths import OutputDir
 from ..io.records import ParticleRecord
-from ..utils.mpi import get_rank
+from ..utils.mpi import get_rank, is_root_rank
 
 Propulator = None
 ABCPMC = None
@@ -190,6 +191,20 @@ def _resolve_max_wall_time_s(inference_cfg: Dict) -> float | None:
     if max_wall_time_s in (None, ""):
         return None
     return float(max_wall_time_s)
+
+
+def _prepare_checkpoint_dir(checkpoint_dir, *, inference_cfg: Dict) -> None:
+    """Reset stale checkpoints for test runs before Propulate starts."""
+    if bool(inference_cfg.get("test_mode", False)) and is_root_rank() and checkpoint_dir.exists():
+        shutil.rmtree(checkpoint_dir)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        from mpi4py import MPI as _MPI
+
+        if _MPI.COMM_WORLD.Get_size() > 1:
+            _MPI.COMM_WORLD.Barrier()
+    except Exception:
+        pass
 
 
 
@@ -371,7 +386,7 @@ def run_propulate_abc(
     _tag = inference_cfg.get("_checkpoint_tag", "")
     _tag_suffix = f"__{_tag}" if _tag else ""
     checkpoint_dir = output_dir.logs / f"propulate_rep{replicate}_seed{seed}{_tag_suffix}"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    _prepare_checkpoint_dir(checkpoint_dir, inference_cfg=inference_cfg)
 
     propulate_comm = _make_propulate_comm()
     propulator_kwargs = {}

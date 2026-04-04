@@ -257,6 +257,14 @@ class TestSensitivityRunner:
         assert tolerance_by_name["sensitivity_tol_init_multiplier=0.5"] == {2.5}
         assert tolerance_by_name["sensitivity_tol_init_multiplier=2.0"] == {10.0}
 
+    def test_sensitivity_gandk_uses_sensitivity_shard_finalizer(self):
+        from async_abc.utils.shard_finalizers import (
+            _FINALIZER_REGISTRY,
+            finalize_sensitivity_experiment,
+        )
+
+        assert _FINALIZER_REGISTRY["sensitivity_gandk"] is finalize_sensitivity_experiment
+
     def test_small_mode_uses_small_grid_without_test_collapse(self, tmp_path):
         cfg = test_helpers.make_fast_runner_config(
             "sensitivity.json",
@@ -609,7 +617,7 @@ class TestScalingRunner:
         module = test_helpers.import_runner_module("scaling_runner.py")
         cfg = test_helpers.make_fast_runner_config(
             "scaling.json",
-            methods=[],
+            methods=["rejection_abc"],
             inference_overrides={"max_simulations": 10, "k": 10},
             execution_overrides={"n_replicates": 1, "base_seed": 1},
             plots={"scaling_curve": False, "efficiency": False},
@@ -652,6 +660,63 @@ class TestScalingRunner:
         )
 
         assert cleanup_calls == []
+
+    def test_scaling_runner_test_mode_honors_explicit_n_workers(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        cfg = test_helpers.make_fast_runner_config(
+            "scaling.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 10, "k": 10},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={"scaling_curve": False, "efficiency": False},
+            top_level_updates={
+                "scaling": {
+                    "worker_counts": [1, 4, 48],
+                    "test_worker_counts": [1, 4, 48],
+                    "k_values": [10],
+                    "test_k_values": [10],
+                    "wall_time_budgets_s": [0.05],
+                    "wall_time_limit_s": 0.05,
+                    "max_simulations_policy": {"min_total": 10, "per_worker": 10, "k_factor": 1},
+                }
+            },
+        )
+
+        seen_worker_counts = []
+        monkeypatch.setattr(module, "configure_logging", lambda: None)
+        monkeypatch.setattr(module, "load_config", lambda *args, **kwargs: cfg)
+        monkeypatch.setattr(module, "is_root_rank", lambda: True)
+        monkeypatch.setattr(
+            module,
+            "make_benchmark",
+            lambda benchmark_cfg: types.SimpleNamespace(
+                simulate=lambda params, seed: 0.0,
+                limits={"x": (-1.0, 1.0)},
+            ),
+        )
+        monkeypatch.setattr(
+            module,
+            "run_method_distributed",
+            lambda name, simulate_fn, limits, inference_cfg, output_dir, replicate, seed: (
+                seen_worker_counts.append(int(inference_cfg["n_workers"])) or []
+            ),
+        )
+
+        module.main(
+            [
+                "--config",
+                str(tmp_path / "scaling_filter_workers.json"),
+                "--output-dir",
+                str(tmp_path),
+                "--test",
+                "--skip-finalize",
+                "--n-workers",
+                "48",
+            ]
+        )
+
+        assert seen_worker_counts
+        assert set(seen_worker_counts) == {48}
 
     def test_scaling_runner_writes_grid_plots(self, tmp_path):
         cfg = test_helpers.make_fast_runner_config(

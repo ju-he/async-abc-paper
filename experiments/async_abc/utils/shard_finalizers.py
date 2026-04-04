@@ -525,6 +525,7 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "lotka_volterra": finalize_benchmark_experiment,
     "cellular_potts": finalize_benchmark_experiment,
     "sensitivity": finalize_sensitivity_experiment,
+    "sensitivity_gandk": finalize_sensitivity_experiment,
     "ablation": finalize_ablation_experiment,
     "straggler": finalize_straggler_experiment,
     "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,

@@ -146,6 +146,15 @@ class _CapturingPropulator(_FakePropulator):
         super().__init__(**kwargs)
 
 
+class _CheckpointInspectingPropulator(_FakePropulator):
+    saw_stale_marker = None
+
+    def __init__(self, **kwargs):
+        checkpoint_path = kwargs["checkpoint_path"]
+        type(self).saw_stale_marker = (checkpoint_path / "stale.txt").exists()
+        super().__init__(**kwargs)
+
+
 class _FakeNoEvaltimePropulator(_FakePropulator):
     def propulate(self, **kwargs):
         self.population = []
@@ -811,6 +820,35 @@ class TestRunPropulateAbc:
         assert _CapturingPropulator.last_kwargs["island_comm"] is fake_comm
         assert _CapturingPropulator.last_kwargs["propulate_comm"] is fake_comm
         assert freed == [fake_comm]
+
+    def test_test_mode_clears_stale_propulate_checkpoint(self, tmp_path):
+        import async_abc.inference.propulate_abc as mod
+        from async_abc.io.paths import OutputDir
+
+        original = (mod.Propulator, mod.ABCPMC)
+        _CheckpointInspectingPropulator.saw_stale_marker = None
+        mod.Propulator = _CheckpointInspectingPropulator
+        mod.ABCPMC = _FakeABCPMC
+        try:
+            bm = _gaussian_bm()
+            od = OutputDir(tmp_path, "propulate_checkpoint_cleanup").ensure()
+            checkpoint_dir = od.logs / "propulate_rep0_seed29"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            (checkpoint_dir / "stale.txt").write_text("stale")
+
+            records = run_propulate_abc(
+                bm.simulate,
+                bm.limits,
+                {**_test_inference_cfg(), "test_mode": True},
+                od,
+                replicate=0,
+                seed=29,
+            )
+        finally:
+            mod.Propulator, mod.ABCPMC = original
+
+        assert records
+        assert _CheckpointInspectingPropulator.saw_stale_marker is False
 
     def test_wall_time_parallel_propulate_cleans_up_intra_island_sends(self, tmp_path, monkeypatch):
         import async_abc.inference.propulate_abc as mod

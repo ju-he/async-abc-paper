@@ -762,7 +762,7 @@ def main(argv: list[str] | None = None) -> None:
     worker_counts = list(scaling_cfg.get("worker_counts", [cfg["inference"].get("n_workers", 1)]))
     if test_mode:
         worker_counts = list(scaling_cfg.get("test_worker_counts", worker_counts))
-    elif args.n_workers is not None:
+    if args.n_workers is not None:
         worker_counts = [int(args.n_workers)]
 
     k_values = list(scaling_cfg.get("k_values", [cfg["inference"].get("k", 100)]))
