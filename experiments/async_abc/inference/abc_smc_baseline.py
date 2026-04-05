@@ -299,32 +299,42 @@ def run_abc_smc_baseline(
                 "Install it with: pip install mpi4py"
             ) from exc
 
+        result: List[ParticleRecord] = []
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-            if executor is None:
-                return []
-            tracker = _FutureTracker(executor)
-            sampler = build_pyabc_sampler(
-                n_procs,
-                parallel_backend,
-                cfuture_executor=tracker,
-            )
-            result = _run_abc_smc_baseline_with_sampler(
-                sampler=sampler,
-                simulate_fn=simulate_fn,
-                limits=limits,
-                max_sims=max_sims,
-                k=k,
-                tol_init=tol_init,
-                n_generations=n_generations,
-                output_dir=output_dir,
-                replicate=replicate,
-                seed=seed,
-                checkpoint_tag=checkpoint_tag,
-                max_wall_time_s=max_wall_time_s,
-                progress=progress,
-            )
-            tracker.drain()
-            return result
+            if executor is not None:
+                tracker = _FutureTracker(executor)
+                sampler = build_pyabc_sampler(
+                    n_procs,
+                    parallel_backend,
+                    cfuture_executor=tracker,
+                )
+                result = _run_abc_smc_baseline_with_sampler(
+                    sampler=sampler,
+                    simulate_fn=simulate_fn,
+                    limits=limits,
+                    max_sims=max_sims,
+                    k=k,
+                    tol_init=tol_init,
+                    n_generations=n_generations,
+                    output_dir=output_dir,
+                    replicate=replicate,
+                    seed=seed,
+                    checkpoint_tag=checkpoint_tag,
+                    max_wall_time_s=max_wall_time_s,
+                    progress=progress,
+                )
+                tracker.drain()
+            # Workers (executor is None) fall through here without returning,
+            # so that all ranks exit the with-block together.
+        # All 48 ranks have now fully exited MPICommExecutor (root completed
+        # executor.shutdown()+Disconnect; workers completed server_stop+Disconnect).
+        # Barrier before returning: prevents workers from racing ahead to
+        # COMM_WORLD collectives (allgather in run_method_distributed) while
+        # root is still tearing down the inter-communicator inside __exit__,
+        # which deadlocks ParaStation MPI.
+        if MPI.COMM_WORLD.Get_size() > 1:
+            MPI.COMM_WORLD.Barrier()
+        return result
 
     sampler = build_pyabc_sampler(n_procs, parallel_backend)
     return _run_abc_smc_baseline_with_sampler(

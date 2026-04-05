@@ -1,5 +1,17 @@
 # Previous Bug Fixes
 
+## 2026-04-05: 48-worker hang after abc_smc_baseline finishes (inter-comm teardown race)
+
+**Symptom:** 48-worker scaling job hangs indefinitely after all 48 ranks log `abc_smc_baseline rep=0 status=finish` at ~12.9s. No output from any rank thereafter.
+
+**Root cause:** In `run_abc_smc_baseline`, workers (ranks 1–47) returned `[]` from **inside** the `with MPICommExecutor(COMM_WORLD, root=0)` block. Workers' `__exit__` is a no-op (executor=None), so workers exited immediately and called `allgather(COMM_WORLD)` in `run_method_distributed`. But root was still inside `MPICommExecutor.__exit__` doing `executor.shutdown(wait=True)` → `inter_comm.Disconnect()`. On ParaStation MPI, workers calling `COMM_WORLD.allgather()` while root holds the inter-communicator in `Disconnect()` causes a deadlock.
+
+**Fix:** Restructured the MPI path so workers do **not** `return []` from inside the `with` block — they fall through instead. Added a `COMM_WORLD.Barrier()` after the `with` block exits, ensuring all 48 ranks have fully released the inter-communicator before any rank proceeds to `COMM_WORLD.allgather()` in `run_method_distributed`.
+
+**Files:** `experiments/async_abc/inference/abc_smc_baseline.py` (`run_abc_smc_baseline`, mpi parallel_backend path)
+
+
+
 ## 2026-04-05: 48-worker scaling job hangs at abc_smc_baseline start
 
 **Symptom:** 48-worker scaling job hangs after `async_propulate_abc` completes. All 47 non-root ranks print `abc_smc_baseline status=start` but rank 0 never does. No error messages.
