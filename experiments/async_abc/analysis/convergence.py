@@ -146,8 +146,19 @@ def posterior_quality_curve(
     *,
     archive_size: int | None = None,
     n_projections: int = 50,
+    max_eval_points: int | None = 500,
 ) -> pd.DataFrame:
-    """Compute posterior quality over observable states for a chosen axis."""
+    """Compute posterior quality over observable states for a chosen axis.
+
+    Parameters
+    ----------
+    max_eval_points:
+        Cap the number of evaluation indices in ``_async_archive_rows`` to
+        avoid O(n^2) blow-up when the record count is large (e.g. 48 k records
+        from a 48-worker async run).  Evaluation indices are spread uniformly
+        across the record range so the quality curve retains its shape.  Set to
+        ``None`` to evaluate at every record (original behaviour).
+    """
     if not true_params:
         return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
     frame = _prepare_quality_frame(records, true_params)
@@ -165,6 +176,7 @@ def posterior_quality_curve(
                 axis_kind=axis_kind,
                 archive_size=archive_size,
                 n_projections=n_projections,
+                max_eval_points=max_eval_points,
             )
         )
 
@@ -337,6 +349,7 @@ def _observable_quality_rows(
     axis_kind: str,
     archive_size: int | None,
     n_projections: int,
+    max_eval_points: int | None = 500,
 ) -> list[dict[str, object]]:
     method = base_method_name(str(group["method"].iloc[0]))
     if method == "async_propulate_abc":
@@ -346,6 +359,7 @@ def _observable_quality_rows(
             axis_kind=axis_kind,
             archive_size=archive_size,
             n_projections=n_projections,
+            max_eval_points=max_eval_points,
         )
     if method in _SYNC_METHODS:
         return _sync_generation_rows(
@@ -376,6 +390,7 @@ def _async_archive_rows(
     axis_kind: str,
     archive_size: int | None,
     n_projections: int,
+    max_eval_points: int | None = 500,
 ) -> list[dict[str, object]]:
     """Reconstruct the archive at each simulation event for an async method.
 
@@ -384,6 +399,11 @@ def _async_archive_rows(
     is optionally truncated to *archive_size* lowest-loss particles.
 
     Each checkpoint row has ``state_kind='archive_reconstruction'``.
+
+    When *max_eval_points* is set and the record count exceeds it, evaluation
+    indices are spread uniformly across the full range (always including the
+    last record) so the quality curve retains its shape while keeping runtime
+    linear in *max_eval_points* instead of quadratic in the record count.
     """
     ordered = group.sort_values(["wall_time", "sim_end_time", "step"]).reset_index(drop=True).copy()
     if ordered["attempt_count"].isna().all():
@@ -401,7 +421,15 @@ def _async_archive_rows(
     if ordered["tolerance"].notna().sum() == 0:
         return rows
 
-    for idx in range(len(ordered)):
+    n_records = len(ordered)
+    if max_eval_points is not None and n_records > max_eval_points > 0:
+        eval_indices = sorted(
+            {int(round(x)) for x in np.linspace(0, n_records - 1, num=max_eval_points)}
+        )
+    else:
+        eval_indices = list(range(n_records))
+
+    for idx in eval_indices:
         prefix = ordered.iloc[: idx + 1].copy()
         observed = prefix.loc[prefix["tolerance"].notna()].copy()
         if observed.empty:
