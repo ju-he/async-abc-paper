@@ -9,12 +9,18 @@ jobs so low-rank runs do not waste full-node allocations on systems without
 partial-node scheduling. Each packed job launches one ``srun --exclusive`` per
 worker count and lets them run concurrently on the same node.
 
-Wall-time limits are derived from a previous matching-mode timing output:
+SBATCH limits are sized from the number of scaling combinations bundled into one
+job and the per-combination wall cap:
 
-    base_time(N=1) = active_elapsed × (full_sims × full_reps) / (active_sims × active_reps)
-    time_limit(N)  = clamp(base_time(N=1) / N × safety, min=15 min, max=24 h)
+    workload_count = len(k_values) × len(methods) × n_replicates
+    time_limit     = clamp(
+        safety × workload_count × effective_wall_time_limit_s + finalize_slack_s,
+        min=15 min,
+        max=24 h,
+    )
 
-This means larger N (more workers) automatically get shorter time limits.
+In test mode, the submitter uses the same effective per-run wall cap as the
+runner, i.e. ``min(scaling.wall_time_limit_s, inference.max_wall_time_s)``.
 
 Usage
 -----
@@ -98,6 +104,28 @@ def _job_time_hours(
         float(safety) * int(workload_count) * float(wall_time_limit_s) + float(finalize_slack_s)
     ) / 3600.0
     return max(float(min_time), min(float(max_time), time_hours))
+
+
+def _effective_wall_time_limit_s(
+    scaling_cfg: dict,
+    inference_cfg: dict,
+    *,
+    test_mode: bool,
+) -> float:
+    """Return the per-combination wall cap used for SLURM time budgeting."""
+    wall_time_limit_s = scaling_cfg.get("wall_time_limit_s")
+    wall_time_budgets_s = [
+        float(value) for value in scaling_cfg.get("wall_time_budgets_s", [])
+        if float(value) > 0
+    ]
+    if wall_time_limit_s in (None, "") and wall_time_budgets_s:
+        wall_time_limit_s = max(wall_time_budgets_s)
+    wall_time_limit_s = float(wall_time_limit_s or 0.0)
+    if test_mode and wall_time_limit_s > 0.0:
+        test_wall_limit = inference_cfg.get("max_wall_time_s")
+        if test_wall_limit not in (None, ""):
+            wall_time_limit_s = min(wall_time_limit_s, float(test_wall_limit))
+    return wall_time_limit_s
 
 
 def _pack_small_worker_counts(worker_counts: list[int], *, capacity: int) -> tuple[list[list[int]], list[int]]:
@@ -317,11 +345,11 @@ def main() -> None:
         k_values = list(scaling_cfg.get("test_k_values", k_values))
     methods = list(active_cfg.get("methods", []))
     n_replicates = int(active_cfg["execution"]["n_replicates"])
-    wall_time_limit_s = scaling_cfg.get("wall_time_limit_s")
-    wall_time_budgets_s = [float(value) for value in scaling_cfg.get("wall_time_budgets_s", []) if float(value) > 0]
-    if wall_time_limit_s in (None, "") and wall_time_budgets_s:
-        wall_time_limit_s = max(wall_time_budgets_s)
-    wall_time_limit_s = float(wall_time_limit_s or 0.0)
+    wall_time_limit_s = _effective_wall_time_limit_s(
+        scaling_cfg,
+        active_cfg["inference"],
+        test_mode=args.test,
+    )
     finalize_slack_s = max(300.0, 0.1 * wall_time_limit_s * max(1, len(k_values)))
     workload_count = max(1, len(k_values) * max(1, len(methods)) * n_replicates)
 
