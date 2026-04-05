@@ -50,9 +50,19 @@ def _population_records(records):
     ]
 
 
+def _make_fake_executor():
+    """Return a minimal executor stub that satisfies shutdown() calls."""
+    return types.SimpleNamespace(shutdown=lambda **kwargs: None)
+
+
 def _install_fake_mpi_executor(monkeypatch, *, executor):
     fake_mpi = types.ModuleType("mpi4py")
-    fake_mpi.MPI = types.SimpleNamespace(COMM_WORLD=object())
+    fake_mpi.MPI = types.SimpleNamespace(
+        COMM_WORLD=types.SimpleNamespace(
+            Get_size=lambda: 1,
+            Barrier=lambda: None,
+        )
+    )
 
     fake_futures = types.ModuleType("mpi4py.futures")
 
@@ -1574,13 +1584,13 @@ class TestAbcSmcBaselineMpiBackend:
         from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
 
         calls = []
-        executor = object()
+        executor = _make_fake_executor()
         _install_fake_mpi_executor(monkeypatch, executor=executor)
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+                calls.append((parallel_backend, cfuture_executor is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1625,13 +1635,13 @@ class TestAbcSmcBaselineMpiBackend:
         from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
 
         calls = []
-        executor = object()
+        executor = _make_fake_executor()
         _install_fake_mpi_executor(monkeypatch, executor=executor)
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+                calls.append((parallel_backend, cfuture_executor is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1655,13 +1665,13 @@ class TestAbcSmcBaselineMpiBackend:
         from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
 
         calls = []
-        executor = object()
+        executor = _make_fake_executor()
         _install_fake_mpi_executor(monkeypatch, executor=executor)
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+                calls.append((parallel_backend, cfuture_executor is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1692,13 +1702,13 @@ class TestAbcSmcBaselineMpiBackend:
         from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
 
         calls = []
-        executor = object()
+        executor = _make_fake_executor()
         _install_fake_mpi_executor(monkeypatch, executor=executor)
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
             lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+                calls.append((n_procs, parallel_backend, cfuture_executor is executor)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1781,3 +1791,38 @@ class TestMpiIntegration:
         data = json.loads(output_file.read_text())
         assert data["n_records"] > 0
         assert data["method"] == "pyabc_smc"
+
+    def test_abc_smc_baseline_shutdown_does_not_hang(self, tmp_path):
+        """Verify run_abc_smc_baseline with mpi backend shuts down quickly.
+
+        With 2 ranks (1 worker), pyABC's ConcurrentFutureSampler submits up to
+        client_max_jobs=200 concurrent futures but only 1 can run at a time.
+        After abc.run() returns, ~190+ futures are still queued.  The old
+        _FutureTracker.drain() path would block in concurrent.futures.wait()
+        until all of them completed (minutes).  The fix — executor.shutdown(
+        wait=True, cancel_futures=True) — cancels queued futures immediately
+        and the test must finish well within the 60s timeout.
+        """
+        helper = Path(__file__).parent / "mpi_abc_smc_baseline_helper.py"
+        output_file = tmp_path / "abc_smc_baseline_result.json"
+        result = subprocess.run(
+            [
+                "mpirun",
+                "-n",
+                "2",
+                "--stdin",
+                "none",
+                sys.executable,
+                str(helper),
+                str(output_file),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        data = json.loads(output_file.read_text())
+        assert data["n_records"] > 0
+        assert data["method"] == "abc_smc_baseline"
+        assert data["barrier_reached"], "COMM_WORLD barrier was not reached — ranks may have diverged"

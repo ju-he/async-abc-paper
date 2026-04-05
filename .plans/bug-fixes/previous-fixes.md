@@ -1,12 +1,22 @@
 # Previous Bug Fixes
 
-## 2026-04-05: 48-worker hang after abc_smc_baseline finishes (inter-comm teardown race)
+## 2026-04-05/06: 48-worker hang in abc_smc_baseline MPI path (two bugs)
 
-**Symptom:** 48-worker scaling job hangs indefinitely after all 48 ranks log `abc_smc_baseline rep=0 status=finish` at ~12.9s. No output from any rank thereafter.
+### Bug 1: inter-comm teardown race (fixed first)
 
-**Root cause:** In `run_abc_smc_baseline`, workers (ranks 1–47) returned `[]` from **inside** the `with MPICommExecutor(COMM_WORLD, root=0)` block. Workers' `__exit__` is a no-op (executor=None), so workers exited immediately and called `allgather(COMM_WORLD)` in `run_method_distributed`. But root was still inside `MPICommExecutor.__exit__` doing `executor.shutdown(wait=True)` → `inter_comm.Disconnect()`. On ParaStation MPI, workers calling `COMM_WORLD.allgather()` while root holds the inter-communicator in `Disconnect()` causes a deadlock.
+**Symptom:** All 48 ranks log `abc_smc_baseline rep=0 status=finish` at ~12.9s, then hang indefinitely.
 
-**Fix:** Restructured the MPI path so workers do **not** `return []` from inside the `with` block — they fall through instead. Added a `COMM_WORLD.Barrier()` after the `with` block exits, ensuring all 48 ranks have fully released the inter-communicator before any rank proceeds to `COMM_WORLD.allgather()` in `run_method_distributed`.
+**Root cause:** Workers returned `[]` from **inside** the `with MPICommExecutor(COMM_WORLD, root=0)` block. Their `__exit__` is a no-op (executor=None), so workers immediately called `allgather(COMM_WORLD)` in `run_method_distributed`. But root was still inside `MPICommExecutor.__exit__` doing `inter_comm.Disconnect()`. On ParaStation MPI, workers calling `COMM_WORLD.allgather()` while root holds the inter-communicator in `Disconnect()` deadlocks.
+
+**Fix:** Restructured so workers fall through the `with` block instead of `return []`. Added `COMM_WORLD.Barrier()` after the block to sync all 48 ranks before any `COMM_WORLD` collective.
+
+### Bug 2: tracker.drain() hang (fixed second)
+
+**Symptom:** Root logs `abc_smc_baseline rep=0 status=finish` at ~2.0s, then hangs for 5+ minutes. Workers never log finish.
+
+**Root cause:** `_FutureTracker.drain()` (called after `abc.run()` returns) blocked indefinitely in `concurrent.futures.wait(pending)`. pyABC's `ConcurrentFutureSampler` keeps up to 200 concurrent futures (`client_max_jobs=200`) across 47 workers, leaving O(100+) queued-but-not-yet-sent futures after sampling finishes. These were being processed by workers one by one before shutdown, taking many minutes on this cluster's filesystem/MPI stack.
+
+**Fix:** Removed `_FutureTracker` entirely. After `_run_abc_smc_baseline_with_sampler` returns, call `executor.shutdown(wait=True, cancel_futures=True)` directly. This cancels all queued futures immediately (via `pool.cancel()`), then waits only for the ≤n_workers futures actually in-flight. Shutdown is fast.
 
 **Files:** `experiments/async_abc/inference/abc_smc_baseline.py` (`run_abc_smc_baseline`, mpi parallel_backend path)
 
