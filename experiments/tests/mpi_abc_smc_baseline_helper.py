@@ -1,4 +1,4 @@
-"""MPI integration helper for abc_smc_baseline shutdown hang regression test.
+"""MPI integration helper for abc_smc_baseline wall-time MPI teardown tests.
 
 Run via:
     mpirun -n 2 <python> <this_file> <output_json_path>
@@ -6,12 +6,10 @@ Run via:
 Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
 
-The test exercises the cancel_futures=True shutdown path.  With 2 ranks
-(1 worker), pyABC's ConcurrentFutureSampler submits up to client_max_jobs=200
-concurrent futures but only 1 runs at a time.  After abc.run() returns, ~190+
-tasks are still queued in the MPICommExecutor task queue.  The old
-_FutureTracker.drain() would wait for all of them; executor.shutdown(
-cancel_futures=True) cancels them immediately.
+The test exercises the bounded-backlog MPI path. With 2 ranks (1 worker),
+pyABC's ConcurrentFutureSampler is configured with client_max_jobs equal to the
+worker count so wall-time stopping does not leave a deep speculative queue
+behind. The run still uses the MPI backend and must tear down cleanly.
 
 On success rank 0 writes a JSON result to argv[1] with:
   n_records   — number of ParticleRecords returned
@@ -42,16 +40,18 @@ if __name__ == "__main__":
         "prior_high": 5.0,
     })
 
-    # Small budget: 3 generations of k=5 particles, max 200 total sims.
-    # pyABC will queue up to client_max_jobs=200 futures against the single
-    # worker rank, so the queued-futures problem is guaranteed to appear.
+    # Use wall-time stopping with a high generation cap so the test exercises
+    # the same early-stop path as the scaling jobs, but keep the outstanding
+    # queue bounded to one worker's worth of work.
     cfg = {
         "max_simulations": 200,
         "k": 5,
         "tol_init": 5.0,
-        "n_generations": 3,
+        "n_generations": 1000,
+        "max_wall_time_s": 0.5,
         "parallel_backend": "mpi",
         "n_workers": 2,
+        "pyabc_client_max_jobs": 2,
     }
 
     with tempfile.TemporaryDirectory() as tmpdir:

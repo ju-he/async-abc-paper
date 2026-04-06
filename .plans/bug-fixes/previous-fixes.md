@@ -16,9 +16,29 @@
 
 **Root cause:** `_FutureTracker.drain()` (called after `abc.run()` returns) blocked indefinitely in `concurrent.futures.wait(pending)`. pyABC's `ConcurrentFutureSampler` keeps up to 200 concurrent futures (`client_max_jobs=200`) across 47 workers, leaving O(100+) queued-but-not-yet-sent futures after sampling finishes. These were being processed by workers one by one before shutdown, taking many minutes on this cluster's filesystem/MPI stack.
 
-**Fix:** Removed `_FutureTracker` entirely. After `_run_abc_smc_baseline_with_sampler` returns, call `executor.shutdown(wait=True, cancel_futures=True)` directly. This cancels all queued futures immediately (via `pool.cancel()`), then waits only for the ≤n_workers futures actually in-flight. Shutdown is fast.
+**Fix (initial):** Removed `_FutureTracker` entirely. After `_run_abc_smc_baseline_with_sampler` returns, call `executor.shutdown(wait=True, cancel_futures=True)` directly. This cancels all queued futures immediately (via `pool.cancel()`), then waits only for the ≤n_workers futures actually in-flight. This improved the 2-rank regression test but turned out to be incomplete on the cluster.
 
 **Files:** `experiments/async_abc/inference/abc_smc_baseline.py` (`run_abc_smc_baseline`, mpi parallel_backend path)
+
+### Follow-up: shutdown-only fix was incomplete under cluster MPI
+
+**Symptom:** `abc_smc_baseline` runs with wall-time stopping still showed long post-finish tails on the cluster. In some cases rank 0 logged `status=finish` quickly but workers only finished tens of seconds later; in others the SLURM step hit the allocation limit after rank 0 had already finished.
+
+**Root cause:** The real issue was not just "queued futures waiting in Python". pyABC's `ConcurrentFutureSampler` defaults to `client_max_jobs=200`, which lets it oversubmit far beyond `n_workers`. On ParaStation MPI, by the time `abc.run()` stops, many orphan futures have already propagated far enough through `MPICommExecutor` that `cancel_futures=True` can no longer retract them. Those already-dispatched futures still need to finish and/or deliver results before communicator teardown can complete cleanly.
+
+**Fix (final):**
+- Add `pyabc_client_max_jobs` inference config knob.
+- Default it to `n_workers` for MPI pyABC methods, drastically reducing speculative oversubmission.
+- Reintroduce a lightweight tracked executor, but only as teardown instrumentation/safety net.
+- Keep the two-stage teardown in `abc_smc_baseline`: call `executor.shutdown(wait=True, cancel_futures=True)` first, then wait only on the subset of tracked futures that remain pending and are not cancelled.
+- Keep the post-`MPICommExecutor` `COMM_WORLD.Barrier()`.
+
+**Files:**
+- `experiments/async_abc/inference/pyabc_sampler.py`
+- `experiments/async_abc/inference/abc_smc_baseline.py`
+- `experiments/async_abc/inference/pyabc_wrapper.py`
+- `experiments/tests/test_inference.py`
+- `experiments/tests/mpi_abc_smc_baseline_helper.py`
 
 
 

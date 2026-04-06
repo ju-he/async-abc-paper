@@ -1,3 +1,6 @@
+# Exception Handling
+Never hide failures, prefer to crash loudly, only handle errors with clear recovery path, otherwise pass upwards. No silent handling. 
+
 # Testing
 Use the venv at nastjapy_copy/.venv
 

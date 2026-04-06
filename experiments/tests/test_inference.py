@@ -990,8 +990,8 @@ class TestPyabcWrapperFixes:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -999,7 +999,7 @@ class TestPyabcWrapperFixes:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 2)]
 
     def test_same_seed_reproducible(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
@@ -1357,6 +1357,27 @@ class TestBuildPyabcSampler:
         )
         assert isinstance(sampler, pyabc.ConcurrentFutureSampler)
 
+    def test_mpi_backend_forwards_client_max_jobs(self, monkeypatch):
+        import pyabc
+        from async_abc.inference.pyabc_sampler import build_pyabc_sampler
+
+        calls = []
+        original = pyabc.ConcurrentFutureSampler
+
+        def _spy(*args, **kwargs):
+            calls.append(kwargs["client_max_jobs"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(pyabc, "ConcurrentFutureSampler", _spy)
+        sampler = build_pyabc_sampler(
+            n_procs=8,
+            parallel_backend="mpi",
+            cfuture_executor=object(),
+            client_max_jobs=8,
+        )
+        assert isinstance(sampler, original)
+        assert calls == [8]
+
     def test_mpi_backend_requires_existing_executor(self):
         from async_abc.inference.pyabc_sampler import build_pyabc_sampler
 
@@ -1379,6 +1400,76 @@ class TestBuildPyabcSampler:
 
         with pytest.raises(ValueError, match="parallel_backend"):
             build_pyabc_sampler(n_procs=2, parallel_backend="redis")
+
+    def test_resolve_pyabc_client_max_jobs_defaults_to_worker_count_for_mpi(self):
+        from async_abc.inference.pyabc_sampler import resolve_pyabc_client_max_jobs
+
+        assert resolve_pyabc_client_max_jobs({}, parallel_backend="mpi", n_procs=7) == 7
+
+    def test_resolve_pyabc_client_max_jobs_honors_explicit_override(self):
+        from async_abc.inference.pyabc_sampler import resolve_pyabc_client_max_jobs
+
+        assert (
+            resolve_pyabc_client_max_jobs(
+                {"pyabc_client_max_jobs": 3},
+                parallel_backend="mpi",
+                n_procs=7,
+            )
+            == 3
+        )
+
+    def test_resolve_pyabc_client_max_jobs_ignored_for_non_mpi(self):
+        from async_abc.inference.pyabc_sampler import resolve_pyabc_client_max_jobs
+
+        assert (
+            resolve_pyabc_client_max_jobs(
+                {"pyabc_client_max_jobs": 3},
+                parallel_backend="multicore",
+                n_procs=7,
+            )
+            is None
+        )
+
+    def test_tracked_future_executor_waits_only_for_non_cancelled_pending_futures(self, monkeypatch):
+        from async_abc.inference.pyabc_sampler import TrackedFutureExecutor
+
+        waited = []
+
+        class _InnerExecutor:
+            def submit(self, fn, /, *args, **kwargs):
+                return fn(*args, **kwargs)
+
+        class _FakeFuture:
+            def __init__(self, *, done=False, cancelled=False):
+                self._done = done
+                self._cancelled = cancelled
+
+            def done(self):
+                return self._done
+
+            def cancelled(self):
+                return self._cancelled
+
+        tracker = TrackedFutureExecutor(_InnerExecutor())
+        futures = [
+            _FakeFuture(done=False, cancelled=False),
+            _FakeFuture(done=False, cancelled=True),
+            _FakeFuture(done=True, cancelled=False),
+        ]
+        for future in futures:
+            tracker.submit(lambda future=future: future)
+
+        import async_abc.inference.pyabc_sampler as sampler_mod
+
+        monkeypatch.setattr(
+            sampler_mod,
+            "_wait",
+            lambda pending: waited.append(list(pending)),
+        )
+        waited_count = tracker.wait_for_pending(exclude_cancelled=True)
+
+        assert waited_count == 1
+        assert waited == [[futures[0]]]
 
 
 class TestPyabcCommon:
@@ -1427,8 +1518,8 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1436,7 +1527,7 @@ class TestPyabcWrapperMpiBackend:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc_mpi").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "parallel_backend": "mpi", "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 2)]
 
     def test_absent_parallel_backend_defaults_to_multicore(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1448,8 +1539,8 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append(parallel_backend),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1457,7 +1548,7 @@ class TestPyabcWrapperMpiBackend:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc_default").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, _test_inference_cfg(), od, replicate=0, seed=1)
-        assert calls == ["multicore"]
+        assert calls == [("multicore", None)]
 
     def test_parallel_run_defaults_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1471,8 +1562,8 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1487,7 +1578,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 4)]
 
     def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1501,8 +1592,8 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1517,7 +1608,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 4)]
 
     def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
@@ -1533,8 +1624,8 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1550,7 +1641,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(4, "mpi", True)]
+        assert calls == [(4, "mpi", True, 4)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
@@ -1589,8 +1680,8 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1605,7 +1696,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 2)]
 
     def test_absent_parallel_backend_defaults_to_multicore(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1617,8 +1708,8 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append(parallel_backend),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1626,7 +1717,7 @@ class TestAbcSmcBaselineMpiBackend:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "smc_default").ensure()
         run_abc_smc_baseline(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_generations": 2}, od, replicate=0, seed=1)
-        assert calls == ["multicore"]
+        assert calls == [("multicore", None)]
 
     def test_parallel_run_defaults_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1640,8 +1731,8 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1656,7 +1747,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 4)]
 
     def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1670,8 +1761,8 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((parallel_backend, cfuture_executor is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1691,7 +1782,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", True)]
+        assert calls == [("mpi", True, 4)]
 
     def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
@@ -1707,8 +1798,8 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None: (
-                calls.append((n_procs, parallel_backend, cfuture_executor is executor)),
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((n_procs, parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1724,7 +1815,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(4, "mpi", True)]
+        assert calls == [(4, "mpi", True, 4)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
@@ -1793,15 +1884,12 @@ class TestMpiIntegration:
         assert data["method"] == "pyabc_smc"
 
     def test_abc_smc_baseline_shutdown_does_not_hang(self, tmp_path):
-        """Verify run_abc_smc_baseline with mpi backend shuts down quickly.
+        """Verify wall-time-limited abc_smc_baseline MPI runs tear down quickly.
 
-        With 2 ranks (1 worker), pyABC's ConcurrentFutureSampler submits up to
-        client_max_jobs=200 concurrent futures but only 1 can run at a time.
-        After abc.run() returns, ~190+ futures are still queued.  The old
-        _FutureTracker.drain() path would block in concurrent.futures.wait()
-        until all of them completed (minutes).  The fix — executor.shutdown(
-        wait=True, cancel_futures=True) — cancels queued futures immediately
-        and the test must finish well within the 60s timeout.
+        The helper keeps pyABC's MPI backlog bounded with
+        ``pyabc_client_max_jobs == n_workers`` so early stop by wall time does
+        not leave a deep speculative queue behind. The run must finish well
+        within the timeout and all ranks must reach the post-executor barrier.
         """
         helper = Path(__file__).parent / "mpi_abc_smc_baseline_helper.py"
         output_file = tmp_path / "abc_smc_baseline_result.json"

@@ -5,9 +5,44 @@ Centralises sampler construction for both
 keeping the MPI import path isolated behind the ``"mpi"`` backend branch.
 """
 
+from __future__ import annotations
+
 import logging
+from concurrent.futures import wait as _wait
 
 logger = logging.getLogger(__name__)
+
+
+class TrackedFutureExecutor:
+    """Wrap an executor and retain references to every submitted future."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self._submitted: list = []
+
+    def submit(self, fn, /, *args, **kwargs):
+        future = self._inner.submit(fn, *args, **kwargs)
+        self._submitted.append(future)
+        return future
+
+    def pending_futures(self, *, exclude_cancelled: bool = False):
+        pending = [future for future in self._submitted if not future.done()]
+        if exclude_cancelled:
+            pending = [future for future in pending if not future.cancelled()]
+        return pending
+
+    def wait_for_pending(self, *, exclude_cancelled: bool = False) -> int:
+        pending = self.pending_futures(exclude_cancelled=exclude_cancelled)
+        if pending:
+            _wait(pending)
+        return len(pending)
+
+    @property
+    def submitted_count(self) -> int:
+        return len(self._submitted)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
 
 
 def _pyabc_parallel_safe(simulate_fn) -> bool:
@@ -85,11 +120,28 @@ def resolve_pyabc_worker_count(
     return 1
 
 
+def resolve_pyabc_client_max_jobs(
+    inference_cfg,
+    *,
+    parallel_backend: str,
+    n_procs: int,
+) -> int | None:
+    """Return the client-side outstanding-job limit for pyABC MPI samplers."""
+    if parallel_backend != "mpi":
+        return None
+
+    configured = inference_cfg.get("pyabc_client_max_jobs")
+    if configured in (None, ""):
+        return max(1, int(n_procs))
+    return max(1, int(configured))
+
+
 def build_pyabc_sampler(
     n_procs: int,
     parallel_backend: str,
     *,
     cfuture_executor=None,
+    client_max_jobs: int | None = None,
 ):
     """Construct a pyABC sampler.
 
@@ -106,6 +158,10 @@ def build_pyabc_sampler(
         Existing ``concurrent.futures``-style executor for the ``"mpi"``
         backend. Callers are expected to provision it from the already launched
         MPI communicator via ``MPICommExecutor``.
+    client_max_jobs:
+        Maximum number of outstanding futures pyABC may keep submitted when
+        using the MPI backend. Defaults to pyABC's internal default unless an
+        explicit value is provided.
 
     Returns
     -------
@@ -129,9 +185,10 @@ def build_pyabc_sampler(
                 "The 'mpi' parallel_backend requires an existing "
                 "communicator-backed executor."
             )
-        return pyabc.ConcurrentFutureSampler(
-            cfuture_executor=cfuture_executor
-        )
+        kwargs = {"cfuture_executor": cfuture_executor}
+        if client_max_jobs is not None:
+            kwargs["client_max_jobs"] = int(client_max_jobs)
+        return pyabc.ConcurrentFutureSampler(**kwargs)
 
     else:
         raise ValueError(

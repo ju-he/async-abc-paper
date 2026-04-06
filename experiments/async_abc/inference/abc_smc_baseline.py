@@ -19,7 +19,9 @@ from ..utils.seeding import canonical_param_key, canonical_param_key_json, stabl
 from ._attempt_trace import attempt_records_from_events, instrument_simulate, load_attempt_events
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
+    TrackedFutureExecutor,
     build_pyabc_sampler,
+    resolve_pyabc_client_max_jobs,
     resolve_pyabc_parallel_backend,
     resolve_pyabc_worker_count,
 )
@@ -254,6 +256,11 @@ def run_abc_smc_baseline(
         parallel_backend,
         method_name="abc_smc_baseline",
     )
+    client_max_jobs = resolve_pyabc_client_max_jobs(
+        inference_cfg,
+        parallel_backend=parallel_backend,
+        n_procs=int(n_procs),
+    )
 
     if parallel_backend == "mpi":
         try:
@@ -268,10 +275,17 @@ def run_abc_smc_baseline(
         result: List[ParticleRecord] = []
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is not None:
+                tracker = TrackedFutureExecutor(executor)
+                logger.debug(
+                    "[abc_smc_baseline] mpi sampler config: n_workers=%d client_max_jobs=%d",
+                    int(n_procs),
+                    int(client_max_jobs) if client_max_jobs is not None else -1,
+                )
                 sampler = build_pyabc_sampler(
                     n_procs,
                     parallel_backend,
-                    cfuture_executor=executor,
+                    cfuture_executor=tracker,
+                    client_max_jobs=client_max_jobs,
                 )
                 result = _run_abc_smc_baseline_with_sampler(
                     sampler=sampler,
@@ -288,13 +302,28 @@ def run_abc_smc_baseline(
                     max_wall_time_s=max_wall_time_s,
                     progress=progress,
                 )
-                # Cancel queued orphan futures immediately and wait only for the
-                # ≤n_workers futures actually in-flight (already sent to workers).
-                # Using cancel_futures=True avoids the tracker.drain() hang:
-                # with 200 concurrent pyABC jobs and 47 workers, up to ~150
-                # queued-but-not-running futures would otherwise be processed
-                # by workers before shutdown, taking O(minutes) on this cluster.
+                pending_before_shutdown = tracker.pending_futures()
+                logger.debug(
+                    "[abc_smc_baseline] mpi teardown starting: submitted=%d pending=%d",
+                    tracker.submitted_count,
+                    len(pending_before_shutdown),
+                )
+                teardown_start = time.monotonic()
                 executor.shutdown(wait=True, cancel_futures=True)
+                pending_after_shutdown = tracker.pending_futures(exclude_cancelled=True)
+                if pending_after_shutdown:
+                    logger.debug(
+                        "[abc_smc_baseline] waiting for %d already-dispatched MPI futures after shutdown",
+                        len(pending_after_shutdown),
+                    )
+                    tracker.wait_for_pending(exclude_cancelled=True)
+                logger.debug(
+                    "[abc_smc_baseline] mpi teardown done: submitted=%d pending_before=%d pending_after=%d elapsed=%.3fs",
+                    tracker.submitted_count,
+                    len(pending_before_shutdown),
+                    len(pending_after_shutdown),
+                    time.monotonic() - teardown_start,
+                )
             # Workers (executor is None) fall through here without returning,
             # so that all ranks exit the with-block together.
         # All 48 ranks have now fully exited MPICommExecutor (root completed
@@ -307,7 +336,11 @@ def run_abc_smc_baseline(
             MPI.COMM_WORLD.Barrier()
         return result
 
-    sampler = build_pyabc_sampler(n_procs, parallel_backend)
+    sampler = build_pyabc_sampler(
+        n_procs,
+        parallel_backend,
+        client_max_jobs=client_max_jobs,
+    )
     return _run_abc_smc_baseline_with_sampler(
         sampler=sampler,
         simulate_fn=simulate_fn,
