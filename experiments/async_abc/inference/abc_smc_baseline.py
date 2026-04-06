@@ -22,6 +22,7 @@ from .pyabc_sampler import (
     TrackedFutureExecutor,
     build_pyabc_sampler,
     resolve_pyabc_client_max_jobs,
+    resolve_pyabc_mpi_sampler,
     resolve_pyabc_parallel_backend,
     resolve_pyabc_worker_count,
 )
@@ -260,6 +261,16 @@ def run_abc_smc_baseline(
         inference_cfg,
         parallel_backend=parallel_backend,
         n_procs=int(n_procs),
+        mpi_sampler=resolve_pyabc_mpi_sampler(
+            inference_cfg,
+            parallel_backend=parallel_backend,
+            method_name="abc_smc_baseline",
+        ),
+    )
+    mpi_sampler = resolve_pyabc_mpi_sampler(
+        inference_cfg,
+        parallel_backend=parallel_backend,
+        method_name="abc_smc_baseline",
     )
 
     if parallel_backend == "mpi":
@@ -276,18 +287,33 @@ def run_abc_smc_baseline(
         context_exit_start = None
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is not None:
-                tracker = TrackedFutureExecutor(executor)
-                logger.debug(
-                    "[abc_smc_baseline] mpi sampler config: n_workers=%d client_max_jobs=%d",
+                logger.info(
+                    "[abc_smc_baseline] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
+                    mpi_sampler,
                     int(n_procs),
-                    int(client_max_jobs) if client_max_jobs is not None else -1,
+                    (
+                        str(int(client_max_jobs))
+                        if client_max_jobs is not None
+                        else "ignored"
+                    ),
                 )
-                sampler = build_pyabc_sampler(
-                    n_procs,
-                    parallel_backend,
-                    cfuture_executor=tracker,
-                    client_max_jobs=client_max_jobs,
-                )
+                if mpi_sampler == "mapping":
+                    sampler = build_pyabc_sampler(
+                        n_procs,
+                        parallel_backend,
+                        mpi_sampler=mpi_sampler,
+                        mpi_map=executor.map,
+                        client_max_jobs=client_max_jobs,
+                    )
+                else:
+                    tracker = TrackedFutureExecutor(executor)
+                    sampler = build_pyabc_sampler(
+                        n_procs,
+                        parallel_backend,
+                        mpi_sampler=mpi_sampler,
+                        cfuture_executor=tracker,
+                        client_max_jobs=client_max_jobs,
+                    )
                 result = _run_abc_smc_baseline_with_sampler(
                     sampler=sampler,
                     simulate_fn=simulate_fn,
@@ -303,20 +329,25 @@ def run_abc_smc_baseline(
                     max_wall_time_s=max_wall_time_s,
                     progress=progress,
                 )
-                pending_before_shutdown = tracker.pending_futures()
-                logger.debug(
-                    "[abc_smc_baseline] abc.run returned: submitted=%d pending=%d",
-                    tracker.submitted_count,
-                    len(pending_before_shutdown),
-                )
                 context_exit_start = time.monotonic()
-                pending_after_run = tracker.pending_futures(exclude_cancelled=True)
-                logger.debug(
-                    "[abc_smc_baseline] handing shutdown to MPICommExecutor.__exit__: submitted=%d pending=%d non_cancelled_pending=%d",
-                    tracker.submitted_count,
-                    len(pending_before_shutdown),
-                    len(pending_after_run),
-                )
+                if mpi_sampler == "concurrent_futures_legacy":
+                    pending_before_shutdown = tracker.pending_futures()
+                    logger.debug(
+                        "[abc_smc_baseline] abc.run returned: submitted=%d pending=%d",
+                        tracker.submitted_count,
+                        len(pending_before_shutdown),
+                    )
+                    pending_after_run = tracker.pending_futures(exclude_cancelled=True)
+                    logger.debug(
+                        "[abc_smc_baseline] handing shutdown to MPICommExecutor.__exit__: submitted=%d pending=%d non_cancelled_pending=%d",
+                        tracker.submitted_count,
+                        len(pending_before_shutdown),
+                        len(pending_after_run),
+                    )
+                else:
+                    logger.info(
+                        "[abc_smc_baseline] abc.run returned under mapping MPI sampler; exiting MPICommExecutor context",
+                    )
             # Workers (executor is None) fall through here without returning,
             # so that all ranks exit the with-block together.
         context_exit_elapsed = None

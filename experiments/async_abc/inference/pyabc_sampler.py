@@ -125,21 +125,65 @@ def resolve_pyabc_client_max_jobs(
     *,
     parallel_backend: str,
     n_procs: int,
+    mpi_sampler: str | None = None,
 ) -> int | None:
     """Return the client-side outstanding-job limit for pyABC MPI samplers."""
     if parallel_backend != "mpi":
         return None
 
     configured = inference_cfg.get("pyabc_client_max_jobs")
+    if mpi_sampler == "mapping":
+        if configured not in (None, ""):
+            logger.warning(
+                "Ignoring pyabc_client_max_jobs=%s because pyabc_mpi_sampler=mapping "
+                "does not use speculative client-side futures.",
+                configured,
+            )
+        return None
+
     if configured in (None, ""):
         return max(1, int(n_procs))
     return max(1, int(configured))
+
+
+def resolve_pyabc_mpi_sampler(
+    inference_cfg,
+    *,
+    parallel_backend: str,
+    method_name: str,
+) -> str | None:
+    """Return the pyABC MPI sampler strategy for this run."""
+    if parallel_backend != "mpi":
+        return None
+
+    configured = inference_cfg.get("pyabc_mpi_sampler")
+    if configured in (None, ""):
+        return "mapping"
+
+    if configured == "mapping":
+        return "mapping"
+
+    if configured == "concurrent_futures_legacy":
+        logger.warning(
+            "Using %s with pyabc_mpi_sampler=concurrent_futures_legacy. "
+            "This retains the old futures-based MPI path, which has shown teardown "
+            "hangs at large rank counts on the cluster and is kept only as an explicit opt-in fallback.",
+            method_name,
+        )
+        return configured
+
+    raise ValueError(
+        f"Unknown pyabc_mpi_sampler={configured!r}. "
+        "Valid values: 'mapping', 'concurrent_futures_legacy'."
+    )
 
 
 def build_pyabc_sampler(
     n_procs: int,
     parallel_backend: str,
     *,
+    mpi_sampler: str | None = None,
+    mpi_map=None,
     cfuture_executor=None,
     client_max_jobs: int | None = None,
 ):
@@ -154,10 +198,19 @@ def build_pyabc_sampler(
         (or :class:`pyabc.SingleCoreSampler` when *n_procs* == 1).
         ``"mpi"`` — wrap an existing communicator-backed executor inside
         :class:`pyabc.ConcurrentFutureSampler`.
+    mpi_sampler:
+        Strategy to use when *parallel_backend* is ``"mpi"``.
+        ``"mapping"`` uses :class:`pyabc.MappingSampler`;
+        ``"concurrent_futures_legacy"`` uses
+        :class:`pyabc.ConcurrentFutureSampler`.
+    mpi_map:
+        Existing blocking ``map``-like callable for the ``"mapping"``
+        MPI strategy, typically provided by an MPI executor.
     cfuture_executor:
         Existing ``concurrent.futures``-style executor for the ``"mpi"``
         backend. Callers are expected to provision it from the already launched
-        MPI communicator via ``MPICommExecutor``.
+        MPI communicator via ``MPICommExecutor`` when using the legacy futures
+        strategy.
     client_max_jobs:
         Maximum number of outstanding futures pyABC may keep submitted when
         using the MPI backend. Defaults to pyABC's internal default unless an
@@ -180,15 +233,28 @@ def build_pyabc_sampler(
         return pyabc.MulticoreEvalParallelSampler(n_procs)
 
     elif parallel_backend == "mpi":
-        if cfuture_executor is None:
-            raise ValueError(
-                "The 'mpi' parallel_backend requires an existing "
-                "communicator-backed executor."
-            )
-        kwargs = {"cfuture_executor": cfuture_executor}
-        if client_max_jobs is not None:
-            kwargs["client_max_jobs"] = int(client_max_jobs)
-        return pyabc.ConcurrentFutureSampler(**kwargs)
+        mpi_sampler = mpi_sampler or "mapping"
+        if mpi_sampler == "mapping":
+            if mpi_map is None:
+                raise ValueError(
+                    "The 'mpi' parallel_backend with pyabc_mpi_sampler='mapping' "
+                    "requires an existing communicator-backed map callable."
+                )
+            return pyabc.MappingSampler(map_=mpi_map)
+        if mpi_sampler == "concurrent_futures_legacy":
+            if cfuture_executor is None:
+                raise ValueError(
+                    "The 'mpi' parallel_backend with pyabc_mpi_sampler='concurrent_futures_legacy' "
+                    "requires an existing communicator-backed executor."
+                )
+            kwargs = {"cfuture_executor": cfuture_executor}
+            if client_max_jobs is not None:
+                kwargs["client_max_jobs"] = int(client_max_jobs)
+            return pyabc.ConcurrentFutureSampler(**kwargs)
+        raise ValueError(
+            f"Unknown mpi_sampler={mpi_sampler!r}. "
+            "Valid values: 'mapping', 'concurrent_futures_legacy'."
+        )
 
     else:
         raise ValueError(

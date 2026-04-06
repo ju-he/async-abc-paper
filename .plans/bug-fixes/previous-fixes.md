@@ -57,6 +57,31 @@
 - `experiments/tests/test_inference.py`
 - `experiments/tests/mpi_abc_smc_baseline_helper.py`
 
+**Outcome:** This also turned out to be incomplete. Removing the explicit inner shutdown did not eliminate the 48-rank hang.
+
+### Follow-up: switch default MPI pyABC sampler from futures to synchronous mapping
+
+**Symptom:** After the bounded-backlog and single-owner-shutdown changes, the single-48 scaling job still froze immediately after rank 0 logged `abc_smc_baseline status=finish`, while smaller packed jobs merely showed long tails. This ruled out our extra shutdown logic as the main cause.
+
+**Root cause:** The persistent failure was the futures-based MPI execution model itself. `pyabc.ConcurrentFutureSampler` plus `MPICommExecutor` remained fragile on ParaStation MPI even with reduced backlog and cleaner shutdown ownership. The shared pattern in cluster logs was: rank 0 finished `abc.run()`, but worker completion still depended on asynchronous future teardown that sometimes never completed at 48 ranks.
+
+**Fix (current default):**
+- Add `pyabc_mpi_sampler` inference config with:
+  - `mapping` as the default for MPI pyABC methods
+  - `concurrent_futures_legacy` as an explicit opt-in fallback
+- Use `pyabc.MappingSampler` with a blocking MPI `map` adapter (`executor.map`) for both `abc_smc_baseline` and `pyabc_smc`.
+- Keep the legacy futures path in-tree, but warn clearly that it has shown teardown hangs on the cluster.
+- Ignore `pyabc_client_max_jobs` for the mapping path because there is no speculative client-side future queue to bound.
+- Keep the post-`MPICommExecutor` `COMM_WORLD.Barrier()` so all ranks complete the MPI context before moving on.
+
+**Files:**
+- `experiments/async_abc/inference/pyabc_sampler.py`
+- `experiments/async_abc/inference/abc_smc_baseline.py`
+- `experiments/async_abc/inference/pyabc_wrapper.py`
+- `experiments/tests/test_inference.py`
+- `experiments/tests/mpi_abc_smc_baseline_helper.py`
+- `experiments/tests/mpi_integration_helper.py`
+
 
 
 ## 2026-04-05: 48-worker scaling job hangs at abc_smc_baseline start
