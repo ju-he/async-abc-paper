@@ -241,10 +241,7 @@ def run_abc_smc_baseline(
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
-    # When wall-time is the intended stopping criterion, use a high default for
-    # n_generations so it never becomes the binding constraint.
-    _default_n_gen = 1000 if max_wall_time_s is not None else 5
-    n_generations = inference_cfg.get("n_generations", _default_n_gen)
+    n_generations = inference_cfg.get("n_generations", 5)
     parallel_backend = resolve_pyabc_parallel_backend(
         inference_cfg,
         method_name="abc_smc_baseline",
@@ -330,7 +327,7 @@ def run_abc_smc_baseline(
                     progress=progress,
                 )
                 context_exit_start = time.monotonic()
-                if mpi_sampler == "concurrent_futures_legacy":
+                if mpi_sampler == "concurrent_futures":
                     pending_before_shutdown = tracker.pending_futures()
                     logger.debug(
                         "[abc_smc_baseline] abc.run returned: submitted=%d pending=%d",

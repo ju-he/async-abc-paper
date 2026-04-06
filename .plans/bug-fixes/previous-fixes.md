@@ -1,5 +1,30 @@
 # Previous Bug Fixes
 
+## 2026-04-06: revert pyABC wall-time stop path in scaling, restore futures default
+
+**Symptom:** After switching scaling to inject `max_wall_time_s` into `abc_smc_baseline` / `pyabc_smc`, cluster jobs could freeze during pyABC MPI teardown, and config loading silently inflated `n_generations` to 1000 for any wall-time-tagged run.
+
+**Root cause:** The unstable path was live wall-time termination of pyABC MPI runs, not the steady-state futures sampler itself. Separately, config annotation/validation still treated wall-time as an execution stop policy for sync pyABC methods and auto-expanded generation budgets.
+
+**Fix:**
+- Restore `concurrent_futures` as the default `pyabc_mpi_sampler`.
+- Keep `mapping` selectable, and keep `concurrent_futures_legacy` only as a deprecated compatibility alias.
+- Change scaling stop policy so only `async_propulate_abc` gets live `max_wall_time_s`; pyABC methods now run under explicit simulation/generation caps and are compared at wall-time budgets in post-processing.
+- Remove config-time `n_generations=1000` auto-inflation and the related warning.
+- Reduce scaling execution-budget knobs to modest explicit values.
+
+**Files:**
+- `experiments/async_abc/inference/pyabc_sampler.py`
+- `experiments/async_abc/inference/abc_smc_baseline.py`
+- `experiments/scripts/scaling_runner.py`
+- `experiments/async_abc/io/config.py`
+- `experiments/configs/scaling.json`
+- `experiments/configs/small/scaling.json`
+- `experiments/tests/test_inference.py`
+- `experiments/tests/test_runners.py`
+- `experiments/tests/mpi_integration_helper.py`
+- `experiments/tests/mpi_abc_smc_baseline_helper.py`
+
 ## 2026-04-05/06: 48-worker hang in abc_smc_baseline MPI path (two bugs)
 
 ### Bug 1: inter-comm teardown race (fixed first)

@@ -13,7 +13,7 @@
   },
   "methods": ["async_propulate_abc", "abc_smc_baseline"],
   "inference": {
-    "max_simulations": 20000,
+    "max_simulations": 5000,
     "k": 100,
     "tol_init": 500000.0,
     "scheduler_type": "acceptance_rate",
@@ -34,9 +34,9 @@
     "wall_time_budgets_s": [60.0, 120.0, 300.0, 600.0, 900.0],
     "wall_time_limit_s": 900.0,
     "max_simulations_policy": {
-      "min_total": 20000,
-      "per_worker": 400,
-      "k_factor": 20
+      "min_total": 4000,
+      "per_worker": 100,
+      "k_factor": 4
     }
   },
   "plots": {

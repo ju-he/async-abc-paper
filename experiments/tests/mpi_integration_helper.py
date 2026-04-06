@@ -22,7 +22,7 @@ if __name__ == '__main__':
     from async_abc.io.paths import OutputDir
 
     output_path = Path(sys.argv[1])
-    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "mapping"
+    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "concurrent_futures"
     client_max_jobs_arg = sys.argv[3] if len(sys.argv) > 3 else None
     client_max_jobs = (
         int(client_max_jobs_arg)

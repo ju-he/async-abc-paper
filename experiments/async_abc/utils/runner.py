@@ -209,6 +209,8 @@ _TIMING_FIELDNAMES = [
     "estimated_full_unsharded_s",
     "estimated_full_sharded_wall_s",
     "aggregate_compute_s",
+    "total_n_simulations",
+    "mean_sims_per_worker_s",
     "test_mode",
     "run_mode",
     "timestamp",
@@ -419,6 +421,8 @@ def write_timing_csv(
     estimated_full_unsharded_s: Optional[float] = None,
     estimated_full_sharded_wall_s: Optional[float] = None,
     aggregate_compute_s: Optional[float] = None,
+    total_n_simulations: Optional[int] = None,
+    mean_sims_per_worker_s: Optional[float] = None,
 ) -> None:
     """Append one timing row to a CSV file, writing the header if needed."""
     path = Path(path)
@@ -450,6 +454,10 @@ def write_timing_csv(
             ),
             "aggregate_compute_s": (
                 round(aggregate_compute_s, 3) if aggregate_compute_s is not None else ""
+            ),
+            "total_n_simulations": total_n_simulations if total_n_simulations is not None else "",
+            "mean_sims_per_worker_s": (
+                round(mean_sims_per_worker_s, 6) if mean_sims_per_worker_s is not None else ""
             ),
             "test_mode": test_mode,
             "run_mode": run_mode,

@@ -7,8 +7,8 @@ Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
 
 The test exercises the MPI path using the requested pyABC MPI sampler. The
-default is the synchronous ``MappingSampler`` path; the legacy futures-based
-path remains selectable for regression coverage.
+default is the futures-based ``ConcurrentFutureSampler`` path; ``mapping``
+remains selectable as a fallback/debug option.
 
 On success rank 0 writes a JSON result to argv[1] with timing diagnostics for
 all ranks, including the elapsed spread between the fastest and slowest rank.
@@ -28,14 +28,19 @@ if __name__ == "__main__":
     from async_abc.io.paths import OutputDir
 
     output_path = Path(sys.argv[1])
-    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "mapping"
+    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "concurrent_futures"
     client_max_jobs_arg = sys.argv[3] if len(sys.argv) > 3 else None
     client_max_jobs = (
         int(client_max_jobs_arg)
         if client_max_jobs_arg not in (None, "", "none")
         else None
     )
-    max_wall_time_s = float(sys.argv[4]) if len(sys.argv) > 4 else 0.5
+    max_wall_time_arg = sys.argv[4] if len(sys.argv) > 4 else None
+    max_wall_time_s = (
+        float(max_wall_time_arg)
+        if max_wall_time_arg not in (None, "", "none", "None")
+        else None
+    )
     rank = MPI.COMM_WORLD.Get_rank()
     world_size = MPI.COMM_WORLD.Get_size()
 
@@ -47,21 +52,19 @@ if __name__ == "__main__":
         "prior_high": 5.0,
     })
 
-    # Use wall-time stopping with a high generation cap so the test exercises
-    # the same early-stop path as the scaling jobs, but keep the outstanding
-    # queue bounded to one worker's worth of work.
     cfg = {
         "max_simulations": 200,
         "k": 5,
         "tol_init": 5.0,
-        "n_generations": 1000,
-        "max_wall_time_s": max_wall_time_s,
+        "n_generations": 5,
         "parallel_backend": "mpi",
         "n_workers": world_size,
         "pyabc_mpi_sampler": mpi_sampler,
     }
     if client_max_jobs is not None:
         cfg["pyabc_client_max_jobs"] = client_max_jobs
+    if max_wall_time_s is not None:
+        cfg["max_wall_time_s"] = max_wall_time_s
 
     run_start = time.monotonic()
     with tempfile.TemporaryDirectory() as tmpdir:

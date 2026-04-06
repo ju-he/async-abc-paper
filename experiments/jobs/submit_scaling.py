@@ -91,6 +91,31 @@ def _read_timing_elapsed(
     return latest_elapsed
 
 
+def _read_timing_sim_throughput(
+    timing_csv: Path,
+    *,
+    experiment_name: str = "scaling",
+    run_mode: str,
+) -> float | None:
+    """Return mean_sims_per_worker_s from the most recent matching timing row, or None."""
+    if not timing_csv.exists():
+        return None
+    latest = None
+    with open(timing_csv) as f:
+        for row in csv.DictReader(f):
+            if row.get("experiment_name") != experiment_name:
+                continue
+            if row.get("run_mode") != run_mode:
+                continue
+            val = row.get("mean_sims_per_worker_s", "").strip()
+            if val:
+                try:
+                    latest = float(val)
+                except ValueError:
+                    pass
+    return latest
+
+
 def _job_time_hours(
     workload_count: int,
     *,
@@ -357,6 +382,7 @@ def main() -> None:
     base_time_s: float
     timing_source: str
 
+    mean_sims_per_worker_s: float | None = None
     if args.timing_csv:
         active_elapsed = _read_timing_elapsed(Path(args.timing_csv), run_mode=run_mode)
         if active_elapsed is not None:
@@ -373,6 +399,9 @@ def main() -> None:
             )
             base_time_s = (args.base_time or 4.0) * 3600
             timing_source = f"--base-time fallback: {base_time_s / 3600:.1f} h"
+        mean_sims_per_worker_s = _read_timing_sim_throughput(
+            Path(args.timing_csv), run_mode=run_mode
+        )
     else:
         base_time_s = (args.base_time or 4.0) * 3600
         timing_source = f"--base-time: {base_time_s / 3600:.1f} h"
@@ -406,6 +435,29 @@ def main() -> None:
         f"Output:    {output_dir}\n"
         f"Jobs:      {jobs_dir}\n"
     )
+
+    if mean_sims_per_worker_s is not None:
+        full_scaling_cfg = full_cfg.get("scaling", {})
+        full_wall_budgets = [
+            float(v) for v in full_scaling_cfg.get("wall_time_budgets_s", []) if float(v) > 0
+        ]
+        full_wall_limit = full_scaling_cfg.get("wall_time_limit_s")
+        full_wall_limit = float(full_wall_limit) if full_wall_limit else (
+            max(full_wall_budgets) if full_wall_budgets else wall_time_limit_s
+        )
+        full_worker_counts = full_scaling_cfg.get("worker_counts", worker_counts)
+        per_worker_est = math.ceil(mean_sims_per_worker_s * full_wall_limit)
+        print(
+            f"Simulation budget estimate  ({mean_sims_per_worker_s:.4f} sims/worker/s "
+            f"from {run_mode} run, budget={full_wall_limit:.0f} s):"
+        )
+        for n in full_worker_counts:
+            est_sims = math.ceil(mean_sims_per_worker_s * int(n) * full_wall_limit)
+            print(f"  N={int(n):4d}: ~{est_sims:>8,} simulations")
+        print(
+            f"  → suggested max_simulations_policy.per_worker = {per_worker_est}\n"
+            f"    (= sims/worker/s × wall_time_limit_s, rounded up)\n"
+        )
 
     for bundle in packed_bundles:
         bundle_job_hours = [

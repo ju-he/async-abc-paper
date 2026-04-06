@@ -1,7 +1,6 @@
 """Config loading and validation."""
 import copy
 import json
-import warnings
 from pathlib import Path
 from typing import Union
 
@@ -83,19 +82,6 @@ def _validate(cfg: dict) -> None:
             f"is not valid. Must be one of: {sorted(VALID_BENCHMARK_NAMES)}"
         )
 
-    # Warn when wall-time is the intended stopping criterion but n_generations
-    # is suspiciously low — it may become the binding constraint instead.
-    max_wall_time_s = cfg["inference"].get("max_wall_time_s")
-    n_generations = cfg["inference"].get("n_generations")
-    if max_wall_time_s is not None and n_generations is not None and n_generations < 50:
-        warnings.warn(
-            f"n_generations={n_generations} is low for a wall-time-limited run "
-            f"(max_wall_time_s={max_wall_time_s}). The generation cap may stop "
-            f"the run before the wall-time budget is exhausted. Consider raising "
-            f"n_generations to 1000 or higher.",
-            stacklevel=3,
-        )
-
     if cfg["benchmark"].get("name") == "cellular_potts":
         _validate_cpm_benchmark(cfg["benchmark"])
 
@@ -142,10 +128,6 @@ def _annotate_mode(cfg: dict, *, config_tier: str, test_mode: bool) -> dict:
     inference = cfg.setdefault("inference", {})
     inference["test_mode"] = bool(test_mode)
     inference.setdefault("progress_log_interval_s", 10.0)
-    # When wall-time is the stopping criterion and n_generations was not
-    # explicitly configured, default to 1000 so it never binds.
-    if inference.get("max_wall_time_s") is not None:
-        inference.setdefault("n_generations", 1000)
     plots = cfg.setdefault("plots", {})
     plots.setdefault("emit_paper_summaries", True)
     plots.setdefault("emit_diagnostics", True)

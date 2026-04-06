@@ -577,7 +577,7 @@ class TestScalingRunner:
         )
         assert captured["stop_policy_by_method"] == {
             "async_propulate_abc": "wall_time_exact",
-            "abc_smc_baseline": "wall_time_exact",
+            "abc_smc_baseline": "simulation_cap_approx",
         }
 
     def test_skip_finalize_leaves_only_shards(self, tmp_path):

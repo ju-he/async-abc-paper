@@ -587,7 +587,7 @@ def _requested_max_simulations(inference_cfg: Dict[str, Any], *, n_workers: int,
 
 
 def _stop_policy_for_method(base_method: str) -> str:
-    if base_method in {"async_propulate_abc", "abc_smc_baseline", "pyabc_smc"}:
+    if base_method in {"async_propulate_abc"}:
         return "wall_time_exact"
     return "simulation_cap_approx"
 
@@ -970,6 +970,20 @@ def main(argv: list[str] | None = None) -> None:
     if not is_root_rank():
         return
 
+    total_n_simulations = sum(
+        int(r.get("n_simulations") or 0) for r in aggregate_throughput_rows
+    )
+    _sims_per_worker_vals = [
+        float(r["throughput_sims_per_s"]) / max(1, int(r["n_workers"]))
+        for r in aggregate_throughput_rows
+        if r.get("throughput_sims_per_s") and r.get("n_workers")
+        and float(r.get("throughput_sims_per_s") or 0) > 0
+    ]
+    mean_sims_per_worker_s = (
+        sum(_sims_per_worker_vals) / len(_sims_per_worker_vals)
+        if _sims_per_worker_vals else None
+    )
+
     write_timing_csv(
         output_dir.data / "timing.csv",
         name,
@@ -977,6 +991,8 @@ def main(argv: list[str] | None = None) -> None:
         estimated,
         test_mode,
         run_mode,
+        total_n_simulations=total_n_simulations or None,
+        mean_sims_per_worker_s=mean_sims_per_worker_s,
     )
     write_timing_comparison_csv(Path(args.output_dir))
     if not args.skip_finalize:
