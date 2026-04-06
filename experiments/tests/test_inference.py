@@ -1002,8 +1002,8 @@ class TestPyabcWrapperFixes:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: (
-                calls.append((parallel_backend, cfuture_executor is not None and cfuture_executor._inner is executor, client_max_jobs)),
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+                calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
             raising=False,
@@ -1011,7 +1011,7 @@ class TestPyabcWrapperFixes:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [("mpi", True, 2)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_same_seed_reproducible(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
