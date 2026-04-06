@@ -273,6 +273,7 @@ def run_abc_smc_baseline(
             ) from exc
 
         result: List[ParticleRecord] = []
+        context_exit_start = None
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is not None:
                 tracker = TrackedFutureExecutor(executor)
@@ -304,30 +305,43 @@ def run_abc_smc_baseline(
                 )
                 pending_before_shutdown = tracker.pending_futures()
                 logger.debug(
-                    "[abc_smc_baseline] mpi teardown starting: submitted=%d pending=%d",
+                    "[abc_smc_baseline] abc.run returned: submitted=%d pending=%d",
                     tracker.submitted_count,
                     len(pending_before_shutdown),
                 )
-                teardown_start = time.monotonic()
-                executor.shutdown(wait=True, cancel_futures=True)
-                pending_after_shutdown = tracker.pending_futures(exclude_cancelled=True)
+                context_exit_start = time.monotonic()
+                pending_after_run = tracker.pending_futures(exclude_cancelled=True)
                 logger.debug(
-                    "[abc_smc_baseline] mpi teardown done: submitted=%d pending_before=%d pending_after=%d elapsed=%.3fs",
+                    "[abc_smc_baseline] handing shutdown to MPICommExecutor.__exit__: submitted=%d pending=%d non_cancelled_pending=%d",
                     tracker.submitted_count,
                     len(pending_before_shutdown),
-                    len(pending_after_shutdown),
-                    time.monotonic() - teardown_start,
+                    len(pending_after_run),
                 )
             # Workers (executor is None) fall through here without returning,
             # so that all ranks exit the with-block together.
+        context_exit_elapsed = None
+        if context_exit_start is not None:
+            context_exit_elapsed = time.monotonic() - context_exit_start
+            logger.debug(
+                "[abc_smc_baseline] MPICommExecutor context exited in %.3fs",
+                context_exit_elapsed,
+            )
         # All 48 ranks have now fully exited MPICommExecutor (root completed
-        # executor.shutdown()+Disconnect; workers completed server_stop+Disconnect).
+        # executor.__exit__ shutdown()+Disconnect; workers completed
+        # server_stop+Disconnect.
         # Barrier before returning: prevents workers from racing ahead to
         # COMM_WORLD collectives (allgather in run_method_distributed) while
         # root is still tearing down the inter-communicator inside __exit__,
         # which deadlocks ParaStation MPI.
+        barrier_start = None
         if MPI.COMM_WORLD.Get_size() > 1:
+            barrier_start = time.monotonic()
             MPI.COMM_WORLD.Barrier()
+        if barrier_start is not None:
+            logger.debug(
+                "[abc_smc_baseline] post-exit COMM_WORLD barrier completed in %.3fs",
+                time.monotonic() - barrier_start,
+            )
         return result
 
     sampler = build_pyabc_sampler(

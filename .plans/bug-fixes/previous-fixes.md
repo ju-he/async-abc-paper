@@ -26,12 +26,29 @@
 
 **Root cause:** The real issue was not just "queued futures waiting in Python". pyABC's `ConcurrentFutureSampler` defaults to `client_max_jobs=200`, which lets it oversubmit far beyond `n_workers`. On ParaStation MPI, by the time `abc.run()` stops, many orphan futures have already propagated far enough through `MPICommExecutor` that `cancel_futures=True` can no longer retract them. Those already-dispatched futures still need to finish and/or deliver results before communicator teardown can complete cleanly.
 
-**Fix (final):**
+**Fix (attempt 2):**
 - Add `pyabc_client_max_jobs` inference config knob.
 - Default it to `n_workers` for MPI pyABC methods, drastically reducing speculative oversubmission.
 - Reintroduce a lightweight tracked executor, but only as teardown instrumentation/safety net.
-- Keep the two-stage teardown in `abc_smc_baseline`: call `executor.shutdown(wait=True, cancel_futures=True)` first, then wait only on the subset of tracked futures that remain pending and are not cancelled.
+- Initially kept an explicit `executor.shutdown(wait=True, cancel_futures=True)` in `abc_smc_baseline`.
 - Keep the post-`MPICommExecutor` `COMM_WORLD.Barrier()`.
+
+**Outcome:** Helped reduce backlog but did not fix the 48-rank cluster hang.
+
+### Follow-up: explicit shutdown caused double-teardown ownership
+
+**Symptom:** Even after bounding `client_max_jobs`, the 48-rank scaling job still hung after rank 0 finished `abc.run()`. Cluster logs showed root `status=finish` followed by either long worker tails or a permanent stall during teardown.
+
+**Root cause:** `mpi4py.futures.MPICommExecutor.__exit__` already calls `executor.shutdown(wait=True)` automatically on the root rank. We were also calling `executor.shutdown(wait=True, cancel_futures=True)` manually inside the `with MPICommExecutor(...)` block. That meant the same `MPIPoolExecutor` was being shut down twice: once explicitly in our code and then again by `MPICommExecutor.__exit__`. The stuck point in cluster logs is consistent with the second shutdown/join path wedging in communicator teardown on ParaStation MPI.
+
+**Fix (current):**
+- Remove the explicit inner `executor.shutdown(...)` call from `abc_smc_baseline`.
+- Keep `pyabc_client_max_jobs = n_workers` and the tracked executor for diagnostics.
+- Hand shutdown ownership entirely to `MPICommExecutor.__exit__`.
+- Add timing/debug logs around:
+  - `abc.run()` return
+  - `MPICommExecutor` context exit
+  - post-exit `COMM_WORLD.Barrier()`
 
 **Files:**
 - `experiments/async_abc/inference/pyabc_sampler.py`

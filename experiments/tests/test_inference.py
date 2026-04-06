@@ -55,6 +55,14 @@ def _make_fake_executor():
     return types.SimpleNamespace(shutdown=lambda **kwargs: None)
 
 
+class _RecordingExecutor:
+    def __init__(self):
+        self.shutdown_calls = []
+
+    def shutdown(self, **kwargs):
+        self.shutdown_calls.append(kwargs)
+
+
 def _install_fake_mpi_executor(monkeypatch, *, executor):
     fake_mpi = types.ModuleType("mpi4py")
     fake_mpi.MPI = types.SimpleNamespace(
@@ -1835,6 +1843,34 @@ class TestAbcSmcBaselineMpiBackend:
         )
 
         assert records == []
+
+    def test_does_not_call_shutdown_inside_mpi_context(self, tmp_output_dir, monkeypatch):
+        import pyabc
+        import async_abc.inference.abc_smc_baseline as baseline_mod
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
+
+        executor = _RecordingExecutor()
+        _install_fake_mpi_executor(monkeypatch, executor=executor)
+        monkeypatch.setattr(
+            baseline_mod,
+            "build_pyabc_sampler",
+            lambda n_procs, parallel_backend, cfuture_executor=None, client_max_jobs=None: pyabc.SingleCoreSampler(),
+            raising=False,
+        )
+        bm = _gaussian_bm()
+        od = OutputDir(tmp_output_dir, "smc_no_inner_shutdown").ensure()
+
+        run_abc_smc_baseline(
+            bm.simulate,
+            bm.limits,
+            {**_test_inference_cfg(), "n_generations": 2, "parallel_backend": "mpi", "n_workers": 2},
+            od,
+            replicate=0,
+            seed=1,
+        )
+
+        assert executor.shutdown_calls == []
 
 
 class TestMpiIntegration:
