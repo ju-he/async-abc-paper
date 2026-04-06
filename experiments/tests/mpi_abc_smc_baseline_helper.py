@@ -1,7 +1,7 @@
 """MPI integration helper for abc_smc_baseline wall-time MPI teardown tests.
 
 Run via:
-    mpirun -n 2 <python> <this_file> <output_json_path>
+    mpirun -n 2 <python> <this_file> <output_json_path> [client_max_jobs] [max_wall_time_s]
 
 Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
@@ -11,12 +11,11 @@ pyABC's ConcurrentFutureSampler is configured with client_max_jobs equal to the
 worker count so wall-time stopping does not leave a deep speculative queue
 behind. The run still uses the MPI backend and must tear down cleanly.
 
-On success rank 0 writes a JSON result to argv[1] with:
-  n_records   — number of ParticleRecords returned
-  method      — record.method of first record ("abc_smc_baseline")
-  barrier_reached — True if COMM_WORLD.Barrier() after the with-block was reached
+On success rank 0 writes a JSON result to argv[1] with timing diagnostics for
+all ranks, including the elapsed spread between the fastest and slowest rank.
 """
 import json
+import time
 import sys
 import tempfile
 from pathlib import Path
@@ -30,7 +29,10 @@ if __name__ == "__main__":
     from async_abc.io.paths import OutputDir
 
     output_path = Path(sys.argv[1])
+    client_max_jobs = int(sys.argv[2]) if len(sys.argv) > 2 else 2
+    max_wall_time_s = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
     rank = MPI.COMM_WORLD.Get_rank()
+    world_size = MPI.COMM_WORLD.Get_size()
 
     bm = GaussianMean({
         "observed_data_seed": 0,
@@ -48,25 +50,35 @@ if __name__ == "__main__":
         "k": 5,
         "tol_init": 5.0,
         "n_generations": 1000,
-        "max_wall_time_s": 0.5,
+        "max_wall_time_s": max_wall_time_s,
         "parallel_backend": "mpi",
-        "n_workers": 2,
-        "pyabc_client_max_jobs": 2,
+        "n_workers": world_size,
+        "pyabc_client_max_jobs": client_max_jobs,
     }
 
+    run_start = time.monotonic()
     with tempfile.TemporaryDirectory() as tmpdir:
         od = OutputDir(Path(tmpdir), "mpi_baseline_test").ensure()
         records = run_abc_smc_baseline(bm.simulate, bm.limits, cfg, od, replicate=0, seed=42)
+    run_elapsed_s = time.monotonic() - run_start
 
     # If we reach here on any rank, the post-with COMM_WORLD.Barrier() was
     # passed — meaning all ranks exited the MPICommExecutor cleanly.
     barrier_reached = True
+    elapsed_by_rank = MPI.COMM_WORLD.gather(run_elapsed_s, root=0)
 
     if rank == 0:
         result = {
             "n_records": len(records),
             "method": records[0].method if records else None,
             "barrier_reached": barrier_reached,
+            "world_size": world_size,
+            "client_max_jobs": client_max_jobs,
+            "max_wall_time_s": max_wall_time_s,
+            "elapsed_by_rank_s": elapsed_by_rank,
+            "max_elapsed_s": max(elapsed_by_rank),
+            "min_elapsed_s": min(elapsed_by_rank),
+            "elapsed_spread_s": max(elapsed_by_rank) - min(elapsed_by_rank),
         }
         output_path.write_text(json.dumps(result))
         assert len(records) > 0, f"Expected records, got {records}"

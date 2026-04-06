@@ -311,12 +311,6 @@ def run_abc_smc_baseline(
                 teardown_start = time.monotonic()
                 executor.shutdown(wait=True, cancel_futures=True)
                 pending_after_shutdown = tracker.pending_futures(exclude_cancelled=True)
-                if pending_after_shutdown:
-                    logger.debug(
-                        "[abc_smc_baseline] waiting for %d already-dispatched MPI futures after shutdown",
-                        len(pending_after_shutdown),
-                    )
-                    tracker.wait_for_pending(exclude_cancelled=True)
                 logger.debug(
                     "[abc_smc_baseline] mpi teardown done: submitted=%d pending_before=%d pending_after=%d elapsed=%.3fs",
                     tracker.submitted_count,

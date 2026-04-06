@@ -1913,4 +1913,55 @@ class TestMpiIntegration:
         data = json.loads(output_file.read_text())
         assert data["n_records"] > 0
         assert data["method"] == "abc_smc_baseline"
+        assert data["world_size"] == 2
+        assert data["client_max_jobs"] == 2
+        assert data["max_elapsed_s"] < 60.0
+        assert data["elapsed_spread_s"] < 20.0
+
+    @pytest.mark.parametrize(
+        ("n_ranks", "client_max_jobs", "max_wall_time_s", "timeout_s"),
+        [
+            (2, 2, 0.5, 60),
+            (4, 4, 0.5, 90),
+        ],
+    )
+    def test_abc_smc_baseline_mpi_diagnostics_bounded_backlog(
+        self,
+        tmp_path,
+        n_ranks,
+        client_max_jobs,
+        max_wall_time_s,
+        timeout_s,
+    ):
+        helper = Path(__file__).parent / "mpi_abc_smc_baseline_helper.py"
+        output_file = tmp_path / f"abc_smc_baseline_diag_n{n_ranks}.json"
+        result = subprocess.run(
+            [
+                "mpirun",
+                "-n",
+                str(n_ranks),
+                "--stdin",
+                "none",
+                sys.executable,
+                str(helper),
+                str(output_file),
+                str(client_max_jobs),
+                str(max_wall_time_s),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout_s,
+        )
+        assert result.returncode == 0, result.stderr
+        data = json.loads(output_file.read_text())
+        assert data["n_records"] > 0
+        assert data["method"] == "abc_smc_baseline"
+        assert data["world_size"] == n_ranks
+        assert data["client_max_jobs"] == client_max_jobs
+        assert data["barrier_reached"], "COMM_WORLD barrier was not reached"
+        assert data["max_elapsed_s"] < timeout_s
+        # Keep this generous: we want a diagnostic guardrail, not a brittle
+        # exact-performance assertion tied to one MPI implementation.
+        assert data["elapsed_spread_s"] < 45.0
         assert data["barrier_reached"], "COMM_WORLD barrier was not reached — ranks may have diverged"
