@@ -210,10 +210,10 @@ class TestNewMethodsInConfig:
 
 
 class TestNGenerationsSafetyNet:
-    """When wall-time is the primary stop, n_generations must not be the binding constraint."""
+    """Wall-time metadata must not silently change sync pyABC generation budgets."""
 
-    def test_config_with_wall_time_warns_low_n_generations(self, tmp_path, minimal_config):
-        """Low n_generations with max_wall_time_s should emit a warning."""
+    def test_config_with_wall_time_does_not_warn_low_n_generations(self, tmp_path, minimal_config):
+        """Low n_generations with max_wall_time_s is an explicit user budget."""
         import warnings
 
         minimal_config["inference"]["max_wall_time_s"] = 300
@@ -224,16 +224,16 @@ class TestNGenerationsSafetyNet:
             warnings.simplefilter("always")
             load_config(p)
             n_gen_warnings = [x for x in w if "n_generations" in str(x.message)]
-            assert len(n_gen_warnings) >= 1
+            assert len(n_gen_warnings) == 0
 
-    def test_config_wall_time_sets_default_high_n_generations(self, tmp_path, minimal_config):
-        """When max_wall_time_s is set and n_generations is absent, default to 1000."""
+    def test_config_wall_time_does_not_set_default_high_n_generations(self, tmp_path, minimal_config):
+        """When max_wall_time_s is set and n_generations is absent, do not inflate it."""
         minimal_config["inference"]["max_wall_time_s"] = 300
-        # n_generations not set — should default high
+        # n_generations not set; config loading should not invent a high cap.
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p)
-        assert cfg["inference"].get("n_generations", 5) >= 1000
+        assert "n_generations" not in cfg["inference"]
 
     def test_no_warning_without_wall_time(self, tmp_path, minimal_config):
         """Without max_wall_time_s, low n_generations should not warn."""

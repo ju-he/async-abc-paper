@@ -146,8 +146,13 @@ def _simulation_count(records: Iterable[ParticleRecord]) -> int:
     return len(records)
 
 
+def _completed_by_budget(record: ParticleRecord, budget_s: float) -> bool:
+    completion_time = record.sim_end_time if record.sim_end_time is not None else record.wall_time
+    return float(completion_time) <= float(budget_s)
+
+
 def _attempt_count_upto(records: Iterable[ParticleRecord], budget_s: float) -> int:
-    subset = [record for record in records if float(record.wall_time) <= float(budget_s)]
+    subset = [record for record in records if _completed_by_budget(record, budget_s)]
     if not subset:
         return 0
     return _simulation_count(subset)
@@ -161,7 +166,7 @@ def _best_tolerance_upto(records: Iterable[ParticleRecord], budget_s: float) -> 
     values = [
         float(record.tolerance)
         for record in records
-        if record.tolerance is not None and float(record.wall_time) <= float(budget_s)
+        if record.tolerance is not None and _completed_by_budget(record, budget_s)
     ]
     return min(values) if values else float("nan")
 

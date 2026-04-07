@@ -25,6 +25,11 @@
 - `experiments/tests/mpi_integration_helper.py`
 - `experiments/tests/mpi_abc_smc_baseline_helper.py`
 
+**Follow-up:** Updated stale config tests that still expected the removed
+`n_generations` warning/auto-inflation, and made scaling budget summaries use
+`sim_end_time` as the completion boundary with a `wall_time` fallback for older
+records.
+
 ## 2026-04-05/06: 48-worker hang in abc_smc_baseline MPI path (two bugs)
 
 ### Bug 1: inter-comm teardown race (fixed first)

@@ -930,6 +930,48 @@ class TestScalingRunner:
             "the CSV cannot support budget-matched comparisons"
         )
 
+    def test_budget_summary_uses_sim_end_time_for_completed_work(self):
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        records = [
+            test_helpers.ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=1,
+                step=1,
+                params={"mu": 0.0},
+                loss=0.0,
+                weight=1.0,
+                tolerance=2.0,
+                wall_time=0.1,
+                sim_start_time=0.0,
+                sim_end_time=0.6,
+                generation=0,
+                record_kind="simulation_attempt",
+                attempt_count=1,
+            ),
+            test_helpers.ParticleRecord(
+                method="abc_smc_baseline",
+                replicate=0,
+                seed=1,
+                step=2,
+                params={"mu": 0.1},
+                loss=0.1,
+                weight=1.0,
+                tolerance=1.0,
+                wall_time=0.7,
+                sim_start_time=0.6,
+                sim_end_time=0.7,
+                generation=0,
+                record_kind="simulation_attempt",
+                attempt_count=2,
+            ),
+        ]
+
+        assert module._attempt_count_upto(records, 0.5) == 0
+        assert module._attempt_count_upto(records, 0.65) == 1
+        assert math.isnan(module._best_tolerance_upto(records, 0.5))
+        assert module._best_tolerance_upto(records, 0.65) == 2.0
+
 
 class TestTimingComparison:
     def test_small_mode_estimate_is_included_in_comparison(self, tmp_path):

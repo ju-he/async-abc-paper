@@ -1,1 +1,0 @@
-bst/sn-mathphys-num.bst
