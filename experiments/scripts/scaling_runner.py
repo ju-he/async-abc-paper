@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from async_abc.analysis import final_state_results, posterior_quality_curve
 from async_abc.analysis.final_state import base_method_name
 from async_abc.benchmarks import make_benchmark
+from async_abc.inference.method_registry import _PYABC_METHODS
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
 from async_abc.io.records import ParticleRecord, load_records, write_records
@@ -809,83 +810,85 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         for n_workers in worker_counts:
-            for k in k_values:
-                combo_records: list[ParticleRecord] = []
-                combo_throughput_rows: list[dict] = []
-                combo_budget_rows: list[dict] = []
+            # Per-k accumulators, filled across both non-MPI and MPI passes.
+            k_combo_records: dict[Any, list[ParticleRecord]] = {}
+            k_combo_throughput: dict[Any, list[dict]] = {}
+            k_combo_budget: dict[Any, list[dict]] = {}
+            k_inference_cfgs: dict[Any, dict] = {}
+            k_max_sims: dict[Any, int] = {}
 
-                requested_max_simulations = _requested_max_simulations(
+            for k in k_values:
+                req_max_sims = _requested_max_simulations(
                     cfg["inference"],
                     n_workers=int(n_workers),
                     k=int(k),
                     policy=max_simulations_policy,
                 )
                 checkpoint_tag = f"w{int(n_workers)}_k{int(k)}"
-                inference_cfg = {
+                k_inference_cfgs[k] = {
                     **cfg["inference"],
                     "n_workers": int(n_workers),
                     "k": int(k),
-                    "max_simulations": int(requested_max_simulations),
+                    "max_simulations": int(req_max_sims),
                     "_checkpoint_tag": checkpoint_tag,
                 }
-                for base_method in cfg["methods"]:
-                    stop_policy = _stop_policy_for_method(base_method)
-                    method_variant = _tagged_method_name(base_method, int(k), int(n_workers))
-                    method_inference_cfg = dict(inference_cfg)
-                    if wall_time_limit_s is not None and stop_policy == "wall_time_exact":
-                        method_inference_cfg["max_wall_time_s"] = float(wall_time_limit_s)
-                    elif "max_wall_time_s" in method_inference_cfg:
-                        method_inference_cfg.pop("max_wall_time_s", None)
-                    for replicate, seed in enumerate(seeds):
-                        if (str(n_workers), str(k), base_method, str(replicate)) in done:
-                            logger.info(
-                                "[scaling] --extend: skipping n_workers=%s k=%s %s replicate=%s",
-                                n_workers,
-                                k,
+                k_max_sims[k] = req_max_sims
+                k_combo_records[k] = []
+                k_combo_throughput[k] = []
+                k_combo_budget[k] = []
+
+            def _run_workloads(methods, *, mpi_executor=None):
+                """Run a set of methods across all k-values and replicates.
+
+                When *mpi_executor* is provided, it is forwarded to
+                ``run_method_distributed`` so pyABC methods reuse the
+                caller's ``MPICommExecutor`` instead of creating their own.
+                """
+                for k in k_values:
+                    inference_cfg = k_inference_cfgs[k]
+                    requested_max_simulations = k_max_sims[k]
+                    for base_method in methods:
+                        stop_policy = _stop_policy_for_method(base_method)
+                        method_variant = _tagged_method_name(base_method, int(k), int(n_workers))
+                        method_inference_cfg = dict(inference_cfg)
+                        if wall_time_limit_s is not None and stop_policy == "wall_time_exact":
+                            method_inference_cfg["max_wall_time_s"] = float(wall_time_limit_s)
+                        elif "max_wall_time_s" in method_inference_cfg:
+                            method_inference_cfg.pop("max_wall_time_s", None)
+                        for replicate, seed in enumerate(seeds):
+                            if (str(n_workers), str(k), base_method, str(replicate)) in done:
+                                logger.info(
+                                    "[scaling] --extend: skipping n_workers=%s k=%s %s replicate=%s",
+                                    n_workers,
+                                    k,
+                                    base_method,
+                                    replicate,
+                                )
+                                continue
+
+                            extra_kw: dict[str, Any] = {}
+                            if mpi_executor is not None:
+                                extra_kw["mpi_executor"] = mpi_executor
+                            run_start = time.time()
+                            records = run_method_distributed(
                                 base_method,
+                                benchmark.simulate,
+                                benchmark.limits,
+                                method_inference_cfg,
+                                output_dir,
                                 replicate,
+                                seed,
+                                **extra_kw,
                             )
-                            continue
+                            run_elapsed = time.time() - run_start
+                            if not is_root_rank():
+                                continue
 
-                        run_start = time.time()
-                        records = run_method_distributed(
-                            base_method,
-                            benchmark.simulate,
-                            benchmark.limits,
-                            method_inference_cfg,
-                            output_dir,
-                            replicate,
-                            seed,
-                        )
-                        run_elapsed = time.time() - run_start
-                        if not is_root_rank():
-                            continue
+                            tagged_records = _tag_records(records, method_variant)
+                            true_params = _true_params_from_cfg(tagged_records, cfg["benchmark"])
+                            k_combo_records[k].extend(tagged_records)
 
-                        tagged_records = _tag_records(records, method_variant)
-                        true_params = _true_params_from_cfg(tagged_records, cfg["benchmark"])
-                        combo_records.extend(tagged_records)
-
-                        summary_row = _final_summary_row(
-                            tagged_records,
-                            base_method=base_method,
-                            method_variant=method_variant,
-                            k=int(k),
-                            n_workers=int(n_workers),
-                            replicate=int(replicate),
-                            seed=int(seed),
-                            requested_max_simulations=int(requested_max_simulations),
-                            max_wall_time_s=wall_time_limit_s,
-                            test_mode=test_mode,
-                            true_params=true_params,
-                            stop_policy=stop_policy,
-                        )
-                        if summary_row["elapsed_wall_time_s"] <= 0 and run_elapsed > 0:
-                            summary_row["elapsed_wall_time_s"] = float(run_elapsed)
-                            n_sims = int(summary_row["n_simulations"])
-                            summary_row["throughput_sims_per_s"] = float(n_sims / run_elapsed)
-                        combo_throughput_rows.append(summary_row)
-                        combo_budget_rows.extend(
-                            _budget_summary_rows(
+                            summary_row = _final_summary_row(
                                 tagged_records,
                                 base_method=base_method,
                                 method_variant=method_variant,
@@ -895,36 +898,86 @@ def main(argv: list[str] | None = None) -> None:
                                 seed=int(seed),
                                 requested_max_simulations=int(requested_max_simulations),
                                 max_wall_time_s=wall_time_limit_s,
-                                wall_time_budgets_s=wall_time_budgets_s,
                                 test_mode=test_mode,
                                 true_params=true_params,
+                                stop_policy=stop_policy,
                             )
-                        )
+                            if summary_row["elapsed_wall_time_s"] <= 0 and run_elapsed > 0:
+                                summary_row["elapsed_wall_time_s"] = float(run_elapsed)
+                                n_sims = int(summary_row["n_simulations"])
+                                summary_row["throughput_sims_per_s"] = float(n_sims / run_elapsed)
+                            k_combo_throughput[k].append(summary_row)
+                            k_combo_budget[k].extend(
+                                _budget_summary_rows(
+                                    tagged_records,
+                                    base_method=base_method,
+                                    method_variant=method_variant,
+                                    k=int(k),
+                                    n_workers=int(n_workers),
+                                    replicate=int(replicate),
+                                    seed=int(seed),
+                                    requested_max_simulations=int(requested_max_simulations),
+                                    max_wall_time_s=wall_time_limit_s,
+                                    wall_time_budgets_s=wall_time_budgets_s,
+                                    test_mode=test_mode,
+                                    true_params=true_params,
+                                )
+                            )
 
+            all_methods = list(cfg["methods"])
+            mpi_methods = [m for m in all_methods if m in _PYABC_METHODS]
+            non_mpi_methods = [m for m in all_methods if m not in _PYABC_METHODS]
+            use_shared_executor = bool(mpi_methods) and int(n_workers) > 1
+
+            # Pass 1: non-MPI methods (e.g. async_propulate_abc) — all ranks
+            # participate normally.
+            if non_mpi_methods:
+                _run_workloads(non_mpi_methods)
+
+            # Pass 2: MPI-executor methods (pyABC baselines) — one shared
+            # MPICommExecutor avoids repeated Create_intercomm/Disconnect
+            # cycles that deadlock ParaStation MPI at high rank counts.
+            if use_shared_executor:
+                from mpi4py import MPI
+                from mpi4py.futures import MPICommExecutor
+
+                with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
+                    if executor is not None:
+                        _run_workloads(mpi_methods, mpi_executor=executor)
+                    # Workers block in server loop until root finishes all
+                    # MPI-executor workloads and exits the context.
+                if MPI.COMM_WORLD.Get_size() > 1:
+                    MPI.COMM_WORLD.Barrier()
+            elif mpi_methods:
+                # Single worker or n_workers==1: no MPI executor needed.
+                _run_workloads(mpi_methods)
+
+            # Flush per-k combo data.
+            for k in k_values:
                 if is_root_rank():
                     _merge_and_write_combo_records(
                         output_dir,
                         n_workers=int(n_workers),
                         k=int(k),
-                        records=combo_records,
+                        records=k_combo_records[k],
                     )
                     _merge_and_write_combo_rows(
                         path=_throughput_shard_path(output_dir.data, int(n_workers), int(k)),
-                        rows=combo_throughput_rows,
+                        rows=k_combo_throughput[k],
                         fieldnames=_THROUGHPUT_FIELDNAMES,
                         key_cols=["n_workers", "k", "base_method", "replicate"],
                         sort_fn=_sort_throughput_rows,
                     )
                     _merge_and_write_combo_rows(
                         path=_budget_shard_path(output_dir.data, int(n_workers), int(k)),
-                        rows=combo_budget_rows,
+                        rows=k_combo_budget[k],
                         fieldnames=_BUDGET_FIELDNAMES,
                         key_cols=["n_workers", "k", "base_method", "replicate", "budget_s"],
                         sort_fn=_sort_budget_rows,
                     )
-                    aggregate_records.extend(combo_records)
-                    aggregate_throughput_rows.extend(combo_throughput_rows)
-                    aggregate_budget_rows.extend(combo_budget_rows)
+                    aggregate_records.extend(k_combo_records[k])
+                    aggregate_throughput_rows.extend(k_combo_throughput[k])
+                    aggregate_budget_rows.extend(k_combo_budget[k])
     finally:
         closer = getattr(benchmark, "close", None)
         if callable(closer):

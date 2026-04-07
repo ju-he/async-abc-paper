@@ -46,6 +46,7 @@ def run_method(
     replicate: int,
     seed: int,
     progress: MethodProgressReporter | None = None,
+    **kwargs,
 ) -> List[ParticleRecord]:
     """Dispatch to the named inference method.
 
@@ -65,6 +66,9 @@ def run_method(
         Replicate index.
     seed:
         RNG seed for this replicate.
+    **kwargs:
+        Extra keyword arguments forwarded to the runner if it accepts them
+        (e.g. ``mpi_executor``).
 
     Returns
     -------
@@ -88,12 +92,24 @@ def run_method(
     except (TypeError, ValueError):
         signature = None
 
-    if signature is None:
-        accepts_progress = True
+    # Determine which optional kwargs the runner accepts.
+    extra_kw: Dict[str, Any] = {}
+    if signature is not None:
+        has_var_keyword = any(
+            p.kind == inspect.Parameter.VAR_KEYWORD
+            for p in signature.parameters.values()
+        )
+        for key, value in kwargs.items():
+            if has_var_keyword or key in signature.parameters:
+                extra_kw[key] = value
     else:
+        extra_kw = dict(kwargs)
+
+    accepts_progress = True
+    if signature is not None:
         accepts_progress = any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD or parameter.name == "progress"
-            for parameter in signature.parameters.values()
+            p.kind == inspect.Parameter.VAR_KEYWORD or p.name == "progress"
+            for p in signature.parameters.values()
         )
 
     if accepts_progress:
@@ -105,8 +121,9 @@ def run_method(
             replicate,
             seed,
             progress=progress,
+            **extra_kw,
         )
-    return runner(simulate_fn, limits, inference_cfg, output_dir, replicate, seed)
+    return runner(simulate_fn, limits, inference_cfg, output_dir, replicate, seed, **extra_kw)
 
 
 def method_execution_mode(name: str) -> str:

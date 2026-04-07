@@ -1,5 +1,15 @@
 # Previous Bug Fixes
 
+## 2026-04-07: Shared MPICommExecutor across scaling workloads (48-rank repeated teardown hang)
+
+**Symptom:** `scaling_48` baseline jobs hang on the **second** `abc_smc_baseline` invocation. First baseline completes (with ~40s teardown), second deadlocks in `MPICommExecutor.__exit__()` → `Disconnect()`. Happens with both `mapping` and `concurrent_futures` samplers.
+
+**Root cause:** Each baseline call created a new `MPICommExecutor(COMM_WORLD, root=0)`, triggering a full `Create_intercomm` + `Disconnect` cycle. ParaStation MPI at 48 ranks is fragile under repeated inter-communicator lifecycles — the first cycle works but the second deadlocks in `Disconnect`. Additionally, workers raced ahead via `if not is_root_rank(): continue` in the scaling runner with no inter-workload synchronization.
+
+**Fix:** Restructured the scaling runner to open **one** `MPICommExecutor` per `n_workers` value, reused across all k-values and replicates. Non-MPI methods (e.g. `async_propulate_abc`) run first, then all pyABC baselines execute under the shared executor. Workers stay in the server recv loop processing work from root; root iterates over workloads. One `Create_intercomm` + one `Disconnect` total. Added `mpi_executor` parameter to `run_abc_smc_baseline` and `run_pyabc_smc` to accept an externally-managed executor, threaded through `run_method` and `run_method_distributed` via `**kwargs`.
+
+**Files:** `experiments/scripts/scaling_runner.py`, `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/async_abc/inference/pyabc_wrapper.py`, `experiments/async_abc/inference/method_registry.py`, `experiments/async_abc/utils/runner.py`
+
 ## 2026-04-07: Restore mapping as default pyABC MPI sampler (48-rank teardown hang)
 
 **Symptom:** `scaling_48` baseline jobs (test10) hang indefinitely after `abc.run()` completes. Rank 0 finishes in ~4.7s but 47 workers never exit `MPICommExecutor.__exit__`. Output stops growing entirely. First baseline already showed 37s teardown delay (rank 0: 2.9s, workers: 40.5s). Second baseline never completed teardown.

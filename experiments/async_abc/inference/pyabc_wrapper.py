@@ -223,6 +223,7 @@ def run_pyabc_smc(
     replicate: int,
     seed: int,
     progress=None,
+    mpi_executor=None,
 ) -> List[ParticleRecord]:
     """Run synchronous ABC-SMC via pyABC.
 
@@ -298,50 +299,58 @@ def run_pyabc_smc(
                 "Install it with: pip install mpi4py"
             ) from exc
 
+        def _run_with_executor(executor):
+            logger.info(
+                "[pyabc] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
+                mpi_sampler,
+                int(n_procs),
+                (
+                    str(int(client_max_jobs))
+                    if client_max_jobs is not None
+                    else "ignored"
+                ),
+            )
+            if mpi_sampler == "mapping":
+                sampler = build_pyabc_sampler(
+                    n_procs,
+                    parallel_backend,
+                    mpi_sampler=mpi_sampler,
+                    mpi_map=executor.map,
+                    client_max_jobs=client_max_jobs,
+                )
+            else:
+                tracker = TrackedFutureExecutor(executor)
+                sampler = build_pyabc_sampler(
+                    n_procs,
+                    parallel_backend,
+                    mpi_sampler=mpi_sampler,
+                    cfuture_executor=tracker,
+                    client_max_jobs=client_max_jobs,
+                )
+            return _run_pyabc_smc_with_sampler(
+                sampler=sampler,
+                simulate_fn=simulate_fn,
+                limits=limits,
+                max_sims=max_sims,
+                k=k,
+                tol_init=tol_init,
+                output_dir=output_dir,
+                replicate=replicate,
+                seed=seed,
+                checkpoint_tag=checkpoint_tag,
+                max_wall_time_s=max_wall_time_s,
+                progress=progress,
+            )
+
+        # Shared executor path: caller manages MPICommExecutor lifecycle.
+        if mpi_executor is not None:
+            return _run_with_executor(mpi_executor)
+
+        # Self-managed executor path: create and destroy per call.
         result: List[ParticleRecord] = []
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is not None:
-                logger.info(
-                    "[pyabc] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
-                    mpi_sampler,
-                    int(n_procs),
-                    (
-                        str(int(client_max_jobs))
-                        if client_max_jobs is not None
-                        else "ignored"
-                    ),
-                )
-                if mpi_sampler == "mapping":
-                    sampler = build_pyabc_sampler(
-                        n_procs,
-                        parallel_backend,
-                        mpi_sampler=mpi_sampler,
-                        mpi_map=executor.map,
-                        client_max_jobs=client_max_jobs,
-                    )
-                else:
-                    tracker = TrackedFutureExecutor(executor)
-                    sampler = build_pyabc_sampler(
-                        n_procs,
-                        parallel_backend,
-                        mpi_sampler=mpi_sampler,
-                        cfuture_executor=tracker,
-                        client_max_jobs=client_max_jobs,
-                    )
-                result = _run_pyabc_smc_with_sampler(
-                    sampler=sampler,
-                    simulate_fn=simulate_fn,
-                    limits=limits,
-                    max_sims=max_sims,
-                    k=k,
-                    tol_init=tol_init,
-                    output_dir=output_dir,
-                    replicate=replicate,
-                    seed=seed,
-                    checkpoint_tag=checkpoint_tag,
-                    max_wall_time_s=max_wall_time_s,
-                    progress=progress,
-                )
+                result = _run_with_executor(executor)
         if MPI.COMM_WORLD.Get_size() > 1:
             MPI.COMM_WORLD.Barrier()
         return result

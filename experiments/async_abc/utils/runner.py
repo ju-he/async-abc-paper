@@ -755,6 +755,7 @@ def run_method_distributed(
     output_dir: OutputDir,
     replicate: int,
     seed: int,
+    **kwargs,
 ) -> List[ParticleRecord]:
     """Execute one inference method with rank-aware coordination."""
     execution_mode = method_execution_mode_for_cfg(name, inference_cfg, simulate_fn)
@@ -783,6 +784,7 @@ def run_method_distributed(
                 replicate,
                 seed,
                 progress=progress,
+                **kwargs,
             )
         except ImportError as exc:
             progress.fail(exc)
@@ -813,6 +815,7 @@ def run_method_distributed(
                     replicate,
                     seed,
                     progress=progress,
+                    **kwargs,
                 )
             except ImportError as exc:
                 progress.fail(exc)
@@ -860,6 +863,7 @@ def run_method_distributed(
                 replicate,
                 seed,
                 progress=progress,
+                **kwargs,
             )
             progress.finish(records=len(records))
         except ImportError as exc:

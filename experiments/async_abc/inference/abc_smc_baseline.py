@@ -199,6 +199,7 @@ def run_abc_smc_baseline(
     replicate: int,
     seed: int,
     progress=None,
+    mpi_executor=None,
 ) -> List[ParticleRecord]:
     """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
 
@@ -280,92 +281,74 @@ def run_abc_smc_baseline(
                 "Install it with: pip install mpi4py"
             ) from exc
 
+        def _run_with_executor(executor):
+            logger.info(
+                "[abc_smc_baseline] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
+                mpi_sampler,
+                int(n_procs),
+                (
+                    str(int(client_max_jobs))
+                    if client_max_jobs is not None
+                    else "ignored"
+                ),
+            )
+            if mpi_sampler == "mapping":
+                sampler = build_pyabc_sampler(
+                    n_procs,
+                    parallel_backend,
+                    mpi_sampler=mpi_sampler,
+                    mpi_map=executor.map,
+                    client_max_jobs=client_max_jobs,
+                )
+            else:
+                tracker = TrackedFutureExecutor(executor)
+                sampler = build_pyabc_sampler(
+                    n_procs,
+                    parallel_backend,
+                    mpi_sampler=mpi_sampler,
+                    cfuture_executor=tracker,
+                    client_max_jobs=client_max_jobs,
+                )
+            return _run_abc_smc_baseline_with_sampler(
+                sampler=sampler,
+                simulate_fn=simulate_fn,
+                limits=limits,
+                max_sims=max_sims,
+                k=k,
+                tol_init=tol_init,
+                n_generations=n_generations,
+                output_dir=output_dir,
+                replicate=replicate,
+                seed=seed,
+                checkpoint_tag=checkpoint_tag,
+                max_wall_time_s=max_wall_time_s,
+                progress=progress,
+            )
+
+        # Shared executor path: caller manages MPICommExecutor lifecycle.
+        # Only root calls this — workers are in the server recv loop.
+        if mpi_executor is not None:
+            return _run_with_executor(mpi_executor)
+
+        # Self-managed executor path: create and destroy per call.
         result: List[ParticleRecord] = []
         context_exit_start = None
         with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
             if executor is not None:
-                logger.info(
-                    "[abc_smc_baseline] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
-                    mpi_sampler,
-                    int(n_procs),
-                    (
-                        str(int(client_max_jobs))
-                        if client_max_jobs is not None
-                        else "ignored"
-                    ),
-                )
-                if mpi_sampler == "mapping":
-                    sampler = build_pyabc_sampler(
-                        n_procs,
-                        parallel_backend,
-                        mpi_sampler=mpi_sampler,
-                        mpi_map=executor.map,
-                        client_max_jobs=client_max_jobs,
-                    )
-                else:
-                    tracker = TrackedFutureExecutor(executor)
-                    sampler = build_pyabc_sampler(
-                        n_procs,
-                        parallel_backend,
-                        mpi_sampler=mpi_sampler,
-                        cfuture_executor=tracker,
-                        client_max_jobs=client_max_jobs,
-                    )
-                result = _run_abc_smc_baseline_with_sampler(
-                    sampler=sampler,
-                    simulate_fn=simulate_fn,
-                    limits=limits,
-                    max_sims=max_sims,
-                    k=k,
-                    tol_init=tol_init,
-                    n_generations=n_generations,
-                    output_dir=output_dir,
-                    replicate=replicate,
-                    seed=seed,
-                    checkpoint_tag=checkpoint_tag,
-                    max_wall_time_s=max_wall_time_s,
-                    progress=progress,
-                )
+                result = _run_with_executor(executor)
                 context_exit_start = time.monotonic()
-                if mpi_sampler == "concurrent_futures":
-                    pending_before_shutdown = tracker.pending_futures()
-                    logger.debug(
-                        "[abc_smc_baseline] abc.run returned: submitted=%d pending=%d",
-                        tracker.submitted_count,
-                        len(pending_before_shutdown),
-                    )
-                    pending_after_run = tracker.pending_futures(exclude_cancelled=True)
-                    logger.debug(
-                        "[abc_smc_baseline] handing shutdown to MPICommExecutor.__exit__: submitted=%d pending=%d non_cancelled_pending=%d",
-                        tracker.submitted_count,
-                        len(pending_before_shutdown),
-                        len(pending_after_run),
-                    )
-                else:
-                    logger.info(
-                        "[abc_smc_baseline] abc.run returned under mapping MPI sampler; exiting MPICommExecutor context",
-                    )
             # Workers (executor is None) fall through here without returning,
             # so that all ranks exit the with-block together.
-        context_exit_elapsed = None
         if context_exit_start is not None:
-            context_exit_elapsed = time.monotonic() - context_exit_start
             logger.debug(
                 "[abc_smc_baseline] MPICommExecutor context exited in %.3fs",
-                context_exit_elapsed,
+                time.monotonic() - context_exit_start,
             )
-        # All 48 ranks have now fully exited MPICommExecutor (root completed
-        # executor.__exit__ shutdown()+Disconnect; workers completed
-        # server_stop+Disconnect.
-        # Barrier before returning: prevents workers from racing ahead to
-        # COMM_WORLD collectives (allgather in run_method_distributed) while
-        # root is still tearing down the inter-communicator inside __exit__,
-        # which deadlocks ParaStation MPI.
-        barrier_start = None
+        # Barrier after teardown: prevents workers from racing ahead to
+        # COMM_WORLD collectives while root is still in Disconnect().
         if MPI.COMM_WORLD.Get_size() > 1:
             barrier_start = time.monotonic()
             MPI.COMM_WORLD.Barrier()
-        if barrier_start is not None:
             logger.debug(
                 "[abc_smc_baseline] post-exit COMM_WORLD barrier completed in %.3fs",
                 time.monotonic() - barrier_start,
