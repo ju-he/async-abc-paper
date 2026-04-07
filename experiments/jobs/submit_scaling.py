@@ -14,7 +14,7 @@ job and the per-combination wall cap:
 
     workload_count = len(k_values) × len(methods) × n_replicates
     time_limit     = clamp(
-        safety × workload_count × effective_wall_time_limit_s + finalize_slack_s,
+        safety × workload_count × (effective_wall_time_limit_s + mpi_overhead_s) + finalize_slack_s,
         min=15 min,
         max=24 h,
     )
@@ -116,6 +116,12 @@ def _read_timing_sim_throughput(
     return latest
 
 
+# Per-workload overhead for MPI executor lifecycle (Create_intercomm +
+# Disconnect on ParaStation MPI).  Measured at ~50 s with 48 workers;
+# padded to 60 s for safety.
+MPI_EXECUTOR_OVERHEAD_S = 60.0
+
+
 def _job_time_hours(
     workload_count: int,
     *,
@@ -124,9 +130,11 @@ def _job_time_hours(
     min_time: float,
     max_time: float,
     finalize_slack_s: float,
+    mpi_overhead_s: float = MPI_EXECUTOR_OVERHEAD_S,
 ) -> float:
+    per_workload = float(wall_time_limit_s) + float(mpi_overhead_s)
     time_hours = (
-        float(safety) * int(workload_count) * float(wall_time_limit_s) + float(finalize_slack_s)
+        float(safety) * int(workload_count) * per_workload + float(finalize_slack_s)
     ) / 3600.0
     return max(float(min_time), min(float(max_time), time_hours))
 

@@ -1,5 +1,19 @@
 # Previous Bug Fixes
 
+## 2026-04-07: SLURM time budget too small for MPICommExecutor overhead
+
+**Symptom:** All test-mode scaling_48 jobs (test5-test9) killed by `CANCELLED DUE TO TIME LIMIT` after completing only 2 of 8 k-values. Appeared as a "hang" but was a deterministic timeout.
+
+**Root cause:** `submit_scaling.py`'s `_job_time_hours` budgets `wall_time_limit_s` (30s in test mode) per workload. But each `abc_smc_baseline` MPI call incurs ~50s of `MPICommExecutor` lifecycle overhead (`Create_intercomm` + `Disconnect` on ParaStation MPI with 48 workers). The overhead is 167% of the budgeted 30s per workload. This is test-mode-specific: in production, 50s overhead vs 900s wall cap is only 5.6%.
+
+**Fix:** Added `MPI_EXECUTOR_OVERHEAD_S = 60` constant to `_job_time_hours`, so each workload is budgeted `wall_time_limit_s + mpi_overhead_s`. Test-mode budget goes from 21 min to ~53 min.
+
+**Follow-up:** Reduced `test_k_values` from 8 to 3 (`[10, 100, 1000]`) in both `scaling.json` and `small/scaling.json`. This cuts test workloads from 16→6 and SLURM budget from ~53→~23 min. 8 k-values was excessive for pipeline validation.
+
+**Follow-up:** Restored `wall_time_exact` stop policy for `abc_smc_baseline` in scaling. The Apr 6 revert switched baseline to `simulation_cap_approx` based on misdiagnosed MPI hangs that were actually SLURM timeouts. Both scaling methods now use fixed wall-clock budgets for apples-to-apples comparison, matching the paper's experimental design.
+
+**Files:** `experiments/jobs/submit_scaling.py`, `experiments/configs/scaling.json`, `experiments/configs/small/scaling.json`, `experiments/scripts/scaling_runner.py`
+
 ## 2026-04-06: revert pyABC wall-time stop path in scaling, restore futures default
 
 **Symptom:** After switching scaling to inject `max_wall_time_s` into `abc_smc_baseline` / `pyabc_smc`, cluster jobs could freeze during pyABC MPI teardown, and config loading silently inflated `n_generations` to 1000 for any wall-time-tagged run.

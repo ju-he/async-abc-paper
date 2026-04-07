@@ -592,7 +592,7 @@ def _requested_max_simulations(inference_cfg: Dict[str, Any], *, n_workers: int,
 
 
 def _stop_policy_for_method(base_method: str) -> str:
-    if base_method in {"async_propulate_abc"}:
+    if base_method in {"async_propulate_abc", "abc_smc_baseline"}:
         return "wall_time_exact"
     return "simulation_cap_approx"
 

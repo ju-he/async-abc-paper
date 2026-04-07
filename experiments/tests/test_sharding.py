@@ -1044,11 +1044,11 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
         assert "Standalone:[48]" in out
-        assert "k_values:  [10, 50, 100, 200, 500, 1000, 5000, 10000]" in out
+        assert "k_values:  [10, 100, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      1" in out
         assert "Wall cap:  30.0 s" in out
-        assert "Workload:  16 combos per worker-count job" in out
+        assert "Workload:  6 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
         assert len(scripts) == 2
@@ -1056,7 +1056,7 @@ class TestScalingSubmitter:
         assert "scaling_packed.sh" in all_text
         assert "--workers 1,4" in all_text
         assert "--test" in all_text
-        assert "#SBATCH --time=00:21:00" in all_text
+        assert "#SBATCH --time=00:23:00" in all_text
 
     def test_submit_scaling_small_uses_small_tier_worker_counts(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
@@ -1111,18 +1111,18 @@ class TestScalingSubmitter:
         assert "Mode:      small_test" in out
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
-        assert "k_values:  [10, 50, 100, 200, 500, 1000]" in out
+        assert "k_values:  [10, 100, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      1" in out
         assert "Wall cap:  30.0 s" in out
-        assert "Workload:  12 combos per worker-count job" in out
+        assert "Workload:  6 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
         assert len(scripts) == 2
         all_text = "\n".join(s.read_text() for s in scripts)
         assert "--small" in all_text
         assert "--test" in all_text
-        assert "#SBATCH --time=00:17:00" in all_text
+        assert "#SBATCH --time=00:23:00" in all_text
 
     def test_submit_scaling_forwards_custom_config_path(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
