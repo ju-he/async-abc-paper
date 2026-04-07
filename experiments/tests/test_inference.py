@@ -1011,7 +1011,7 @@ class TestPyabcWrapperFixes:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [("mpi", "concurrent_futures", False, True, 2)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_same_seed_reproducible(self, tmp_output_dir):
         from async_abc.io.paths import OutputDir
@@ -1358,16 +1358,16 @@ class TestBuildPyabcSampler:
         build_pyabc_sampler(n_procs=4, parallel_backend="multicore")
         assert calls == [4]
 
-    def test_mpi_backend_defaults_to_concurrent_future_sampler(self):
+    def test_mpi_backend_defaults_to_mapping_sampler(self):
         import pyabc
         from async_abc.inference.pyabc_sampler import build_pyabc_sampler
 
         sampler = build_pyabc_sampler(
             n_procs=8,
             parallel_backend="mpi",
-            cfuture_executor=object(),
+            mpi_map=lambda f, xs: list(map(f, xs)),
         )
-        assert isinstance(sampler, pyabc.ConcurrentFutureSampler)
+        assert isinstance(sampler, pyabc.MappingSampler)
 
     def test_mpi_concurrent_futures_backend_returns_concurrent_future_sampler(self):
         import pyabc
@@ -1419,16 +1419,16 @@ class TestBuildPyabcSampler:
                 mpi_sampler="concurrent_futures",
             )
 
-    def test_mpi_n1_still_uses_concurrent_future_sampler_by_default(self):
+    def test_mpi_n1_still_uses_mapping_sampler_by_default(self):
         import pyabc
         from async_abc.inference.pyabc_sampler import build_pyabc_sampler
 
         sampler = build_pyabc_sampler(
             n_procs=1,
             parallel_backend="mpi",
-            cfuture_executor=object(),
+            mpi_map=lambda f, xs: list(map(f, xs)),
         )
-        assert isinstance(sampler, pyabc.ConcurrentFutureSampler)
+        assert isinstance(sampler, pyabc.MappingSampler)
 
     def test_invalid_backend_raises_value_error(self):
         from async_abc.inference.pyabc_sampler import build_pyabc_sampler
@@ -1489,7 +1489,7 @@ class TestBuildPyabcSampler:
             is None
         )
 
-    def test_resolve_pyabc_mpi_sampler_defaults_to_concurrent_futures(self):
+    def test_resolve_pyabc_mpi_sampler_defaults_to_mapping(self):
         from async_abc.inference.pyabc_sampler import resolve_pyabc_mpi_sampler
 
         assert (
@@ -1498,22 +1498,20 @@ class TestBuildPyabcSampler:
                 parallel_backend="mpi",
                 method_name="pyabc_smc",
             )
-            == "concurrent_futures"
+            == "mapping"
         )
 
-    def test_resolve_pyabc_mpi_sampler_honors_mapping_with_warning(self, caplog):
+    def test_resolve_pyabc_mpi_sampler_honors_explicit_mapping(self):
         from async_abc.inference.pyabc_sampler import resolve_pyabc_mpi_sampler
 
-        with caplog.at_level(logging.WARNING):
-            assert (
-                resolve_pyabc_mpi_sampler(
-                    {"pyabc_mpi_sampler": "mapping"},
-                    parallel_backend="mpi",
-                    method_name="abc_smc_baseline",
-                )
-                == "mapping"
+        assert (
+            resolve_pyabc_mpi_sampler(
+                {"pyabc_mpi_sampler": "mapping"},
+                parallel_backend="mpi",
+                method_name="abc_smc_baseline",
             )
-        assert "no longer the default" in caplog.text
+            == "mapping"
+        )
 
     def test_resolve_pyabc_mpi_sampler_honors_legacy_alias_with_warning(self, caplog):
         from async_abc.inference.pyabc_sampler import resolve_pyabc_mpi_sampler
@@ -1638,7 +1636,7 @@ class TestPyabcWrapperMpiBackend:
         bm = _gaussian_bm()
         od = OutputDir(tmp_output_dir, "pyabc_mpi").ensure()
         run_pyabc_smc(bm.simulate, bm.limits, {**_test_inference_cfg(), "parallel_backend": "mpi", "n_workers": 2}, od, replicate=0, seed=1)
-        assert calls == [("mpi", "concurrent_futures", False, True, 2)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_mpi_legacy_backend_is_forwarded(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1724,7 +1722,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1754,7 +1752,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
@@ -1787,7 +1785,7 @@ class TestPyabcWrapperMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(4, "mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [(4, "mpi", "mapping", True, False, None)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
@@ -1842,7 +1840,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", "concurrent_futures", False, True, 2)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_mpi_legacy_backend_key_is_forwarded(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1929,7 +1927,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_parallel_multicore_request_is_overridden_to_mpi(self, tmp_output_dir, monkeypatch):
         import pyabc
@@ -1964,7 +1962,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [("mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [("mpi", "mapping", True, False, None)]
 
     def test_parallel_default_uses_mpi_even_for_benchmarks_marked_unsafe(
         self, tmp_output_dir, monkeypatch
@@ -1997,7 +1995,7 @@ class TestAbcSmcBaselineMpiBackend:
             replicate=0,
             seed=1,
         )
-        assert calls == [(4, "mpi", "concurrent_futures", False, True, 4)]
+        assert calls == [(4, "mpi", "mapping", True, False, None)]
 
     def test_non_root_returns_no_records_under_mpi_backend(self, tmp_output_dir, monkeypatch):
         from async_abc.io.paths import OutputDir
@@ -2092,7 +2090,7 @@ class TestMpiIntegration:
         data = json.loads(output_file.read_text())
         assert data["n_records"] > 0
         assert data["method"] == "pyabc_smc"
-        assert data["pyabc_mpi_sampler"] == "concurrent_futures"
+        assert data["pyabc_mpi_sampler"] == "mapping"
         assert data["barrier_reached"]
 
     def test_abc_smc_baseline_shutdown_does_not_hang(self, tmp_path):

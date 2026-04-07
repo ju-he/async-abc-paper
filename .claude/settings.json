@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Read(//home/juhe/remotes/scratch/herold2/**)",
-      "Bash(/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_sharding.py -k \"submit_scaling\" -x --tb=short)"
+      "Bash(/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_sharding.py -k \"submit_scaling\" -x --tb=short)",
+      "Bash(/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/python -m pytest tests/test_inference.py -x -v -k \"sampler or mpi_backend_key or mpi_backend_via or mpi_backend_defaults\")"
     ]
   }
 }

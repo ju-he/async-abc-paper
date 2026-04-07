@@ -158,17 +158,18 @@ def resolve_pyabc_mpi_sampler(
 
     configured = inference_cfg.get("pyabc_mpi_sampler")
     if configured in (None, ""):
-        return "concurrent_futures"
+        return "mapping"
 
     if configured == "mapping":
-        logger.warning(
-            "Using %s with pyabc_mpi_sampler=mapping. "
-            "This is a synchronous fallback/debug path and is no longer the default.",
-            method_name,
-        )
         return "mapping"
 
     if configured == "concurrent_futures":
+        logger.warning(
+            "Using %s with pyabc_mpi_sampler=concurrent_futures. "
+            "This path has a known teardown hang at high rank counts on "
+            "ParaStation MPI. The default is now 'mapping'.",
+            method_name,
+        )
         return "concurrent_futures"
 
     if configured == "concurrent_futures_legacy":
@@ -240,7 +241,7 @@ def build_pyabc_sampler(
         return pyabc.MulticoreEvalParallelSampler(n_procs)
 
     elif parallel_backend == "mpi":
-        mpi_sampler = mpi_sampler or "concurrent_futures"
+        mpi_sampler = mpi_sampler or "mapping"
         if mpi_sampler == "mapping":
             if mpi_map is None:
                 raise ValueError(

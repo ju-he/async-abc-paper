@@ -4,6 +4,8 @@ Run via:
     mpirun -n 2 <python> <this_file> <output_json_path> [mpi_sampler] [client_max_jobs] [max_wall_time_s]
 
 Rank 0 runs run_pyabc_smc with parallel_backend="mpi"; rank 1 is the worker.
+The default is the blocking ``MappingSampler`` path; ``concurrent_futures``
+remains selectable as an explicit opt-in.
 On success rank 0 writes a JSON result to the path given as argv[1] and exits 0.
 """
 import json
@@ -22,7 +24,7 @@ if __name__ == '__main__':
     from async_abc.io.paths import OutputDir
 
     output_path = Path(sys.argv[1])
-    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "concurrent_futures"
+    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "mapping"
     client_max_jobs_arg = sys.argv[3] if len(sys.argv) > 3 else None
     client_max_jobs = (
         int(client_max_jobs_arg)

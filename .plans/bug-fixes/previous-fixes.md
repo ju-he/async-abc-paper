@@ -1,5 +1,15 @@
 # Previous Bug Fixes
 
+## 2026-04-07: Restore mapping as default pyABC MPI sampler (48-rank teardown hang)
+
+**Symptom:** `scaling_48` baseline jobs (test10) hang indefinitely after `abc.run()` completes. Rank 0 finishes in ~4.7s but 47 workers never exit `MPICommExecutor.__exit__`. Output stops growing entirely. First baseline already showed 37s teardown delay (rank 0: 2.9s, workers: 40.5s). Second baseline never completed teardown.
+
+**Root cause:** `pyabc.ConcurrentFutureSampler` maintains a speculative future queue via `MPIPoolExecutor`. On ParaStation MPI with 48 ranks, the async teardown of outstanding futures in `MPICommExecutor.__exit__` deadlocks. This is the same hang documented multiple times (Apr 5-6), which the `mapping` sampler was originally introduced to fix. The Apr 6 revert back to `concurrent_futures` default re-introduced the hang.
+
+**Fix:** Changed default `pyabc_mpi_sampler` from `concurrent_futures` to `mapping` in `resolve_pyabc_mpi_sampler()`. `MappingSampler` uses blocking `executor.map()` — no speculative queue, no async teardown, clean exit. `concurrent_futures` remains available as an explicit opt-in with a warning about the known hang.
+
+**Files:** `experiments/async_abc/inference/pyabc_sampler.py`, `experiments/tests/test_inference.py`, `experiments/tests/mpi_integration_helper.py`, `experiments/tests/mpi_abc_smc_baseline_helper.py`
+
 ## 2026-04-07: SLURM time budget too small for MPICommExecutor overhead
 
 **Symptom:** All test-mode scaling_48 jobs (test5-test9) killed by `CANCELLED DUE TO TIME LIMIT` after completing only 2 of 8 k-values. Appeared as a "hang" but was a deterministic timeout.

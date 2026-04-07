@@ -7,8 +7,8 @@ Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
 
 The test exercises the MPI path using the requested pyABC MPI sampler. The
-default is the futures-based ``ConcurrentFutureSampler`` path; ``mapping``
-remains selectable as a fallback/debug option.
+default is the blocking ``MappingSampler`` path; ``concurrent_futures``
+remains selectable as an explicit opt-in.
 
 On success rank 0 writes a JSON result to argv[1] with timing diagnostics for
 all ranks, including the elapsed spread between the fastest and slowest rank.
@@ -28,7 +28,7 @@ if __name__ == "__main__":
     from async_abc.io.paths import OutputDir
 
     output_path = Path(sys.argv[1])
-    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "concurrent_futures"
+    mpi_sampler = sys.argv[2] if len(sys.argv) > 2 else "mapping"
     client_max_jobs_arg = sys.argv[3] if len(sys.argv) > 3 else None
     client_max_jobs = (
         int(client_max_jobs_arg)
