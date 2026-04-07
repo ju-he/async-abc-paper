@@ -101,9 +101,19 @@ def _run_pyabc_smc_with_sampler(
         "[pyabc] abc.run() starting: replicate=%d seed=%d max_sims=%d",
         replicate, seed, max_sims,
     )
+    # When a wall-time cap is set, it should be the sole binding stopping
+    # criterion so that pyabc_smc produces data for the full time window.
+    # The epsilon and simulation caps remain as fallbacks for non-wall-time
+    # runs (e.g. unit tests).
+    if max_wall_time_s is not None:
+        run_minimum_epsilon = 0.0
+        run_max_sims = int(1e12)
+    else:
+        run_minimum_epsilon = tol_init * 0.01
+        run_max_sims = max_sims
     history = abc.run(
-        minimum_epsilon=tol_init * 0.01,
-        max_total_nr_simulations=max_sims,
+        minimum_epsilon=run_minimum_epsilon,
+        max_total_nr_simulations=run_max_sims,
         max_walltime=(
             timedelta(seconds=float(max_wall_time_s))
             if max_wall_time_s is not None

@@ -107,12 +107,15 @@ def infer_stop_policy_by_method(cfg: Dict[str, Any]) -> Dict[str, str]:
     by_method: Dict[str, str] = {}
     for method in cfg.get("methods", []):
         method_name = str(method)
-        if method_name == "pyabc_smc":
+        if max_wall_time_s not in (None, ""):
+            # All methods now run for the full wall-time budget when set.
+            by_method[method_name] = "fixed_walltime"
+        elif method_name == "pyabc_smc":
             by_method[method_name] = "epsilon_target"
         elif method_name == "abc_smc_baseline":
-            by_method[method_name] = "fixed_walltime" if max_wall_time_s not in (None, "") else "fixed_generations"
+            by_method[method_name] = "fixed_generations"
         elif method_name == "async_propulate_abc":
-            by_method[method_name] = "fixed_walltime" if max_wall_time_s not in (None, "") else "fixed_budget"
+            by_method[method_name] = "fixed_budget"
         else:
             by_method[method_name] = "fixed_budget"
     return by_method

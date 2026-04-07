@@ -102,10 +102,20 @@ def _run_abc_smc_baseline_with_sampler(
     # Seed numpy before running so pyABC's internal prior sampling is reproducible
     np.random.seed(seed % (2**31))
     run_start = time.time()
+    # When a wall-time cap is set, it should be the sole binding stopping
+    # criterion so that abc_smc_baseline produces data for the full time
+    # window.  Generation and simulation caps remain as fallbacks for
+    # non-wall-time runs (e.g. unit tests).
+    if max_wall_time_s is not None:
+        run_max_sims = int(1e12)
+        run_max_populations = int(1e6)
+    else:
+        run_max_sims = max_sims
+        run_max_populations = n_generations
     history = abc.run(
         minimum_epsilon=0.0,
-        max_total_nr_simulations=max_sims,
-        max_nr_populations=n_generations,
+        max_total_nr_simulations=run_max_sims,
+        max_nr_populations=run_max_populations,
         max_walltime=(
             timedelta(seconds=float(max_wall_time_s))
             if max_wall_time_s is not None
