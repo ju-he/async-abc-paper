@@ -8,6 +8,8 @@
 
 **Fix:** Restructured the scaling runner to open **one** `MPICommExecutor` per `n_workers` value, reused across all k-values and replicates. Non-MPI methods (e.g. `async_propulate_abc`) run first, then all pyABC baselines execute under the shared executor. Workers stay in the server recv loop processing work from root; root iterates over workloads. One `Create_intercomm` + one `Disconnect` total. Added `mpi_executor` parameter to `run_abc_smc_baseline` and `run_pyabc_smc` to accept an externally-managed executor, threaded through `run_method` and `run_method_distributed` via `**kwargs`.
 
+**Follow-up (test12):** The shared executor itself worked (one `Create_intercomm`/`Disconnect` cycle), but the scaling runner hung after the first k-value completed. Root cause: `_run_workloads` called `run_method_distributed` even with the shared executor active. For `all_ranks` mode, `run_method_distributed` ends with `allgather(error_payload)` expecting all ranks to participate — but workers were trapped in `MPICommExecutor`'s server recv loop and never reached `allgather`. Fixed by calling `run_method` directly (root-only) when `mpi_executor` is provided, bypassing the `allgather` coordination that workers cannot participate in.
+
 **Files:** `experiments/scripts/scaling_runner.py`, `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/async_abc/inference/pyabc_wrapper.py`, `experiments/async_abc/inference/method_registry.py`, `experiments/async_abc/utils/runner.py`
 
 ## 2026-04-07: Restore mapping as default pyABC MPI sampler (48-rank teardown hang)

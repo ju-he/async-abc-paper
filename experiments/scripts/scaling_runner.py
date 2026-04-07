@@ -38,6 +38,8 @@ from async_abc.plotting.reporters import plot_scaling_grid
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
 from async_abc.utils.mpi import is_root_rank
+from async_abc.inference.method_registry import run_method
+from async_abc.utils.progress import MethodProgressReporter
 from async_abc.utils.runner import (
     compute_scaling_factor,
     format_duration,
@@ -866,20 +868,45 @@ def main(argv: list[str] | None = None) -> None:
                                 )
                                 continue
 
-                            extra_kw: dict[str, Any] = {}
-                            if mpi_executor is not None:
-                                extra_kw["mpi_executor"] = mpi_executor
                             run_start = time.time()
-                            records = run_method_distributed(
-                                base_method,
-                                benchmark.simulate,
-                                benchmark.limits,
-                                method_inference_cfg,
-                                output_dir,
-                                replicate,
-                                seed,
-                                **extra_kw,
-                            )
+                            if mpi_executor is not None:
+                                # Shared executor path: workers are in the
+                                # MPICommExecutor server loop and cannot
+                                # participate in allgather, so call run_method
+                                # directly on root instead of
+                                # run_method_distributed.
+                                progress = MethodProgressReporter(
+                                    method_name=base_method,
+                                    replicate=replicate,
+                                    interval_s=float(method_inference_cfg.get(
+                                        "progress_log_interval_s", 10.0)),
+                                )
+                                progress.start(
+                                    total_hint=method_inference_cfg.get("max_simulations"),
+                                    detail="mode=all_ranks",
+                                )
+                                records = run_method(
+                                    base_method,
+                                    benchmark.simulate,
+                                    benchmark.limits,
+                                    method_inference_cfg,
+                                    output_dir,
+                                    replicate,
+                                    seed,
+                                    progress=progress,
+                                    mpi_executor=mpi_executor,
+                                )
+                                progress.finish(records=len(records))
+                            else:
+                                records = run_method_distributed(
+                                    base_method,
+                                    benchmark.simulate,
+                                    benchmark.limits,
+                                    method_inference_cfg,
+                                    output_dir,
+                                    replicate,
+                                    seed,
+                                )
                             run_elapsed = time.time() - run_start
                             if not is_root_rank():
                                 continue

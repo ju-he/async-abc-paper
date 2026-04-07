@@ -272,3 +272,25 @@ else:
 1. Run unit tests: `pytest tests/test_inference.py -x -v`
 2. MPI integration tests (if mpirun available): mapping-default tests should exercise the new path
 3. Cluster validation: rerun scaling_48 to confirm no hang
+
+---
+
+## Actual fix applied (simpler approach)
+
+The `CommWorldMap` plan above was **not implemented**. A simpler restructure was used instead.
+
+### test12 (shared executor + run_method fix)
+
+**Approach:** Share one `MPICommExecutor` across all baseline workloads per `n_workers` value. Non-MPI methods run first, then all pyABC baselines execute under the shared executor. One `Create_intercomm` + one `Disconnect` total.
+
+**scaling_bundle_1_4** (job 13667682): completed successfully in 7m 27s. All k-values and methods completed without issues.
+
+**scaling_48** (job 13667683): **hung after first abc_smc_baseline k=10 completed** (19.7s elapsed, 939 records). Output stopped at 765 lines with no further growth.
+
+**Root cause of test12 hang:** `_run_workloads` called `run_method_distributed` even with the shared executor. For `all_ranks` mode, `run_method_distributed` ends with `allgather(error_payload)` (runner.py:876) expecting all 48 ranks to participate. But workers were trapped in `MPICommExecutor`'s server recv loop — they never reached `allgather`, so root hung waiting for them.
+
+**Fix:** When `mpi_executor` is provided, call `run_method` directly on root instead of `run_method_distributed`. Workers process work internally via the executor's dispatch — no `allgather` coordination needed at the user-code level.
+
+### test13 (pending)
+
+Awaiting cluster validation with the `allgather` fix.
