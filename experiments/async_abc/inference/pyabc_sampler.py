@@ -45,6 +45,136 @@ class TrackedFutureExecutor:
         return getattr(self._inner, name)
 
 
+class CommWorldMap:
+    """COMM_WORLD-based blocking parallel map for pyABC's MappingSampler.
+
+    Replaces ``MPICommExecutor`` to avoid ``Create_intercomm``/``Disconnect``
+    fragility on ParaStation MPI at high rank counts.  Uses only ``bcast``,
+    ``send``, and ``recv`` on ``COMM_WORLD`` — no inter-communicators.
+
+    Usage (all ranks must call the same code path)::
+
+        cmap = CommWorldMap(MPI.COMM_WORLD)
+        if cmap.is_root:
+            sampler = build_pyabc_sampler(..., mpi_map=cmap.map)
+            result = run_abc(sampler=sampler, ...)
+            cmap.shutdown()          # tells workers to exit
+        else:
+            cmap.worker_loop()       # blocks until shutdown
+        comm.Barrier()
+    """
+
+    _SENTINEL = None  # end-of-batch marker for work items
+
+    def __init__(self, comm):
+        self.comm = comm
+        self.rank = comm.Get_rank()
+        self.size = comm.Get_size()
+        self.is_root = self.rank == 0
+        self._shutdown = False
+
+    def map(self, fn, iterable):
+        """Distribute *fn* over *iterable* across MPI workers.  Root-only.
+
+        Broadcasts *fn* to all workers, then distributes items dynamically
+        (one at a time to idle workers) for load balance.  Returns results
+        in submission order.
+        """
+        items = list(iterable)
+
+        # Single-process fallback: no workers to distribute to.
+        if self.size <= 1:
+            return [fn(item) for item in items]
+
+        if not items:
+            self.comm.bcast(("map", fn), root=0)
+            for dest in range(1, self.size):
+                self.comm.send(self._SENTINEL, dest=dest, tag=0)
+            return []
+
+        from mpi4py import MPI
+
+        self.comm.bcast(("map", fn), root=0)
+
+        results = [None] * len(items)
+        next_item = 0
+        active = 0
+
+        # Seed each worker with one item
+        for dest in range(1, self.size):
+            if next_item < len(items):
+                self.comm.send((next_item, items[next_item]), dest=dest, tag=0)
+                next_item += 1
+                active += 1
+            else:
+                self.comm.send(self._SENTINEL, dest=dest, tag=0)
+
+        # Collect results and send more work dynamically
+        while active > 0:
+            status = MPI.Status()
+            response = self.comm.recv(source=MPI.ANY_SOURCE, tag=1, status=status)
+            source = status.Get_source()
+            idx, result_or_error = response
+
+            if isinstance(result_or_error, _WorkerError):
+                # Drain remaining active workers before re-raising
+                active -= 1
+                for dest in range(1, self.size):
+                    if dest != source:
+                        self.comm.send(self._SENTINEL, dest=dest, tag=0)
+                while active > 0:
+                    self.comm.recv(source=MPI.ANY_SOURCE, tag=1)
+                    active -= 1
+                raise result_or_error.exc
+
+            results[idx] = result_or_error
+            active -= 1
+
+            if next_item < len(items):
+                self.comm.send((next_item, items[next_item]), dest=source, tag=0)
+                next_item += 1
+                active += 1
+            else:
+                self.comm.send(self._SENTINEL, dest=source, tag=0)
+
+        return results
+
+    def shutdown(self):
+        """Signal workers to exit their loop.  Root-only, idempotent."""
+        if self._shutdown:
+            return
+        self._shutdown = True
+        if self.size > 1:
+            self.comm.bcast(("shutdown", None), root=0)
+
+    def worker_loop(self):
+        """Process map batches until shutdown.  Workers-only (rank != 0)."""
+        while True:
+            tag, payload = self.comm.bcast(None, root=0)
+            if tag == "shutdown":
+                break
+            fn = payload
+            # Process items until sentinel
+            while True:
+                item = self.comm.recv(source=0, tag=0)
+                if item is self._SENTINEL:
+                    break
+                idx, work = item
+                try:
+                    result = fn(work)
+                    self.comm.send((idx, result), dest=0, tag=1)
+                except Exception as exc:
+                    self.comm.send((idx, _WorkerError(exc)), dest=0, tag=1)
+
+
+class _WorkerError:
+    """Wrapper to distinguish worker exceptions from normal results."""
+    __slots__ = ("exc",)
+
+    def __init__(self, exc):
+        self.exc = exc
+
+
 def _pyabc_parallel_safe(simulate_fn) -> bool:
     """Return whether a benchmark can be shipped to parallel pyABC workers."""
     owner = getattr(simulate_fn, "__self__", None)

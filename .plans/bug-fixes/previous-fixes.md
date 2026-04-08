@@ -1,5 +1,17 @@
 # Previous Bug Fixes
 
+## 2026-04-08: CommWorldMap replaces MPICommExecutor for default mapping sampler
+
+**Symptom:** Non-scaling experiments (`lotka_volterra`, `straggler`, `gaussian_mean`, etc.) hang in `MPICommExecutor.__exit__()` → `Disconnect()` after pyABC methods complete. Two failure modes: (1) at 48 ranks, even a single `Create_intercomm`/`Disconnect` cycle hangs (lotka_volterra `pyabc_smc`); (2) at 16 ranks, repeated cycles hang (straggler, 3rd `abc_smc_baseline` call). The shared-executor fix for the scaling runner doesn't help non-scaling experiments because they use `run_experiment()` / `run_method_distributed()` which creates a new `MPICommExecutor` per method call.
+
+**Root cause:** `MPICommExecutor` uses `Create_intercomm` + `Disconnect` on `COMM_WORLD`, which is fragile on ParaStation MPI at scale. The `Disconnect` call is a collective operation on an inter-communicator that deadlocks non-deterministically at high rank counts.
+
+**Fix:** Added `CommWorldMap` class to `pyabc_sampler.py` — a COMM_WORLD-based blocking parallel map using only `bcast`/`send`/`recv`. No inter-communicators, no `Create_intercomm`, no `Disconnect`. Root broadcasts the function, distributes work items dynamically (one-at-a-time for load balance), and collects ordered results. Workers run a loop processing batches until shutdown. Replaced the self-managed `MPICommExecutor` path in both `abc_smc_baseline.py` and `pyabc_wrapper.py` with `CommWorldMap` for the default `mapping` sampler. The `concurrent_futures` legacy sampler still uses `MPICommExecutor` (opt-in only). The scaling runner's shared `MPICommExecutor` path is unchanged (it still works since it does only one cycle).
+
+**Key design:** All ranks enter `CommWorldMap` within their `run_method` call and all ranks exit it. This means `allgather` in `run_method_distributed` still works — no runner changes needed.
+
+**Files:** `experiments/async_abc/inference/pyabc_sampler.py`, `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/async_abc/inference/pyabc_wrapper.py`, `experiments/tests/test_inference.py`
+
 ## 2026-04-07: Shared MPICommExecutor across scaling workloads (48-rank repeated teardown hang)
 
 **Symptom:** `scaling_48` baseline jobs hang on the **second** `abc_smc_baseline` invocation. First baseline completes (with ~40s teardown), second deadlocks in `MPICommExecutor.__exit__()` → `Disconnect()`. Happens with both `mapping` and `concurrent_futures` samplers.

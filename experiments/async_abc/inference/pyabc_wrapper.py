@@ -15,6 +15,7 @@ from ..utils.seeding import canonical_param_key, canonical_param_key_json, stabl
 from ._attempt_trace import attempt_records_from_events, instrument_simulate, load_attempt_events
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
+    CommWorldMap,
     TrackedFutureExecutor,
     build_pyabc_sampler,
     resolve_pyabc_client_max_jobs,
@@ -302,14 +303,13 @@ def run_pyabc_smc(
     if parallel_backend == "mpi":
         try:
             from mpi4py import MPI
-            from mpi4py.futures import MPICommExecutor
         except ImportError as exc:
             raise ImportError(
                 "The 'mpi' parallel_backend requires mpi4py. "
                 "Install it with: pip install mpi4py"
             ) from exc
 
-        def _run_with_executor(executor):
+        def _run_with_map_callable(map_callable):
             logger.info(
                 "[pyabc] mpi sampler config: pyabc_mpi_sampler=%s n_workers=%d client_max_jobs=%s",
                 mpi_sampler,
@@ -320,23 +320,13 @@ def run_pyabc_smc(
                     else "ignored"
                 ),
             )
-            if mpi_sampler == "mapping":
-                sampler = build_pyabc_sampler(
-                    n_procs,
-                    parallel_backend,
-                    mpi_sampler=mpi_sampler,
-                    mpi_map=executor.map,
-                    client_max_jobs=client_max_jobs,
-                )
-            else:
-                tracker = TrackedFutureExecutor(executor)
-                sampler = build_pyabc_sampler(
-                    n_procs,
-                    parallel_backend,
-                    mpi_sampler=mpi_sampler,
-                    cfuture_executor=tracker,
-                    client_max_jobs=client_max_jobs,
-                )
+            sampler = build_pyabc_sampler(
+                n_procs,
+                parallel_backend,
+                mpi_sampler=mpi_sampler,
+                mpi_map=map_callable,
+                client_max_jobs=client_max_jobs,
+            )
             return _run_pyabc_smc_with_sampler(
                 sampler=sampler,
                 simulate_fn=simulate_fn,
@@ -352,15 +342,51 @@ def run_pyabc_smc(
                 progress=progress,
             )
 
-        # Shared executor path: caller manages MPICommExecutor lifecycle.
+        # Shared MPICommExecutor path: caller manages lifecycle (scaling runner).
         if mpi_executor is not None:
-            return _run_with_executor(mpi_executor)
+            return _run_with_map_callable(mpi_executor.map)
 
-        # Self-managed executor path: create and destroy per call.
+        if mpi_sampler == "concurrent_futures":
+            # Legacy futures path: still uses MPICommExecutor (opt-in only).
+            from mpi4py.futures import MPICommExecutor
+
+            result: List[ParticleRecord] = []
+            with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
+                if executor is not None:
+                    tracker = TrackedFutureExecutor(executor)
+                    sampler = build_pyabc_sampler(
+                        n_procs,
+                        parallel_backend,
+                        mpi_sampler=mpi_sampler,
+                        cfuture_executor=tracker,
+                        client_max_jobs=client_max_jobs,
+                    )
+                    result = _run_pyabc_smc_with_sampler(
+                        sampler=sampler,
+                        simulate_fn=simulate_fn,
+                        limits=limits,
+                        max_sims=max_sims,
+                        k=k,
+                        tol_init=tol_init,
+                        output_dir=output_dir,
+                        replicate=replicate,
+                        seed=seed,
+                        checkpoint_tag=checkpoint_tag,
+                        max_wall_time_s=max_wall_time_s,
+                        progress=progress,
+                    )
+            if MPI.COMM_WORLD.Get_size() > 1:
+                MPI.COMM_WORLD.Barrier()
+            return result
+
+        # Default mapping path: CommWorldMap avoids MPICommExecutor entirely.
+        cmap = CommWorldMap(MPI.COMM_WORLD)
         result: List[ParticleRecord] = []
-        with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-            if executor is not None:
-                result = _run_with_executor(executor)
+        if cmap.is_root:
+            result = _run_with_map_callable(cmap.map)
+            cmap.shutdown()
+        else:
+            cmap.worker_loop()
         if MPI.COMM_WORLD.Get_size() > 1:
             MPI.COMM_WORLD.Barrier()
         return result

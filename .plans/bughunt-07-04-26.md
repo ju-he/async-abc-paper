@@ -291,6 +291,23 @@ The `CommWorldMap` plan above was **not implemented**. A simpler restructure was
 
 **Fix:** When `mpi_executor` is provided, call `run_method` directly on root instead of `run_method_distributed`. Workers process work internally via the executor's dispatch — no `allgather` coordination needed at the user-code level.
 
-### test13 (pending)
+### test13 (small1 run — revealed broader problem)
 
-Awaiting cluster validation with the `allgather` fix.
+The scaling runner `allgather` fix worked (scaling_48 progressed through `async_propulate_abc` k-values). But two non-scaling experiments hung:
+
+- **straggler shard_000** (16 ranks): completed 3 `abc_smc_baseline` cycles, hung after 3rd teardown — repeated `MPICommExecutor` cycles
+- **lotka_volterra shard_001** (48 ranks): completed 1 `pyabc_smc` call, hung during single `MPICommExecutor.__exit__` teardown
+
+These experiments use `run_experiment()` / `run_method_distributed()` which creates a new `MPICommExecutor` per method call. The shared executor fix only applies to the scaling runner.
+
+### CommWorldMap fix (implemented)
+
+Replaced the self-managed `MPICommExecutor` path with `CommWorldMap` — a custom `COMM_WORLD`-based parallel map using `bcast`/`send`/`recv`. No inter-communicators, no `Create_intercomm`, no `Disconnect`.
+
+All ranks enter and exit `CommWorldMap` within their `run_method` call, so `allgather` in `run_method_distributed` works unchanged. No runner modifications needed.
+
+**Files changed:** `pyabc_sampler.py` (new class), `abc_smc_baseline.py`, `pyabc_wrapper.py`, `test_inference.py`
+
+### test14 (pending)
+
+Awaiting cluster validation with `CommWorldMap`.

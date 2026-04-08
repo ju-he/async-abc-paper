@@ -6,7 +6,8 @@
       "Bash(/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/python -m pytest tests/test_inference.py -x -v -k \"sampler or mpi_backend_key or mpi_backend_via or mpi_backend_defaults\")",
       "Read(//home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/lib/python3.11/site-packages/mpi4py/futures/**)",
       "Read(//home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/lib/python3.11/site-packages/pyabc/sampler/**)",
-      "Bash(python3 -m json.tool)"
+      "Bash(python3 -m json.tool)",
+      "Read(//home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/lib/python3.11/site-packages/pyabc/**)"
     ]
   }
 }
