@@ -11,7 +11,7 @@
     "true_theta3": 0.025,
     "true_theta4": 0.5
   },
-  "methods": ["async_propulate_abc", "pyabc_smc", "abc_smc_baseline"],
+  "methods": ["async_propulate_abc", "abc_smc_baseline"],
   "inference": {
     "max_simulations": 30000,
     "n_workers": 48,

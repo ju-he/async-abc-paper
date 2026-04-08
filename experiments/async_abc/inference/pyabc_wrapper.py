@@ -217,6 +217,16 @@ def _run_pyabc_smc_with_sampler(
                 attempt_count=attempt_count,
             ))
 
+    # Discard records that completed after the wall-time deadline.  pyABC only
+    # checks max_walltime between generations, so a long final generation can
+    # overshoot significantly.  This post-hoc trim matches propulate_abc's
+    # semantics: only work finished before the deadline counts.
+    if max_wall_time_s is not None:
+        records = [
+            r for r in records
+            if r.wall_time is None or r.wall_time <= max_wall_time_s
+        ]
+
     logger.info(
         "[pyabc] records built: %d total (%d attempts, %d population_particles) "
         "replicate=%d seed=%d",

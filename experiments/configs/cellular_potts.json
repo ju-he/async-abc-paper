@@ -15,7 +15,7 @@
     "true_motility": 0.2,
     "true_params_scale": "normalized [0,1]"
   },
-  "methods": ["async_propulate_abc", "pyabc_smc", "rejection_abc", "abc_smc_baseline"],
+  "methods": ["async_propulate_abc", "rejection_abc", "abc_smc_baseline"],
   "inference": {
     "max_simulations": 2000,
     "n_workers": 48,
