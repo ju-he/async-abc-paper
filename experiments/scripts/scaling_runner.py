@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+import pandas as pd
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis import final_state_results, posterior_quality_curve
@@ -412,8 +414,9 @@ def _final_summary_row(
     requested_max_simulations: int,
     max_wall_time_s: float | None,
     test_mode: bool,
-    true_params: Dict[str, float],
+    true_params: Dict[str, float] | None = None,
     stop_policy: str,
+    quality_df: pd.DataFrame | None = None,
 ) -> dict:
     elapsed = _elapsed_wall_time(records)
     n_sims = _simulation_count(records)
@@ -425,11 +428,12 @@ def _final_summary_row(
     final_tolerance = _final_tolerance(final_state.records if final_state is not None else [])
     state_kind = final_state.state_kind if final_state is not None else ""
 
-    quality_df = _quality_curve_by_wall_time(
-        records,
-        true_params=true_params,
-        archive_size=int(k),
-    )
+    if quality_df is None and true_params:
+        quality_df = _quality_curve_by_wall_time(
+            records,
+            true_params=true_params,
+            archive_size=int(k),
+        )
     final_quality = float("nan")
     if quality_df is not None and not quality_df.empty:
         final_quality = float(quality_df.iloc[-1]["wasserstein"])
@@ -489,14 +493,16 @@ def _budget_summary_rows(
     max_wall_time_s: float | None,
     wall_time_budgets_s: list[float],
     test_mode: bool,
-    true_params: Dict[str, float],
+    true_params: Dict[str, float] | None = None,
+    quality_df: pd.DataFrame | None = None,
 ) -> list[dict]:
     elapsed = _elapsed_wall_time(records)
-    quality_df = _quality_curve_by_wall_time(
-        records,
-        true_params=true_params,
-        archive_size=int(k),
-    )
+    if quality_df is None and true_params:
+        quality_df = _quality_curve_by_wall_time(
+            records,
+            true_params=true_params,
+            archive_size=int(k),
+        )
     rows: list[dict] = []
     for budget_s in sorted({float(value) for value in wall_time_budgets_s if float(value) > 0}):
         attempts = _attempt_count_upto(records, budget_s)
@@ -648,6 +654,90 @@ def _merge_and_write_combo_rows(
         _write_rows_atomic(path, merged, fieldnames)
 
 
+def _backfill_quality_metrics(
+    throughput_rows: list[dict],
+    budget_rows: list[dict],
+    records: list[ParticleRecord],
+    cfg: dict,
+) -> None:
+    """Recompute quality metrics from raw records, patching NaN values in-place.
+
+    Called during ``rebuild_scaling_outputs`` so that quality curves deferred
+    from the MPI hot-path are filled in during post-processing.
+    """
+    if not records:
+        return
+    benchmark_cfg = cfg.get("benchmark", {})
+    true_params = _true_params_from_cfg(records[:10], benchmark_cfg)
+    if not true_params:
+        return
+
+    from collections import defaultdict
+
+    record_groups: dict[tuple[str, int, int], list[ParticleRecord]] = defaultdict(list)
+    for r in records:
+        record_groups[(str(r.method), int(r.replicate), int(getattr(r, "seed", 0)))].append(r)
+
+    quality_cache: dict[tuple[str, int, int, int], pd.DataFrame | None] = {}
+
+    def _get_quality(method: str, replicate: int, seed: int, k: int) -> pd.DataFrame | None:
+        cache_key = (method, replicate, seed, k)
+        if cache_key not in quality_cache:
+            group_records = record_groups.get((method, replicate, seed), [])
+            if not group_records:
+                quality_cache[cache_key] = None
+            else:
+                try:
+                    quality_cache[cache_key] = _quality_curve_by_wall_time(
+                        group_records,
+                        true_params=true_params,
+                        archive_size=int(k),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Quality curve failed for %s rep=%d seed=%d k=%d; leaving NaN",
+                        method, replicate, seed, k, exc_info=True,
+                    )
+                    quality_cache[cache_key] = None
+        return quality_cache[cache_key]
+
+    for row in throughput_rows:
+        try:
+            raw_q = float(row.get("final_quality_wasserstein", "nan"))
+        except (ValueError, TypeError):
+            raw_q = float("nan")
+        if not math.isnan(raw_q):
+            continue
+        qdf = _get_quality(
+            str(row["method_variant"]), int(row["replicate"]),
+            int(row.get("seed", 0)), int(row["k"]),
+        )
+        if qdf is not None and not qdf.empty:
+            row["final_quality_wasserstein"] = float(qdf.iloc[-1]["wasserstein"])
+            if not row.get("state_kind"):
+                row["state_kind"] = str(qdf.iloc[-1]["state_kind"])
+            if int(row.get("final_n_particles", 0)) == 0:
+                row["final_n_particles"] = int(qdf.iloc[-1]["posterior_samples"])
+
+    for row in budget_rows:
+        try:
+            raw_q = float(row.get("quality_wasserstein_by_budget", "nan"))
+        except (ValueError, TypeError):
+            raw_q = float("nan")
+        if not math.isnan(raw_q):
+            continue
+        qdf = _get_quality(
+            str(row["method_variant"]), int(row["replicate"]),
+            int(row.get("seed", 0)), int(row["k"]),
+        )
+        if qdf is not None and not qdf.empty:
+            budget_s = float(row["budget_s"])
+            eligible = qdf.loc[qdf["axis_value"] <= budget_s]
+            if not eligible.empty:
+                row["quality_wasserstein_by_budget"] = float(eligible.iloc[-1]["wasserstein"])
+                row["posterior_samples_by_budget"] = int(eligible.iloc[-1]["posterior_samples"])
+
+
 def rebuild_scaling_outputs(
     output_dir: OutputDir,
     cfg: dict,
@@ -671,6 +761,8 @@ def rebuild_scaling_outputs(
     aggregate_rows = _sort_throughput_rows(aggregate_rows)
     budget_rows = _sort_budget_rows(budget_rows)
     aggregate_records = _sort_records(aggregate_records)
+
+    _backfill_quality_metrics(aggregate_rows, budget_rows, aggregate_records, cfg)
 
     if aggregate_rows:
         _write_rows_atomic(
@@ -912,7 +1004,6 @@ def main(argv: list[str] | None = None) -> None:
                                 continue
 
                             tagged_records = _tag_records(records, method_variant)
-                            true_params = _true_params_from_cfg(tagged_records, cfg["benchmark"])
                             k_combo_records[k].extend(tagged_records)
 
                             summary_row = _final_summary_row(
@@ -926,7 +1017,7 @@ def main(argv: list[str] | None = None) -> None:
                                 requested_max_simulations=int(requested_max_simulations),
                                 max_wall_time_s=wall_time_limit_s,
                                 test_mode=test_mode,
-                                true_params=true_params,
+                                true_params=None,
                                 stop_policy=stop_policy,
                             )
                             if summary_row["elapsed_wall_time_s"] <= 0 and run_elapsed > 0:
@@ -947,7 +1038,7 @@ def main(argv: list[str] | None = None) -> None:
                                     max_wall_time_s=wall_time_limit_s,
                                     wall_time_budgets_s=wall_time_budgets_s,
                                     test_mode=test_mode,
-                                    true_params=true_params,
+                                    true_params=None,
                                 )
                             )
 

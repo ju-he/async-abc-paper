@@ -421,6 +421,23 @@ def _async_archive_rows(
     if ordered["tolerance"].notna().sum() == 0:
         return rows
 
+    # --- Pre-compute arrays for O(1) per-checkpoint lookups ---
+    tol_notna = ordered["tolerance"].notna().to_numpy()
+    cum_tol_min = ordered["tolerance"].expanding().min().to_numpy()
+    loss_values = ordered["loss"].to_numpy(dtype=float)
+
+    # Pre-compute global sort rank by (loss, wall_time, step) so we can
+    # avoid re-sorting the archive at every checkpoint.
+    sort_cols = ordered[["loss", "wall_time", "step"]]
+    global_sort_order = np.lexsort(
+        (sort_cols["step"].to_numpy(), sort_cols["wall_time"].to_numpy(), sort_cols["loss"].to_numpy())
+    )
+    global_sort_rank = np.empty(len(ordered), dtype=int)
+    global_sort_rank[global_sort_order] = np.arange(len(ordered))
+
+    param_names = list(true_params.keys())
+    param_values = ordered[param_names].to_numpy(dtype=float)
+
     n_records = len(ordered)
     if max_eval_points is not None and n_records > max_eval_points > 0:
         eval_indices = sorted(
@@ -430,25 +447,27 @@ def _async_archive_rows(
         eval_indices = list(range(n_records))
 
     for idx in eval_indices:
-        prefix = ordered.iloc[: idx + 1].copy()
-        observed = prefix.loc[prefix["tolerance"].notna()].copy()
-        if observed.empty:
+        if not tol_notna[idx]:
             continue
-        epsilon = float(observed["tolerance"].min())
-        archive = observed.loc[observed["loss"] < epsilon].copy()
-        if archive.empty:
+        if not tol_notna[: idx + 1].any():
             continue
-        archive = archive.sort_values(["loss", "wall_time", "step"]).reset_index(drop=True)
+        epsilon = cum_tol_min[idx]
+        if np.isnan(epsilon):
+            continue
+        archive_mask = tol_notna[: idx + 1] & (loss_values[: idx + 1] < epsilon)
+        if not archive_mask.any():
+            continue
+        archive_idx = np.flatnonzero(archive_mask)
+        archive_idx = archive_idx[np.argsort(global_sort_rank[archive_idx])]
         if archive_size is not None and int(archive_size) > 0:
-            archive = archive.iloc[: int(archive_size)].copy()
-        current = prefix.iloc[-1]
-        if pd.isna(current["tolerance"]):
-            continue
+            archive_idx = archive_idx[: int(archive_size)]
         checkpoint_id += 1
+        archive_df = pd.DataFrame(param_values[archive_idx], columns=param_names)
+        current = ordered.iloc[idx]
         rows.append(
             _quality_row(
                 current=current,
-                state=archive,
+                state=archive_df,
                 true_params=true_params,
                 axis_kind=axis_kind,
                 checkpoint_id=checkpoint_id,
