@@ -113,16 +113,27 @@ def _run_abc_smc_baseline_with_sampler(
     else:
         run_max_sims = max_sims
         run_max_populations = n_generations
-    history = abc.run(
-        minimum_epsilon=0.0,
-        max_total_nr_simulations=run_max_sims,
-        max_nr_populations=run_max_populations,
-        max_walltime=(
-            timedelta(seconds=float(max_wall_time_s))
-            if max_wall_time_s is not None
-            else None
-        ),
-    )
+    try:
+        history = abc.run(
+            minimum_epsilon=0.0,
+            max_total_nr_simulations=run_max_sims,
+            max_nr_populations=run_max_populations,
+            max_walltime=(
+                timedelta(seconds=float(max_wall_time_s))
+                if max_wall_time_s is not None
+                else None
+            ),
+        )
+    except AssertionError as exc:
+        if "weight" in str(exc) and "nan" in str(exc).lower():
+            logger.warning(
+                "[abc_smc_baseline] pyABC NaN population weight — "
+                "treating as early wall-time stop: %s",
+                exc,
+            )
+            history = abc.history
+        else:
+            raise
 
     observable = history_observable_frame(history, run_start)
 
@@ -368,8 +379,10 @@ def run_abc_smc_baseline(
         cmap = CommWorldMap(MPI.COMM_WORLD)
         result: List[ParticleRecord] = []
         if cmap.is_root:
-            result = _run_with_map_callable(cmap.map)
-            cmap.shutdown()
+            try:
+                result = _run_with_map_callable(cmap.map)
+            finally:
+                cmap.shutdown()
         else:
             cmap.worker_loop()
         if MPI.COMM_WORLD.Get_size() > 1:

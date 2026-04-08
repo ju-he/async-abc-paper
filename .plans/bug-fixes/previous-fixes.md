@@ -1,5 +1,21 @@
 # Previous Bug Fixes
 
+## 2026-04-08: CommWorldMap hang on root exception + pyABC NaN weight crash
+
+**Symptom (hangs):** Non-scaling jobs (`gandk` shard_000, `straggler` shard_001, `sbc` shards 001/004) hang indefinitely. Progress log shows repeated identical lines (e.g. `simulations=1 elapsed=20.2s`) with no advancement. All are `all_ranks` methods using CommWorldMap.
+
+**Symptom (crash):** Scaling jobs (`scaling_48`, `scaling_bundle_1_16`) crash with `AssertionError: The population total weight nan is not normalized` from `pyabc/population/population.py:98`. Preceded by `RuntimeWarning: invalid value encountered in scalar divide` at `population.py:415`.
+
+**Root cause (hangs):** When `abc.run()` throws on root (e.g. NaN weight error), `CommWorldMap.shutdown()` was skipped because it wasn't in a `try/finally`. Workers remained blocked in `worker_loop()` at `comm.bcast(None, root=0)` waiting for the shutdown signal. Root then hung on `allgather(error_payload)` in `run_method_distributed`, which workers never reached — double deadlock.
+
+**Root cause (NaN weight):** With the "unify stopping criterion" change (commit 2666648), `max_wall_time_s` is the sole binding stop. When pyABC's wall-time fires mid-generation, the sampler stops collecting particles. The partial generation has particles whose weights can't be normalized (sum is 0 or NaN), causing `Population.__init__` to reject them. In the CommWorldMap path this became a hang (root throws, no shutdown); in the scaling MPICommExecutor path it was a visible crash.
+
+**Fix 1 (hangs):** Wrapped CommWorldMap root path in `try/finally` to ensure `cmap.shutdown()` is always called, even when `_run_with_map_callable` throws. Workers now always receive the shutdown bcast and can proceed to Barrier/allgather.
+
+**Fix 2 (NaN weight):** Wrapped `abc.run()` in both `_run_abc_smc_baseline_with_sampler` and `_run_pyabc_smc_with_sampler` to catch the specific `AssertionError` (matching "weight" and "nan" in the message). On catch, falls back to `abc.history` which contains all completed generations. Records are extracted from whatever generations succeeded — treating the interrupted generation as a graceful early stop.
+
+**Files:** `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/async_abc/inference/pyabc_wrapper.py`
+
 ## 2026-04-08: CommWorldMap replaces MPICommExecutor for default mapping sampler
 
 **Symptom:** Non-scaling experiments (`lotka_volterra`, `straggler`, `gaussian_mean`, etc.) hang in `MPICommExecutor.__exit__()` → `Disconnect()` after pyABC methods complete. Two failure modes: (1) at 48 ranks, even a single `Create_intercomm`/`Disconnect` cycle hangs (lotka_volterra `pyabc_smc`); (2) at 16 ranks, repeated cycles hang (straggler, 3rd `abc_smc_baseline` call). The shared-executor fix for the scaling runner doesn't help non-scaling experiments because they use `run_experiment()` / `run_method_distributed()` which creates a new `MPICommExecutor` per method call.
