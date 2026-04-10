@@ -354,7 +354,7 @@ Candidate 2 is NOT removed — the scaling runner still uses it and will continu
 - [x] Four residual risks and newly discovered hang paths documented with reproduction recipes (Plan 02 Task 1)
 - [x] Clear, unhedged recommendation with evidence-based rationale (Plan 02 Task 2)
 - [x] Residual work handed off to Phase 2 with specific test targets
-- [ ] Human-verified (Plan 02 Task 3)
+- [x] Human-verified (Plan 02 Task 3)
 
 *Phase 1 Diagnose deliverable — ready for human verification and Phase 2 planning.*
 
