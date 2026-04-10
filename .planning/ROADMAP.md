@@ -43,7 +43,7 @@ Plans:
   4. Regression tests covering NaN weight crash, double shutdown, and barrier timing races are present and passing
 **Plans**: 3 plans
 Plans:
-- [ ] 02-01-PLAN.md — Create MPI hardening test suite (NaN weight regression, CommWorldMap coordination, barrier source check, double-shutdown) — satisfies TEST-01, TEST-03, MPI-03
+- [x] 02-01-PLAN.md — Create MPI hardening test suite (NaN weight regression, CommWorldMap coordination, barrier source check, double-shutdown) — satisfies TEST-01, TEST-03, MPI-03
 - [ ] 02-02-PLAN.md — 48-rank cluster verification: SLURM script + Python driver + human checkpoint — satisfies MPI-01
 - [ ] 02-03-PLAN.md — Conditional scaling_runner migration to CommWorldMap (D-03, only if 02-02 PASSes) — completes MPI-01 unification
 
@@ -75,6 +75,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Diagnose | 2/2 | Complete   | 2026-04-10 |
-| 2. MPI Hardening | 0/? | Not started | - |
+| 2. MPI Hardening | 1/3 | In Progress|  |
 | 3. Code Cleanup | 0/? | Not started | - |
 | 4. Reproducibility | 0/? | Not started | - |
