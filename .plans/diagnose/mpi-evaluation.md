@@ -198,3 +198,104 @@ Plan 02 must NOT restructure or rewrite the sections above. Append-only past thi
 
 *End of Plan 01 content. Requirements MPI-02 and MPI-04 inventory sections are complete.*
 
+---
+
+## Characterization Table
+
+| Candidate | Cluster Stability | Correctness vs Standard pyABC | Effect on Paper Results | Residual Risk |
+|-----------|-------------------|-------------------------------|-------------------------|---------------|
+| 1. CommWorldMap | Verified at 16 ranks post-Apr 8 for lotka_volterra, straggler, gaussian_mean, gandk, sbc. UNVERIFIED at 48 ranks. No inter-communicators means it eliminates the ParaStation Disconnect hang class entirely. | MappingSampler(map_=CommWorldMap.map) satisfies pyABC's documented MappingSampler interface — pyABC accepts any map(fn, iter) callable. CommWorldMap preserves input order (results indexed by idx). Particle acceptance semantics identical to standard pyABC. | Negligible. Coordination overhead sub-millisecond per batch at 48 workers and 100-1000 population. No inter-communicator teardown overhead. | (a) Worker crash during bcast causes root hang (theoretical, not observed). (b) 48-rank stability with ParaStation MPI unverified on any current job. |
+| 2. MappingSampler + Shared MPICommExecutor | Survives at 48 ranks for the scaling workload pattern (one shared executor per n_workers value). Verified Apr 7. Depends on structural luck: one Create_intercomm/Disconnect cycle total. | Uses pyABC MappingSampler with executor.map — matches pyABC documentation exactly. Identical particle acceptance semantics. | ~40-50s teardown overhead per n_workers value (one-time). Not significant vs the 900s wall-time budget when amortized across k-values and replicates. | The single Disconnect still deadlocked in other non-scaling experiments (lotka_volterra at 48 ranks, Apr 8 entry). 'Happens to work' due to the server-loop usage pattern, not because Disconnect is reliable. Fragile to ParaStation MPI version changes. |
+| 3. ConcurrentFutureSampler + Per-call MPICommExecutor | KNOWN BROKEN at 48 ranks on ParaStation MPI. Multiple reproducible hangs documented Apr 5-7. Retained opt-in with warning at pyabc_sampler.py:296-302. | Uses pyABC documented speculative future interface. Minor semantic deviation: workers may start simulating particles for next tolerance threshold before current generation completes (pre-submission via client_max_jobs). | Under wall-time budgets this can let slightly more work complete than strict sync semantics allow. Effect bounded by client_max_jobs and small in absolute terms. | Entire path is the known failure mode. No unresolved sub-bugs; the known behavior IS the risk. Useful only for diagnostic comparison. |
+| 4. MappingSampler + Per-call MPICommExecutor.map | KNOWN BROKEN at 48 ranks on ParaStation MPI. Was default Apr 7 to 8 and hung in the second abc.run() at 48 ranks (Apr 7 entries). Single-cycle hangs also documented Apr 8. | This IS the standard pyABC MPI usage pattern from pyABC's own documentation. Particle acceptance semantics identical to Candidate 1 and 2 (synchronous blocking map). | Teardown overhead per abc.run() call, measured 37-50s per call (Apr 7). At many calls, eats a meaningful fraction of the 900s budget. | Per-call Create_intercomm/Disconnect cycles are the documented hang pattern. No path forward without rewriting mpi4py or ParaStation MPI. |
+
+**Table summary:** Candidates 3 and 4 are eliminated by the bug history; Candidate 2 works only in its specific scaling runner pattern and remains fragile; Candidate 1 is the only candidate that eliminates the inter-communicator hang class by design, pending 48-rank verification (Phase 2 MPI-01 work).
+
+---
+
+## Paper Sensitivity Assessment (per D-07)
+
+Assessed at reasoning level only — no new mpirun runs or timing numbers (per CONTEXT.md D-05 and D-07).
+
+### Q1: Does sampler choice affect which particles get accepted (correctness of ABC-SMC)?
+
+No, for all four candidates. MappingSampler and ConcurrentFutureSampler both pass the same simulate_fn to pyABC's ABCSMC loop; particle selection, epsilon schedule, and weight normalization are handled entirely inside pyabc.ABCSMC; the sampler only controls _how_ simulations are dispatched, not _which_ results are accepted. CommWorldMap's map preserves input order by indexing results with idx (pyabc_sampler.py:115-140), so no reordering. All four candidates are correctness-equivalent.
+
+### Q2: Does sampler choice change wall-time semantics?
+
+Potentially yes, marginally, for Candidate 3 only. ConcurrentFutureSampler pre-submits up to client_max_jobs futures speculatively, so workers can start on next tolerance threshold before current generation completes. Under wall-time this lets slightly more work complete, but effect is bounded by client_max_jobs (<= n_workers after Apr 5 fix) and small. Candidates 1, 2, 4 all use synchronous blocking map and have identical wall-time semantics.
+
+### Q3: Is sampler overhead significant relative to the 900s wall-time budget?
+
+- **Candidate 1:** NO. bcast + send*k + recv*k per batch; sub-millisecond at 48 workers × 100-1000 population.
+- **Candidate 2:** Small. One Create_intercomm/Disconnect cycle per n_workers value, ~40-50s on Apr 7. Amortized across all k-values and replicates.
+- **Candidate 3:** Large and hang-prone. Per-call teardown ~37-50s when it succeeds, plus hang risk on subsequent calls.
+- **Candidate 4:** Large. Per-call Create_intercomm/Disconnect, ~40-50s per abc.run() on Apr 7. At many calls this eats a meaningful fraction of the 900s budget.
+
+### Q4: Is the paper's primary claim sensitive to sampler choice?
+
+No. The paper compares wall-time efficiency of async Propulate-ABC vs sync pyABC. The structural advantage of async (no global synchronization barrier per generation) is independent of which MPI dispatch mechanism sync pyABC uses. Sampler choice only affects sync pyABC's implementation throughput: fragile sampler makes sync pyABC look worse (unwanted bias favoring async), stable sampler represents sync pyABC fairly. CommWorldMap gives sync pyABC its best fair shot. ABC-SMC correctness from Q1 is identical across candidates, so scientific conclusions (accepted particles, posterior shape) are independent of sampler choice; only wall-time fairness depends on it.
+
+---
+
+## Residual Risks and Newly Discovered Hang Paths
+
+Each entry below is either a previously-undocumented residual risk or a hang path identified by this phase's analysis. Per CONTEXT.md D-06, each gets a reproduction recipe or test stub description (not an actual test — test creation is Phase 2's job).
+
+### Risk 1: Worker crash during CommWorldMap.map (NEW, not in bug history)
+
+**Candidate affected:** 1 (CommWorldMap)
+
+**Description:** If a worker crashes, exits, or is killed during CommWorldMap.map, root's next COMM_WORLD.bcast blocks indefinitely because mpi4py bcast requires all ranks. There is no timeout and no worker liveness check in CommWorldMap. Root will hang at the next bcast in CommWorldMap.map() or CommWorldMap.shutdown(); other surviving workers will hang at the next bcast in worker_loop. No process exits automatically.
+
+**Reproduction recipe:**
+
+1. Launch with `mpirun -n 3` running a CommWorldMap workload.
+2. After at least one generation, send SIGKILL (`kill -9`) to the highest-rank worker.
+3. Expected: root hangs at next bcast in CommWorldMap.map() or CommWorldMap.shutdown(); rank 1 also hangs at next bcast in worker_loop; no process exits.
+4. Observation: no further output from surviving processes; py-spy dump on root shows mpi4py.MPI.Comm.bcast as current frame.
+
+**Mitigation options (Phase 2 scope):**
+(a) MPI_Testsome pattern to poll with timeout (not currently implemented anywhere).
+(b) catch MPI_ERR_PROC_FAILED from bcast (requires MPI fault tolerance not available in ParaStation MPI default build).
+(c) Document as expected-crash failure mode and rely on Slurm job timeouts as outer safety net.
+
+### Risk 2: CommWorldMap at 48 ranks — unverified (KNOWN RISK, STATE.md entry)
+
+**Candidate affected:** 1 (CommWorldMap)
+
+**Description:** CommWorldMap was developed Apr 8 and verified only on non-scaling jobs at <=16 ranks. The scaling runner continues to use Candidate 2. Whether COMM_WORLD.bcast/send/recv are stable under ParaStation MPI at 48 ranks is untested.
+
+**Reproduction recipe (Phase 2 cluster test, not Phase 1):**
+
+1. Modify scaling_runner.py to use CommWorldMap-backed sampler instead of shared MPICommExecutor for one test run.
+2. Submit scaling_48 job with a small pyABC workload (gaussian_mean, population=100, 3 generations).
+3. Expected: job completes without hanging, CSV has non-zero rows.
+4. Failure mode: if it hangs, the specific bcast/send/recv call at the hang point identifies the issue.
+
+**Note:** Why this belongs to Phase 2: D-05 forbids new mpirun/cluster runs in Phase 1; explicitly Phase 2 MPI-01 work.
+
+### Risk 3: Pre-Barrier allgather skew (existing fix, regression risk)
+
+**Candidates affected:** 1 and 2
+
+**Description:** The COMM_WORLD.Barrier() at pyabc_wrapper.py:413 and abc_smc_baseline.py:399 is NOT cosmetic — it ensures workers have exited worker_loop() before run_method_distributed calls allgather(error_payload); if removed or reordered (thinking it's redundant with allgather), workers entering allgather while root is still in map() will deadlock. For Candidate 2, the equivalent is COMM_WORLD.Barrier() at scaling_runner.py:1067-1068.
+
+**How this was introduced and fixed:** Apr 5 entry documents the original bug: workers returned `[]` from inside the `with MPICommExecutor(...)` block and called `allgather` while root was still in `Disconnect`. The fix added `COMM_WORLD.Barrier()` after the context block. The CommWorldMap version of this fix (Barrier after `worker_loop()` returns) was added alongside CommWorldMap's introduction (Apr 8). The Barrier call sites are: `pyabc_wrapper.py:413`, `abc_smc_baseline.py:399`, `scaling_runner.py:1067-1068`.
+
+**Test stub description (Phase 2):** Unit test mocking CommWorldMap.shutdown() to skip the bcast, asserting run_method_distributed deadlocks at allgather (integration-level, observable only via timeout); regression test parsing source for exact Barrier() call sites and failing CI if removed.
+
+### Risk 4: pyABC NaN weight on partial generation (existing fix, regression risk)
+
+**Candidates affected:** All four
+
+**Description:** When max_wall_time_s fires mid-generation, pyABC stops collecting particles and the partial population has weight_sum 0 or NaN, causing Population.__init__ to raise AssertionError("The population total weight nan is not normalized"); the fix (Apr 8) catches this specific AssertionError in pyabc_wrapper.py:125-133 and abc_smc_baseline.py:127-136 and falls back to abc.history. Risk: if the fix guard is removed or pyABC error message wording changes, the catch misses.
+
+**How this was introduced and fixed:** The Apr 8 entry documents that `max_wall_time_s` became the sole stopping criterion after commit 2666648 ("Unify stopping criterion"). When pyABC's wall-time fires mid-generation, the sampler stops collecting particles. The partial generation has particles whose weights cannot be normalized (sum is 0 or NaN), causing `Population.__init__` to raise `AssertionError: The population total weight nan is not normalized` (pyabc/population/population.py:98). The fix catches this in two places: `pyabc_wrapper.py:125-133` (for pyabc_smc path) and `abc_smc_baseline.py:127-136` (for baseline path). On catch, falls back to `abc.history` for all completed generations, treating the interrupted generation as a graceful early stop. The fix guard depends on pyABC's exact exception message text; if the pyABC library changes its message wording, the catch silently passes up the exception.
+
+**Test stub description (Phase 2):** Unit test running a pyABC workload with max_wall_time_s=0.1 (force immediate timeout), asserting (a) no exception escapes, (b) returned records list has 0 or more entries but no NaN weights, (c) log contains the "NaN population weight — treating as early wall-time stop" warning.
+
+---
+
+*End of Plan 02 Task 1 content. Task 2 will append the Recommendation and Phase 1 Exit Checklist sections.*
+
