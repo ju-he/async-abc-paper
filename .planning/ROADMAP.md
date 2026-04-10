@@ -41,7 +41,11 @@ Plans:
   2. Stopping pyABC mid-generation on wall-time deadline produces a CSV with all pre-deadline particles and no NaN weights
   3. MPI unit tests for the chosen sampler path and wall-time stopping run locally with mpirun and pass
   4. Regression tests covering NaN weight crash, double shutdown, and barrier timing races are present and passing
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 02-01-PLAN.md — Create MPI hardening test suite (NaN weight regression, CommWorldMap coordination, barrier source check, double-shutdown) — satisfies TEST-01, TEST-03, MPI-03
+- [ ] 02-02-PLAN.md — 48-rank cluster verification: SLURM script + Python driver + human checkpoint — satisfies MPI-01
+- [ ] 02-03-PLAN.md — Conditional scaling_runner migration to CommWorldMap (D-03, only if 02-02 PASSes) — completes MPI-01 unification
 
 ### Phase 3: Code Cleanup
 **Goal**: The MPI inference layer is simplified, documented, and free of dead code so future patches can be made safely
