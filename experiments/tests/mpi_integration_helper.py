@@ -79,6 +79,9 @@ if __name__ == '__main__':
             "elapsed_spread_s": max(elapsed_by_rank) - min(elapsed_by_rank),
         }
         output_path.write_text(json.dumps(result))
-        assert len(records) > 0, f"Expected records, got {records}"
+        # When max_wall_time_s is very short, pyABC may not complete any
+        # generation; allow empty records in that case (NaN guard test).
+        if max_wall_time_s is None:
+            assert len(records) > 0, f"Expected records, got {records}"
     else:
         assert records == [], f"Expected worker rank to return no records, got {records}"
