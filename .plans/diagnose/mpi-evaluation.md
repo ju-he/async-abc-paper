@@ -299,3 +299,62 @@ Each entry below is either a previously-undocumented residual risk or a hang pat
 
 *End of Plan 02 Task 1 content. Task 2 will append the Recommendation and Phase 1 Exit Checklist sections.*
 
+---
+
+## Recommendation
+
+**Chosen approach for Phase 2: Candidate 1 — CommWorldMap (current default).** This is an unhedged recommendation. Candidate 1 is the only approach that survives the elimination analysis below.
+
+### Elimination rationale
+
+**Candidate 3 (ConcurrentFutureSampler + Per-call MPICommExecutor) — eliminated.** Multiple independent reproductions across Apr 5, 6, and 7 entries document teardown hangs at 48 ranks under ParaStation MPI. Multiple rounds of fixes — bounding client_max_jobs, single-owner shutdown, per-call teardown hardening — did not resolve the teardown hang. The Apr 5 entries document two distinct bugs (tracker.drain() hang and inter-comm teardown race) that were each fixed separately, yet the Apr 6-7 entries show the path still hung after both fixes were applied. The path is retained as opt-in only with the warning at `pyabc_sampler.py:296-302`, but it has no path to production use at 48 ranks on ParaStation MPI.
+
+**Candidate 4 (MappingSampler + Per-call MPICommExecutor.map) — eliminated.** The Apr 7 "restore mapping as default" entry documents that switching the default from concurrent_futures to mapping worked for the first abc.run() invocation at 48 ranks, but hung on the second invocation in the second baseline method. The Apr 8 entry ("CommWorldMap replaces MPICommExecutor") documents that even a SINGLE Create_intercomm/Disconnect cycle hung in lotka_volterra at 48 ranks — Candidate 4's exact execution model. pyABC's documentation assumes an MPI implementation where Disconnect is not fragile. ParaStation MPI violates that assumption.
+
+**Candidate 2 (MappingSampler + Shared MPICommExecutor) — eliminated for general use, retained for scaling runner only.** Three points explain why this candidate cannot be generalized:
+1. Candidate 2 only works in a specific pattern — one shared executor per n_workers value with all MPI workloads grouped inside the `with` block — which does NOT fit the non-scaling experiment runner calling many independent abc.run() instances. The non-scaling runner creates a new MPICommExecutor per method call, which is exactly the per-call pattern that Candidate 4 proved deadlocks at 48 ranks.
+2. Even in the scaling runner's happy path, the single Create_intercomm/Disconnect cycle still uses inter-communicators — the same primitive that hangs single-cycle in non-scaling experiments (Apr 8 lotka_volterra). It "happens to work" for scaling because the server-loop pattern differs, not because Disconnect is reliable on ParaStation MPI.
+3. Candidate 2 requires the runner to bypass allgather coordination at scaling_runner.py:964-990, creating a second code path that is easy to break by future refactoring.
+
+Candidate 2 is NOT removed — the scaling runner still uses it and will continue to work for scaling experiments. The recommendation is that Candidate 1 is preferred for NEW code and the non-scaling path. Phase 2 may optionally migrate the scaling runner to CommWorldMap as well if Risk 2 (48-rank verification) clears.
+
+### Why Candidate 1 wins
+
+1. **It is the only candidate that eliminates the inter-communicator hang class by design.** CommWorldMap uses only bcast/send/recv on COMM_WORLD; does not call Create_intercomm, does not call Disconnect, does not rely on MPIPoolExecutor. The documented ParaStation MPI failure modes (Disconnect deadlock at 48 ranks, repeated-cycle teardown hangs) cannot apply because the primitives that cause them are absent from CommWorldMap entirely.
+
+2. **It has already resolved real bugs in production.** The Apr 8 CommWorldMap entry documents that it fixed hangs in lotka_volterra, straggler, gaussian_mean, gandk, and sbc non-scaling jobs. These are the same jobs that Candidate 4 could not run reliably. The fix was verified on the cluster at 16 ranks across five experiment types.
+
+3. **It is correctness-equivalent to pyABC's documented usage.** MappingSampler(map_=cmap.map) is exactly what pyABC's MappingSampler API expects: a map(fn, iter) callable. CommWorldMap.map preserves input order and propagates errors. ABC-SMC particle acceptance semantics are identical to Candidate 4 (Q1 from Paper Sensitivity Assessment confirms all four candidates are correctness-equivalent).
+
+4. **It has negligible overhead.** No inter-communicator teardown cost; sub-millisecond per-batch coordination. Contrast with Candidates 2, 3, and 4 where teardown overhead was measured at 37-50s per cycle (Apr 7).
+
+5. **It has clear, isolated failure modes.** The two residual risks (worker crash during bcast; 48-rank verification) are well-defined and each has a clear test recipe for Phase 2. Compare to Candidate 2's diffuse "works for this pattern but not that pattern" fragility, where correctness depends on the runner's code structure rather than CommWorldMap's own properties.
+
+### Residual work for Phase 2 (MPI-01)
+
+1. Verify CommWorldMap at 48 ranks on the cluster (Risk 2). Until done, we are betting bcast/send/recv on COMM_WORLD are stable at scale on ParaStation MPI; the bet is reasonable since these are the most fundamental MPI primitives, but unverified.
+2. Decide on worker crash handling (Risk 1). Options: MPI_Testsome with timeout (complex); rely on Slurm job timeout (simple, accepts that a worker crash means the job is lost); add wrapper to detect worker exit via OS signals (platform-dependent).
+3. Decide whether the scaling runner should migrate from Candidate 2 to Candidate 1. Optional — Candidate 2 currently works for scaling — but unifying on Candidate 1 would eliminate the dual-code-path risk from Risk 3.
+4. Regression tests for existing fixes: NaN weight guard (Risk 4), Barrier placement (Risk 3), try/finally on root exception path (Apr 8 fix). These protect against future regressions in code paths that have been patched multiple times.
+
+### Clear verdict
+
+- **Adopt:** CommWorldMap as the default MPI sampler for ALL pyABC-backed inference methods.
+- **Retain for scaling:** Shared MPICommExecutor (Candidate 2) in the scaling runner until Phase 2 clears 48-rank verification for CommWorldMap.
+- **Keep opt-in with warning:** ConcurrentFutureSampler (Candidate 3) for diagnostic comparison.
+- **Reject:** MappingSampler + per-call MPICommExecutor.map (Candidate 4) — no production use case.
+
+---
+
+## Phase 1 Exit Checklist
+
+- [x] All four candidates have a full coordination point inventory with file:line citations (Plan 01)
+- [x] Characterization table populated with stability, correctness, paper effect, and residual risk per candidate (Plan 02 Task 1)
+- [x] Paper sensitivity assessment addresses all four D-07 questions (Plan 02 Task 1)
+- [x] Four residual risks and newly discovered hang paths documented with reproduction recipes (Plan 02 Task 1)
+- [x] Clear, unhedged recommendation with evidence-based rationale (Plan 02 Task 2)
+- [x] Residual work handed off to Phase 2 with specific test targets
+- [ ] Human-verified (Plan 02 Task 3)
+
+*Phase 1 Diagnose deliverable — ready for human verification and Phase 2 planning.*
+
