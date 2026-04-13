@@ -931,12 +931,13 @@ def main(argv: list[str] | None = None) -> None:
                 k_combo_throughput[k] = []
                 k_combo_budget[k] = []
 
-            def _run_workloads(methods, *, mpi_executor=None):
+            def _run_workloads(methods):
                 """Run a set of methods across all k-values and replicates.
 
-                When *mpi_executor* is provided, it is forwarded to
-                ``run_method_distributed`` so pyABC methods reuse the
-                caller's ``MPICommExecutor`` instead of creating their own.
+                All MPI coordination now flows through CommWorldMap (Phase 2 D-03).
+                pyABC methods and non-pyABC methods share the same
+                ``run_method_distributed`` dispatch path — no dual code path, no
+                shared MPICommExecutor, no inter-communicator teardown.
                 """
                 for k in k_values:
                     inference_cfg = k_inference_cfgs[k]
@@ -961,44 +962,15 @@ def main(argv: list[str] | None = None) -> None:
                                 continue
 
                             run_start = time.time()
-                            if mpi_executor is not None:
-                                # Shared executor path: workers are in the
-                                # MPICommExecutor server loop and cannot
-                                # participate in allgather, so call run_method
-                                # directly on root instead of
-                                # run_method_distributed.
-                                progress = MethodProgressReporter(
-                                    method_name=base_method,
-                                    replicate=replicate,
-                                    interval_s=float(method_inference_cfg.get(
-                                        "progress_log_interval_s", 10.0)),
-                                )
-                                progress.start(
-                                    total_hint=method_inference_cfg.get("max_simulations"),
-                                    detail="mode=all_ranks",
-                                )
-                                records = run_method(
-                                    base_method,
-                                    benchmark.simulate,
-                                    benchmark.limits,
-                                    method_inference_cfg,
-                                    output_dir,
-                                    replicate,
-                                    seed,
-                                    progress=progress,
-                                    mpi_executor=mpi_executor,
-                                )
-                                progress.finish(records=len(records))
-                            else:
-                                records = run_method_distributed(
-                                    base_method,
-                                    benchmark.simulate,
-                                    benchmark.limits,
-                                    method_inference_cfg,
-                                    output_dir,
-                                    replicate,
-                                    seed,
-                                )
+                            records = run_method_distributed(
+                                base_method,
+                                benchmark.simulate,
+                                benchmark.limits,
+                                method_inference_cfg,
+                                output_dir,
+                                replicate,
+                                seed,
+                            )
                             run_elapsed = time.time() - run_start
                             if not is_root_rank():
                                 continue
@@ -1045,30 +1017,27 @@ def main(argv: list[str] | None = None) -> None:
             all_methods = list(cfg["methods"])
             mpi_methods = [m for m in all_methods if m in _PYABC_METHODS]
             non_mpi_methods = [m for m in all_methods if m not in _PYABC_METHODS]
-            use_shared_executor = bool(mpi_methods) and int(n_workers) > 1
 
             # Pass 1: non-MPI methods (e.g. async_propulate_abc) — all ranks
             # participate normally.
             if non_mpi_methods:
                 _run_workloads(non_mpi_methods)
 
-            # Pass 2: MPI-executor methods (pyABC baselines) — one shared
-            # MPICommExecutor avoids repeated Create_intercomm/Disconnect
-            # cycles that deadlock ParaStation MPI at high rank counts.
-            if use_shared_executor:
-                from mpi4py import MPI
-                from mpi4py.futures import MPICommExecutor
+            # Pass 2: pyABC MPI methods via CommWorldMap (Phase 2 D-03).
+            # Per-call CommWorldMap inside run_pyabc_smc / run_abc_smc_baseline
+            # handles coordination. Unlike the old shared MPICommExecutor path,
+            # all ranks now participate in _run_workloads because each pyABC call
+            # internally creates and tears down its own CommWorldMap cheaply
+            # (no inter-communicator cycles).
+            if mpi_methods:
+                _run_workloads(mpi_methods)
 
-                with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-                    if executor is not None:
-                        _run_workloads(mpi_methods, mpi_executor=executor)
-                    # Workers block in server loop until root finishes all
-                    # MPI-executor workloads and exits the context.
+            # Post-pass Barrier: ensure all ranks finish pass 2 before proceeding
+            # to finalization / shard writes.
+            if int(n_workers) > 1:
+                from mpi4py import MPI
                 if MPI.COMM_WORLD.Get_size() > 1:
                     MPI.COMM_WORLD.Barrier()
-            elif mpi_methods:
-                # Single worker or n_workers==1: no MPI executor needed.
-                _run_workloads(mpi_methods)
 
             # Flush per-k combo data.
             for k in k_values:
