@@ -143,8 +143,10 @@ class TestMpiHardeningNoMpiRun:
 
     def test_barrier_placement_source_check(self):
         # Regression for Risk 3: COMM_WORLD.Barrier() MUST exist at the three
-        # documented call sites. If someone removes or reorders them thinking
-        # they are redundant with allgather, the test fails in CI.
+        # documented call sites (wrapper, baseline, scaling). Wrapper and baseline
+        # use the CommWorldMap finally-block pattern. Scaling runner uses the
+        # post-mpi_methods pass pattern after Phase 2 D-03 migration from
+        # MPICommExecutor.
         wrapper_src = (INFERENCE_DIR / "pyabc_wrapper.py").read_text()
         baseline_src = (INFERENCE_DIR / "abc_smc_baseline.py").read_text()
         scaling_src = (SCRIPTS_DIR / "scaling_runner.py").read_text()
@@ -169,16 +171,21 @@ class TestMpiHardeningNoMpiRun:
             "cmap.worker_loop() missing or reordered"
         )
 
-        # Pattern 2: scaling_runner post-MPICommExecutor Barrier.
+        # Pattern 2: scaling_runner post-mpi_methods-pass Barrier (Phase 2 D-03).
+        # After migration from MPICommExecutor, per-call CommWorldMap handles
+        # coordination inside run_pyabc_smc / run_abc_smc_baseline. A trailing
+        # Barrier after the `if mpi_methods:` block ensures all ranks sync before
+        # finalization.
         scaling_pattern = re.compile(
-            r"with MPICommExecutor\(MPI\.COMM_WORLD, root=0\) as executor:"
-            r"[\s\S]{0,400}?"
-            r"if MPI\.COMM_WORLD\.Get_size\(\) > 1:\s*\n"
+            r"if mpi_methods:\s*\n"
+            r"(?:[^\n]*\n){1,10}?"
+            r"\s*if MPI\.COMM_WORLD\.Get_size\(\) > 1:\s*\n"
             r"\s*MPI\.COMM_WORLD\.Barrier\(\)",
+            re.MULTILINE,
         )
         assert scaling_pattern.search(scaling_src), (
             "scaling_runner.py: required COMM_WORLD.Barrier() after "
-            "`with MPICommExecutor` block missing or reordered"
+            "`if mpi_methods:` block missing or reordered"
         )
 
         # Belt-and-braces: the literal string must appear in all three files

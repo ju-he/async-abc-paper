@@ -13,7 +13,7 @@ Milestone v1.0 Stability & Reproducibility hardens the experiment framework so c
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Diagnose** - Systematically document all rank coordination points and evaluate all candidate pyABC MPI sampler approaches; select the best one (completed 2026-04-10)
-- [ ] **Phase 2: MPI Hardening** - Implement the chosen MPI approach, verify it at scale, make wall-time stopping robust, backed by unit tests
+- [x] **Phase 2: MPI Hardening** - Implement the chosen MPI approach, verify it at scale, make wall-time stopping robust, backed by unit tests (completed 2026-04-13)
 - [ ] **Phase 3: Code Cleanup** - Simplify and document the inference layer after the MPI model is fully understood
 - [ ] **Phase 4: Reproducibility** - Verify extend mode, seed determinism, and one-command end-to-end test script
 
@@ -45,7 +45,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Create MPI hardening test suite (NaN weight regression, CommWorldMap coordination, barrier source check, double-shutdown) — satisfies TEST-01, TEST-03, MPI-03
 - [x] 02-02-PLAN.md — 48-rank cluster verification: SLURM script + Python driver + human checkpoint — satisfies MPI-01
-- [ ] 02-03-PLAN.md — Conditional scaling_runner migration to CommWorldMap (D-03, only if 02-02 PASSes) — completes MPI-01 unification
+- [x] 02-03-PLAN.md — Conditional scaling_runner migration to CommWorldMap (D-03, only if 02-02 PASSes) — completes MPI-01 unification
 
 ### Phase 3: Code Cleanup
 **Goal**: The MPI inference layer is simplified, documented, and free of dead code so future patches can be made safely
@@ -75,6 +75,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Diagnose | 2/2 | Complete   | 2026-04-10 |
-| 2. MPI Hardening | 2/3 | In Progress|  |
+| 2. MPI Hardening | 3/3 | Complete   | 2026-04-13 |
 | 3. Code Cleanup | 0/? | Not started | - |
 | 4. Reproducibility | 0/? | Not started | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md (CommWorldMap 48-rank verification — PASS)
-last_updated: "2026-04-13T19:54:31.110Z"
+stopped_at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — PASS)
+last_updated: "2026-04-13T21:30:00.000Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 5
-  completed_plans: 4
-  percent: 0
+  completed_plans: 5
+  percent: 40
 ---
 
 # Project State
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 02 (mpi-hardening) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
+Plan: 3 of 3 (Phase 2 complete)
+Status: Phase 2 complete — ready for Phase 3
 Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0%
@@ -69,6 +69,9 @@ Recent decisions affecting current work:
 - [Phase 02-mpi-hardening]: mpi helper assertion relaxed to allow empty records when max_wall_time_s given — early-stop is valid behavior not a failure
 - [Phase 02-mpi-hardening]: CommWorldMap verified PASS at 48 ranks on JUWELS ParaStationMPI — MPI-01 satisfied; Plan 02-03 should proceed with scaling runner migration
 - [Phase 02-mpi-hardening]: Local 2-rank smoke test (193 records, 2.6s) used as gate before cluster submission — confirms no local CommWorldMap regression
+- [Phase 02-mpi-hardening]: scaling_runner.py migrated from shared MPICommExecutor to per-call CommWorldMap (D-03) — mpi_map not plumbed through run_method_distributed, safer per-call path used
+- [Phase 02-mpi-hardening]: MPICommExecutor completely removed from scaling_runner.py; CommWorldMap is now the sole pyABC MPI coordination model in the codebase
+- [Phase 02-mpi-hardening]: test_barrier_placement_source_check updated to Case B regex (post-mpi_methods-pass Barrier pattern); test passes after migration
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T19:54:31.106Z
-Stopped at: Completed 02-02-PLAN.md (CommWorldMap 48-rank verification — PASS)
+Last session: 2026-04-13T21:30:00.000Z
+Stopped at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — Phase 2 complete)
 Resume file: None
