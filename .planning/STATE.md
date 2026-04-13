@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Paused at Task 3 checkpoint (02-02): awaiting human cluster submission of verify_commworldmap_48.sh on JUWELS"
-last_updated: "2026-04-10T12:29:36.921Z"
-last_activity: 2026-04-10
+stopped_at: Completed 02-02-PLAN.md (CommWorldMap 48-rank verification — PASS)
+last_updated: "2026-04-13T19:54:31.110Z"
+last_activity: 2026-04-13
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 02 (mpi-hardening) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
-Last activity: 2026-04-10
+Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-diagnose P01 | 30 | 2 tasks | 1 files |
 | Phase 01-diagnose P02 | 10 | 3 tasks | 1 files |
 | Phase 02-mpi-hardening P01 | 5 | 2 tasks | 4 files |
+| Phase 02-mpi-hardening P02 | 3 days | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - [Phase 01-diagnose]: Candidates 3 and 4 rejected: both known broken at 48 ranks on ParaStation MPI
 - [Phase 02-mpi-hardening]: Isolated non-mpirun tests (source-check, in-process shutdown) in TestMpiHardeningNoMpiRun class to guarantee execution regardless of mpirun probe state
 - [Phase 02-mpi-hardening]: mpi helper assertion relaxed to allow empty records when max_wall_time_s given — early-stop is valid behavior not a failure
+- [Phase 02-mpi-hardening]: CommWorldMap verified PASS at 48 ranks on JUWELS ParaStationMPI — MPI-01 satisfied; Plan 02-03 should proceed with scaling runner migration
+- [Phase 02-mpi-hardening]: Local 2-rank smoke test (193 records, 2.6s) used as gate before cluster submission — confirms no local CommWorldMap regression
 
 ### Pending Todos
 
@@ -78,6 +81,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-10T12:29:36.914Z
-Stopped at: Paused at Task 3 checkpoint (02-02): awaiting human cluster submission of verify_commworldmap_48.sh on JUWELS
+Last session: 2026-04-13T19:54:31.106Z
+Stopped at: Completed 02-02-PLAN.md (CommWorldMap 48-rank verification — PASS)
 Resume file: None
