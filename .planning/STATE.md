@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — PASS)
-last_updated: "2026-04-13T21:30:00.000Z"
+status: verifying
+stopped_at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — DONE)
+last_updated: "2026-04-13T21:07:47.843Z"
 last_activity: 2026-04-13
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 5
   completed_plans: 5
-  percent: 40
+  percent: 0
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 
 Phase: 02 (mpi-hardening) — EXECUTING
 Plan: 3 of 3 (Phase 2 complete)
-Status: Phase 2 complete — ready for Phase 3
+Status: Phase complete — ready for verification
 Last activity: 2026-04-13
 
 Progress: [░░░░░░░░░░] 0%
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 01-diagnose P02 | 10 | 3 tasks | 1 files |
 | Phase 02-mpi-hardening P01 | 5 | 2 tasks | 4 files |
 | Phase 02-mpi-hardening P02 | 3 days | 3 tasks | 3 files |
+| Phase 02-mpi-hardening P03 | 35 | 3 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,8 @@ Recent decisions affecting current work:
 - [Phase 02-mpi-hardening]: scaling_runner.py migrated from shared MPICommExecutor to per-call CommWorldMap (D-03) — mpi_map not plumbed through run_method_distributed, safer per-call path used
 - [Phase 02-mpi-hardening]: MPICommExecutor completely removed from scaling_runner.py; CommWorldMap is now the sole pyABC MPI coordination model in the codebase
 - [Phase 02-mpi-hardening]: test_barrier_placement_source_check updated to Case B regex (post-mpi_methods-pass Barrier pattern); test passes after migration
+- [Phase 02-mpi-hardening]: Per-call CommWorldMap migration path chosen (mpi_map not plumbed through run_method_distributed — outer-wrapper would deadlock)
+- [Phase 02-mpi-hardening]: MPICommExecutor completely removed from scaling_runner.py — CommWorldMap is sole pyABC MPI coordination model
 
 ### Pending Todos
 
@@ -84,6 +87,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T21:30:00.000Z
-Stopped at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — Phase 2 complete)
+Last session: 2026-04-13T21:07:47.839Z
+Stopped at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — DONE)
 Resume file: None
