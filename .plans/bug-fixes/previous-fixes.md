@@ -1,5 +1,14 @@
 # Previous Bug Fixes
 
+## 2026-04-14 — Phase 3 Plan 01: Dead code removal
+
+- Removed `TrackedFutureExecutor` class and `MPICommExecutor` / `concurrent_futures` branches from `pyabc_sampler.py`, `pyabc_wrapper.py`, `abc_smc_baseline.py`
+- `mpi_executor` kwarg dropped from `run_pyabc_smc` and `run_abc_smc_baseline` (no callers post-Phase-2 scaling_runner migration)
+- `resolve_pyabc_mpi_sampler` now rejects `'concurrent_futures'` and `'concurrent_futures_legacy'` with `ValueError`
+- Tests updated to match (`TestBuildPyabcSampler.test_mpi_concurrent_futures_now_raises_value_error`, `test_resolve_pyabc_mpi_sampler_rejects_*`)
+- Rationale: Phase 2 D-03 migrated scaling_runner to CommWorldMap. No config or caller references these paths. Keeping dead code makes future MPI debugging harder.
+- Files: `experiments/async_abc/inference/pyabc_sampler.py`, `experiments/async_abc/inference/pyabc_wrapper.py`, `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/tests/test_inference.py`
+
 ## 2026-04-08: CommWorldMap hang on root exception + pyABC NaN weight crash
 
 **Symptom (hangs):** Non-scaling jobs (`gandk` shard_000, `straggler` shard_001, `sbc` shards 001/004) hang indefinitely. Progress log shows repeated identical lines (e.g. `simulations=1 elapsed=20.2s`) with no advancement. All are `all_ranks` methods using CommWorldMap.
