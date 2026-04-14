@@ -4,8 +4,9 @@ Run via:
     mpirun -n 2 <python> <this_file> <output_json_path> [mpi_sampler] [client_max_jobs] [max_wall_time_s]
 
 Rank 0 runs run_pyabc_smc with parallel_backend="mpi"; rank 1 is the worker.
-The default is the blocking ``MappingSampler`` path; ``concurrent_futures``
-remains selectable as an explicit opt-in.
+Only the ``mapping`` (CommWorldMap) path is supported after Phase 3 cleanup.
+The ``mpi_sampler`` CLI argument remains for backward-compat with older test
+invocations, but passing anything other than "mapping" will raise ValueError.
 On success rank 0 writes a JSON result to the path given as argv[1] and exits 0.
 """
 import json

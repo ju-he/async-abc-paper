@@ -6,9 +6,9 @@ Run via:
 Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
 
-The test exercises the MPI path using the requested pyABC MPI sampler. The
-default is the blocking ``MappingSampler`` path; ``concurrent_futures``
-remains selectable as an explicit opt-in.
+Only the ``mapping`` (CommWorldMap) path is supported after Phase 3 cleanup.
+The ``mpi_sampler`` CLI argument remains for backward-compat with older test
+invocations, but passing anything other than "mapping" will raise ValueError.
 
 On success rank 0 writes a JSON result to argv[1] with timing diagnostics for
 all ranks, including the elapsed spread between the fastest and slowest rank.
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     run_elapsed_s = time.monotonic() - run_start
 
     # If we reach here on any rank, the post-with COMM_WORLD.Barrier() was
-    # passed — meaning all ranks exited the MPICommExecutor cleanly.
+    # passed — meaning all ranks exited the CommWorldMap cleanly.
     barrier_reached = True
     elapsed_by_rank = MPI.COMM_WORLD.gather(run_elapsed_s, root=0)
 
