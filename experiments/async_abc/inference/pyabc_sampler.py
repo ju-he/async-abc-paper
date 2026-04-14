@@ -15,20 +15,83 @@ logger = logging.getLogger(__name__)
 class CommWorldMap:
     """COMM_WORLD-based blocking parallel map for pyABC's MappingSampler.
 
-    Replaces the legacy MPI executor to avoid ``Create_intercomm``/``Disconnect``
-    fragility on ParaStation MPI at high rank counts.  Uses only ``bcast``,
-    ``send``, and ``recv`` on ``COMM_WORLD`` — no inter-communicators.
+    Replaces ``MPICommExecutor`` to avoid ``Create_intercomm`` /
+    ``Disconnect`` fragility on ParaStation MPI at high rank counts.
+    Uses only ``bcast``, ``send``, and ``recv`` on ``COMM_WORLD`` —
+    no inter-communicators.
+
+    Coordination model
+    ------------------
+    Root (rank 0) drives the computation. Workers (rank 1..N-1) spin
+    in :meth:`worker_loop` until root signals shutdown. Each ``map()``
+    call is a self-contained batch: root broadcasts the function,
+    distributes work items one at a time (for load balance), collects
+    results, and sends sentinels to park workers back in their
+    outer loop. The same ``CommWorldMap`` instance can service many
+    ``map()`` calls between construction and ``shutdown()``.
+
+    Rank protocol (per ``map()`` call, ``size > 1``)
+    ------------------------------------------------
+    ::
+
+        Root (rank 0)                   Workers (rank 1..N-1)
+        ──────────────                  ─────────────────────
+        bcast(("map", fn))  ──────►     tag, payload = bcast(None)
+                                        fn = payload
+        send(idx, item) ×N  ──────►     item = recv(source=0, tag=0)
+                                        idx, work = item
+                                        result = fn(work)
+        recv(result) ×N     ◄──────     send((idx, result), tag=1)
+        send(sentinel) ×N   ──────►     item is sentinel → break inner loop
+                                        (wait on next bcast)
+        shutdown():
+          bcast(("shutdown", ...))──►   tag == "shutdown" → exit worker_loop
+        COMM_WORLD.Barrier()            COMM_WORLD.Barrier()
+
+    After ``shutdown()`` the caller should call ``COMM_WORLD.Barrier()``
+    (the wrapper / baseline functions do this) and then proceed to
+    ``allgather`` of results if needed.
+
+    Known failure modes
+    -------------------
+    1. **Worker crash during** ``map()``. Root receives a
+       ``_WorkerError`` wrapper, drains remaining workers with sentinels,
+       and re-raises. Workers that haven't yet received a sentinel wait
+       at ``recv(source=0, tag=0)`` until the drain completes. See the
+       drain block inside :meth:`map`.
+
+    2. **Root exception before** ``shutdown()``. The caller MUST wrap the
+       root branch in ``try/finally`` and call ``cmap.shutdown()`` in
+       ``finally``. Without this, workers block forever at
+       ``bcast(None, root=0)``. This was the Apr 8 2026 teardown fix
+       (see ``.plans/bug-fixes/previous-fixes.md``).
+
+    3. **Worker crash between** ``map()`` **calls.** No liveness check — by
+       design, no heartbeat. Root's next ``bcast(("map", fn))`` hangs
+       because not all ranks participate. Job is eventually killed by
+       SLURM timeout. Trade-off rationale: see
+       ``.plans/diagnose/mpi-evaluation.md`` (Residual Risks section).
+
+    4. **Single-process fallback** (``self.size <= 1``). :meth:`map`
+       bypasses all MPI calls and runs ``[fn(item) for item in items]``
+       sequentially. Used in local ``--test`` runs without ``mpirun``.
+
+    Full design evaluation: ``.plans/diagnose/mpi-evaluation.md``.
+    Bug history: ``.plans/bug-fixes/previous-fixes.md``.
 
     Usage (all ranks must call the same code path)::
 
         cmap = CommWorldMap(MPI.COMM_WORLD)
         if cmap.is_root:
-            sampler = build_pyabc_sampler(..., mpi_map=cmap.map)
-            result = run_abc(sampler=sampler, ...)
-            cmap.shutdown()          # tells workers to exit
+            try:
+                sampler = build_pyabc_sampler(..., mpi_map=cmap.map)
+                result = run_abc(sampler=sampler, ...)
+            finally:
+                cmap.shutdown()          # tells workers to exit
         else:
-            cmap.worker_loop()       # blocks until shutdown
-        comm.Barrier()
+            cmap.worker_loop()           # blocks until shutdown
+        if comm.Get_size() > 1:
+            comm.Barrier()
     """
 
     _SENTINEL = None  # end-of-batch marker for work items
