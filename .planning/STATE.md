@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — DONE)
-last_updated: "2026-04-13T21:38:07.849Z"
-last_activity: 2026-04-13
+status: executing
+stopped_at: Completed 03-01-PLAN.md (dead MPICommExecutor/concurrent_futures code removal — DONE)
+last_updated: "2026-04-14T09:47:27.754Z"
+last_activity: 2026-04-14
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 8
+  completed_plans: 6
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Experiments must run reliably to completion on the cluster — all paper results depend on this.
-**Current focus:** Phase 02 — mpi-hardening
+**Current focus:** Phase 03 — code-cleanup
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-13
+Phase: 03 (code-cleanup) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-14
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-mpi-hardening P01 | 5 | 2 tasks | 4 files |
 | Phase 02-mpi-hardening P02 | 3 days | 3 tasks | 3 files |
 | Phase 02-mpi-hardening P03 | 35 | 3 tasks | 2 files |
+| Phase 03 P01 | 11 | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -75,6 +76,8 @@ Recent decisions affecting current work:
 - [Phase 02-mpi-hardening]: test_barrier_placement_source_check updated to Case B regex (post-mpi_methods-pass Barrier pattern); test passes after migration
 - [Phase 02-mpi-hardening]: Per-call CommWorldMap migration path chosen (mpi_map not plumbed through run_method_distributed — outer-wrapper would deadlock)
 - [Phase 02-mpi-hardening]: MPICommExecutor completely removed from scaling_runner.py — CommWorldMap is sole pyABC MPI coordination model
+- [Phase 03]: concurrent_futures and concurrent_futures_legacy now raise ValueError in resolve_pyabc_mpi_sampler — loud failure, not silent fallback (Phase 3 Plan 01)
+- [Phase 03]: TrackedFutureExecutor class removed entirely from pyabc_sampler.py — no callers post Phase 2 migration (Phase 3 Plan 01)
 
 ### Pending Todos
 
@@ -87,6 +90,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-13T21:07:47.839Z
-Stopped at: Completed 02-03-PLAN.md (scaling_runner migration to CommWorldMap — DONE)
+Last session: 2026-04-14T09:47:27.751Z
+Stopped at: Completed 03-01-PLAN.md (dead MPICommExecutor/concurrent_futures code removal — DONE)
 Resume file: None
