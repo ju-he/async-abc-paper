@@ -164,6 +164,63 @@ class TestExtendBasicRunner:
             ("timed_fake", "1"),
         }
 
+    def test_extend_matches_fresh_run_same_seed(self, tmp_path, extend_runner_config_file):
+        def _rows_as_set(path, cols):
+            with open(path) as f:
+                return {tuple(row[c] for c in cols) for row in csv.DictReader(f)}
+
+        key_cols = ["method", "replicate", "seed", "step", "loss"]
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            # Step a: fresh run — ground truth
+            fresh_dir = tmp_path / "fresh"
+            fresh_dir.mkdir()
+            test_helpers.run_runner_main(
+                "gaussian_mean_runner.py", extend_runner_config_file, fresh_dir
+            )
+            fresh_csv = fresh_dir / "gaussian_mean" / "data" / "raw_results.csv"
+            assert fresh_csv.exists()
+
+            # Step b: write partial CSV into extend_dir (only rejection_abc, replicate=0)
+            extend_dir = tmp_path / "extended"
+            (extend_dir / "gaussian_mean" / "data").mkdir(parents=True)
+            extend_csv = extend_dir / "gaussian_mean" / "data" / "raw_results.csv"
+
+            with open(fresh_csv) as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                partial_rows = [
+                    row for row in reader
+                    if row["method"] == "rejection_abc" and row["replicate"] == "0"
+                ]
+
+            with open(extend_csv, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(partial_rows)
+
+            # Step c: run --extend to complete the remaining combinations
+            test_helpers.run_runner_main(
+                "gaussian_mean_runner.py",
+                extend_runner_config_file,
+                extend_dir,
+                extra_args=("--extend",),
+            )
+
+        # Assertions
+        assert set(_read_key_tuples(extend_csv, ["method", "replicate"])) == {
+            ("rejection_abc", "0"),
+            ("rejection_abc", "1"),
+            ("timed_fake", "0"),
+            ("timed_fake", "1"),
+        }
+
+        fresh_set = _rows_as_set(fresh_csv, key_cols)
+        extend_set = _rows_as_set(extend_csv, key_cols)
+        assert extend_set == fresh_set
+
+        assert _count_csv_rows(extend_csv) == _count_csv_rows(fresh_csv)
+
 
 class TestExtendScalingRunner:
     def test_extend_does_not_duplicate_rows(self, tmp_path):
