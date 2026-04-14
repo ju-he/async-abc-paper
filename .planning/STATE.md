@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md (dead MPICommExecutor/concurrent_futures code removal — DONE)
-last_updated: "2026-04-14T09:47:27.754Z"
+stopped_at: Completed 03-03-PLAN.md (end-to-end --test orchestrator smoke — TEST-02 satisfied)
+last_updated: "2026-04-14T13:49:38.379Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 8
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 03 (code-cleanup) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-14
 
@@ -53,6 +53,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-mpi-hardening P02 | 3 days | 3 tasks | 3 files |
 | Phase 02-mpi-hardening P03 | 35 | 3 tasks | 2 files |
 | Phase 03 P01 | 11 | 3 tasks | 9 files |
+| Phase 03-code-cleanup P03 | 49 | 3 tasks | 0 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,7 @@ Recent decisions affecting current work:
 - [Phase 02-mpi-hardening]: MPICommExecutor completely removed from scaling_runner.py — CommWorldMap is sole pyABC MPI coordination model
 - [Phase 03]: concurrent_futures and concurrent_futures_legacy now raise ValueError in resolve_pyabc_mpi_sampler — loud failure, not silent fallback (Phase 3 Plan 01)
 - [Phase 03]: TrackedFutureExecutor class removed entirely from pyabc_sampler.py — no callers post Phase 2 migration (Phase 3 Plan 01)
+- [Phase 03-code-cleanup]: No source changes required in TEST-02 plan — all 11 runners passed baseline; Pitfall 6 (straggler world_size=1) was a false alarm
 
 ### Pending Todos
 
@@ -90,6 +92,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T09:47:27.751Z
-Stopped at: Completed 03-01-PLAN.md (dead MPICommExecutor/concurrent_futures code removal — DONE)
+Last session: 2026-04-14T13:49:38.374Z
+Stopped at: Completed 03-03-PLAN.md (end-to-end --test orchestrator smoke — TEST-02 satisfied)
 Resume file: None
