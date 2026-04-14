@@ -68,7 +68,11 @@ Plans:
   1. Running --extend on an existing CSV produces the same final outputs as a fresh run with the same seed (no silent incorrect merges)
   2. Running all benchmarks twice with the same seed produces bit-identical CSVs
   3. A single script invocation runs all runners in test mode and checks that output files exist and are non-empty
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 04-01-PLAN.md — Add `--extend` equivalence test to test_extend.py (partial CSV vs fresh run, set equality on key columns) — satisfies REPR-01
+- [x] 04-02-PLAN.md — Add rejection_abc seed-determinism test to test_seeding.py (two runs, same seed, row-set equality) — satisfies REPR-02
+- [ ] 04-03-PLAN.md — Add output-existence gate to run_all_paper_experiments.py + pytest coverage (pass and fail paths) — satisfies REPR-03
 
 ## Progress
 
@@ -80,4 +84,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Diagnose | 2/2 | Complete   | 2026-04-10 |
 | 2. MPI Hardening | 3/3 | Complete   | 2026-04-13 |
 | 3. Code Cleanup | 3/3 | Complete   | 2026-04-14 |
-| 4. Reproducibility | 0/? | Not started | - |
+| 4. Reproducibility | 2/3 | In Progress|  |

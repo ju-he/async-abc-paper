@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 03-02-PLAN.md (CommWorldMap documentation — CODE-02 satisfied)
-last_updated: "2026-04-14T15:39:09.468Z"
+status: executing
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-04-14T17:41:29.128Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 4
   completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
+  total_plans: 11
+  completed_plans: 10
   percent: 0
 ---
 
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Experiments must run reliably to completion on the cluster — all paper results depend on this.
-**Current focus:** Phase 03 — code-cleanup
+**Current focus:** Phase 04 — reproducibility
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Phase complete — ready for verification
+Phase: 04 (reproducibility) — EXECUTING
+Plan: 3 of 3
+Status: Ready to execute
 Last activity: 2026-04-14
 
 Progress: [░░░░░░░░░░] 0%
@@ -55,6 +55,8 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 03 P01 | 11 | 3 tasks | 9 files |
 | Phase 03-code-cleanup P03 | 49 | 3 tasks | 0 files |
 | Phase 03-code-cleanup P02 | 25 | 3 tasks | 1 files |
+| Phase 04-reproducibility P01 | 8 | 1 tasks | 1 files |
+| Phase 04-reproducibility P02 | 4 | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -82,6 +84,9 @@ Recent decisions affecting current work:
 - [Phase 03]: TrackedFutureExecutor class removed entirely from pyabc_sampler.py — no callers post Phase 2 migration (Phase 3 Plan 01)
 - [Phase 03-code-cleanup]: No source changes required in TEST-02 plan — all 11 runners passed baseline; Pitfall 6 (straggler world_size=1) was a false alarm
 - [Phase 03-code-cleanup]: Class docstring updated Usage block to match production caller pattern: try/finally around root branch, Barrier guarded by Get_size() > 1 — CODE-02 satisfied
+- [Phase 04-reproducibility]: String equality holds for loss values across fresh/extend runs: no rounding needed, deterministic seed path confirmed
+- [Phase 04-reproducibility]: Partial CSV fixture built inline from real fresh-run rows (not synthetic), ensures structural validity and correct fieldnames
+- [Phase 04-reproducibility]: rejection_abc is fully bit-deterministic from same seed — string equality holds across CSV round-trip, no approx needed
 
 ### Pending Todos
 
@@ -94,6 +99,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T14:47:38.744Z
-Stopped at: Completed 03-02-PLAN.md (CommWorldMap documentation — CODE-02 satisfied)
+Last session: 2026-04-14T17:41:29.125Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
