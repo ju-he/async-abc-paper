@@ -21,7 +21,7 @@
 ### Code Structure
 
 - [x] **CODE-01**: pyabc_sampler.py, abc_smc_baseline.py, pyabc_wrapper.py simplified after multiple patch rounds
-- [ ] **CODE-02**: MPI coordination model documented inline (CommWorldMap design, rank protocol, known failure modes)
+- [x] **CODE-02**: MPI coordination model documented inline (CommWorldMap design, rank protocol, known failure modes)
 - [x] **CODE-03**: Dead/legacy code removed (concurrent_futures_legacy paths, obsolete workarounds)
 
 ### Reproducibility
@@ -57,7 +57,7 @@
 | TEST-01 | Phase 2 | Complete |
 | TEST-03 | Phase 2 | Complete |
 | CODE-01 | Phase 3 | Complete |
-| CODE-02 | Phase 3 | Pending |
+| CODE-02 | Phase 3 | Complete |
 | CODE-03 | Phase 3 | Complete |
 | TEST-02 | Phase 3 | Complete |
 | REPR-01 | Phase 4 | Pending |

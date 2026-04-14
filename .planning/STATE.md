@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-03-PLAN.md (end-to-end --test orchestrator smoke — TEST-02 satisfied)
-last_updated: "2026-04-14T13:49:38.379Z"
+status: verifying
+stopped_at: Completed 03-02-PLAN.md (CommWorldMap documentation — CODE-02 satisfied)
+last_updated: "2026-04-14T14:47:38.748Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 4
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 8
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 
 Phase: 03 (code-cleanup) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-14
 
 Progress: [░░░░░░░░░░] 0%
@@ -54,6 +54,7 @@ Progress: [░░░░░░░░░░] 0%
 | Phase 02-mpi-hardening P03 | 35 | 3 tasks | 2 files |
 | Phase 03 P01 | 11 | 3 tasks | 9 files |
 | Phase 03-code-cleanup P03 | 49 | 3 tasks | 0 files |
+| Phase 03-code-cleanup P02 | 25 | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -80,6 +81,7 @@ Recent decisions affecting current work:
 - [Phase 03]: concurrent_futures and concurrent_futures_legacy now raise ValueError in resolve_pyabc_mpi_sampler — loud failure, not silent fallback (Phase 3 Plan 01)
 - [Phase 03]: TrackedFutureExecutor class removed entirely from pyabc_sampler.py — no callers post Phase 2 migration (Phase 3 Plan 01)
 - [Phase 03-code-cleanup]: No source changes required in TEST-02 plan — all 11 runners passed baseline; Pitfall 6 (straggler world_size=1) was a false alarm
+- [Phase 03-code-cleanup]: Class docstring updated Usage block to match production caller pattern: try/finally around root branch, Barrier guarded by Get_size() > 1 — CODE-02 satisfied
 
 ### Pending Todos
 
@@ -92,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T13:49:38.374Z
-Stopped at: Completed 03-03-PLAN.md (end-to-end --test orchestrator smoke — TEST-02 satisfied)
+Last session: 2026-04-14T14:47:38.744Z
+Stopped at: Completed 03-02-PLAN.md (CommWorldMap documentation — CODE-02 satisfied)
 Resume file: None

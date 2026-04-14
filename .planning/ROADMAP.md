@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Diagnose** - Systematically document all rank coordination points and evaluate all candidate pyABC MPI sampler approaches; select the best one (completed 2026-04-10)
 - [x] **Phase 2: MPI Hardening** - Implement the chosen MPI approach, verify it at scale, make wall-time stopping robust, backed by unit tests (completed 2026-04-13)
-- [ ] **Phase 3: Code Cleanup** - Simplify and document the inference layer after the MPI model is fully understood
+- [x] **Phase 3: Code Cleanup** - Simplify and document the inference layer after the MPI model is fully understood (completed 2026-04-14)
 - [ ] **Phase 4: Reproducibility** - Verify extend mode, seed determinism, and one-command end-to-end test script
 
 ## Phase Details
@@ -57,7 +57,7 @@ Plans:
   3. All experiment runners pass --test end-to-end in a single command without errors
 **Plans**: 3 plans
 - [x] 03-01-PLAN.md — Remove dead MPICommExecutor / concurrent_futures paths from the three inference files (CODE-01, CODE-03)
-- [ ] 03-02-PLAN.md — Document CommWorldMap coordination model, rank protocol, and failure modes (CODE-02)
+- [x] 03-02-PLAN.md — Document CommWorldMap coordination model, rank protocol, and failure modes (CODE-02)
 - [x] 03-03-PLAN.md — End-to-end orchestrator smoke under --test (TEST-02)
 
 ### Phase 4: Reproducibility
@@ -79,5 +79,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 |-------|----------------|--------|-----------|
 | 1. Diagnose | 2/2 | Complete   | 2026-04-10 |
 | 2. MPI Hardening | 3/3 | Complete   | 2026-04-13 |
-| 3. Code Cleanup | 2/3 | In Progress|  |
+| 3. Code Cleanup | 3/3 | Complete   | 2026-04-14 |
 | 4. Reproducibility | 0/? | Not started | - |
