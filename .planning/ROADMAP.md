@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Diagnose** - Systematically document all rank coordination points and evaluate all candidate pyABC MPI sampler approaches; select the best one (completed 2026-04-10)
 - [x] **Phase 2: MPI Hardening** - Implement the chosen MPI approach, verify it at scale, make wall-time stopping robust, backed by unit tests (completed 2026-04-13)
 - [x] **Phase 3: Code Cleanup** - Simplify and document the inference layer after the MPI model is fully understood (completed 2026-04-14)
-- [ ] **Phase 4: Reproducibility** - Verify extend mode, seed determinism, and one-command end-to-end test script
+- [x] **Phase 4: Reproducibility** - Verify extend mode, seed determinism, and one-command end-to-end test script (completed 2026-04-14)
 
 ## Phase Details
 
@@ -72,7 +72,7 @@ Plans:
 Plans:
 - [x] 04-01-PLAN.md — Add `--extend` equivalence test to test_extend.py (partial CSV vs fresh run, set equality on key columns) — satisfies REPR-01
 - [x] 04-02-PLAN.md — Add rejection_abc seed-determinism test to test_seeding.py (two runs, same seed, row-set equality) — satisfies REPR-02
-- [ ] 04-03-PLAN.md — Add output-existence gate to run_all_paper_experiments.py + pytest coverage (pass and fail paths) — satisfies REPR-03
+- [x] 04-03-PLAN.md — Add output-existence gate to run_all_paper_experiments.py + pytest coverage (pass and fail paths) — satisfies REPR-03
 
 ## Progress
 
@@ -84,4 +84,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4
 | 1. Diagnose | 2/2 | Complete   | 2026-04-10 |
 | 2. MPI Hardening | 3/3 | Complete   | 2026-04-13 |
 | 3. Code Cleanup | 3/3 | Complete   | 2026-04-14 |
-| 4. Reproducibility | 2/3 | In Progress|  |
+| 4. Reproducibility | 3/3 | Complete   | 2026-04-14 |

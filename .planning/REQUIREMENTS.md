@@ -28,7 +28,7 @@
 
 - [x] **REPR-01**: `--extend` mode verified to produce correct results (no silent incorrect merges)
 - [x] **REPR-02**: Config/seed audit confirms deterministic outputs for the same seed across all benchmarks
-- [ ] **REPR-03**: One-command end-to-end test script runs all runners in test mode and verifies outputs exist
+- [x] **REPR-03**: One-command end-to-end test script runs all runners in test mode and verifies outputs exist
 
 ## v2 Requirements
 
@@ -62,7 +62,7 @@
 | TEST-02 | Phase 3 | Complete |
 | REPR-01 | Phase 4 | Complete |
 | REPR-02 | Phase 4 | Complete |
-| REPR-03 | Phase 4 | Pending |
+| REPR-03 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 13 total
