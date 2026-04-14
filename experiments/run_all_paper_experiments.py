@@ -54,6 +54,35 @@ def _read_runner_estimate(timing_csv: Path) -> float | None:
     return None
 
 
+def _verify_outputs_exist(name: str, output_dir: Path) -> tuple[bool, str | None]:
+    """Verify that a runner produced at least one non-empty CSV output.
+
+    Satisfies REPR-03 (Phase 4): after each runner exits cleanly, confirm that
+    its expected output directory contains at least one non-empty CSV file.
+
+    Parameters
+    ----------
+    name:
+        Experiment registry name (e.g. ``"gaussian_mean"``).
+    output_dir:
+        Root output directory passed to the orchestrator.
+
+    Returns
+    -------
+    tuple[bool, str | None]
+        ``(True, None)`` on success; ``(False, reason)`` on failure.
+    """
+    data_dir = output_dir / name / "data"
+    if not data_dir.is_dir():
+        return False, f"data directory missing: {data_dir}"
+    csvs = list(data_dir.glob("*.csv"))
+    if not csvs:
+        return False, f"data directory empty: {data_dir}"
+    if all(p.stat().st_size == 0 for p in csvs):
+        return False, f"all CSVs empty: {data_dir}"
+    return True, None
+
+
 # Ordered mapping: experiment_name → (runner_script, config_file)
 EXPERIMENT_REGISTRY = {
     "gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json"),
@@ -215,7 +244,15 @@ def main(argv: list[str] | None = None) -> None:
                 )
         if is_root_rank():
             write_timing_csv(output_dir / timing_summary_filename(run_mode), name, elapsed, est, args.test, run_mode)
+        outputs_ok = True
+        outputs_reason: str | None = None
+        if rc == 0 and is_root_rank():
+            outputs_ok, outputs_reason = _verify_outputs_exist(name, output_dir)
+            if not outputs_ok:
+                logger.error("[run_all] Missing outputs: %s — %s", name, outputs_reason)
         if rc != 0:
+            failures.append(name)
+        elif not outputs_ok:
             failures.append(name)
 
     total_elapsed = time.time() - total_start
