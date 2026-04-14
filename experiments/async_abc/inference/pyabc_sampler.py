@@ -104,11 +104,31 @@ class CommWorldMap:
         self._shutdown = False
 
     def map(self, fn, iterable):
-        """Distribute *fn* over *iterable* across MPI workers.  Root-only.
+        """Distribute *fn* over *iterable* across MPI workers. Root-only.
 
-        Broadcasts *fn* to all workers, then distributes items dynamically
-        (one at a time to idle workers) for load balance.  Returns results
-        in submission order.
+        Rank protocol (this call):
+
+        1. Broadcast ``("map", fn)`` so every worker's :meth:`worker_loop`
+           wakes up and receives the function to apply.
+        2. Seed each worker with one ``(idx, item)`` send on tag 0.
+        3. Collect results on tag 1 (``MPI.ANY_SOURCE``), dispatching a
+           new work item each time a worker reports done. Order is
+           preserved via the ``idx`` stored with each item.
+        4. Send a sentinel (``None``) to every worker when the queue
+           drains; workers exit their inner loop and wait on the next
+           :meth:`worker_loop` bcast.
+
+        If a worker raises, the exception comes back as a
+        ``_WorkerError`` wrapper on tag 1. Root drains every remaining
+        worker with sentinels before re-raising the original exception.
+
+        Single-process fallback: if ``self.size <= 1``, skip MPI entirely
+        and return ``[fn(item) for item in items]``.
+
+        Returns
+        -------
+        list
+            Results in submission order (matches ``iterable``).
         """
         items = list(iterable)
 
@@ -170,7 +190,17 @@ class CommWorldMap:
         return results
 
     def shutdown(self):
-        """Signal workers to exit their loop.  Root-only, idempotent."""
+        """Tell every worker to exit :meth:`worker_loop`. Root-only.
+
+        Broadcasts ``("shutdown", None)``; every worker sees
+        ``tag == "shutdown"`` and falls out of its outer ``while True``.
+        Idempotent: a second call is a no-op.
+
+        MUST be called from a ``finally`` block around the root branch
+        (see :class:`CommWorldMap` failure mode #2). Without this, any
+        exception on root leaves workers blocked at ``bcast(None)``
+        forever.
+        """
         if self._shutdown:
             return
         self._shutdown = True
@@ -178,7 +208,27 @@ class CommWorldMap:
             self.comm.bcast(("shutdown", None), root=0)
 
     def worker_loop(self):
-        """Process map batches until shutdown.  Workers-only (rank != 0)."""
+        """Process map batches until shutdown. Workers-only (rank != 0).
+
+        Rank protocol (outer loop):
+
+        1. Wait on ``bcast(None, root=0)`` for the next tag.
+        2. If ``tag == "shutdown"``, return (exits this worker's
+           participation in CommWorldMap).
+        3. Otherwise ``payload`` is the user function ``fn``. Enter the
+           inner work loop:
+
+           * ``recv(source=0, tag=0)`` — next work item or sentinel.
+           * Sentinel → break inner loop, wait on next outer ``bcast``.
+           * Otherwise compute ``fn(work)`` and ``send((idx, result),
+             dest=0, tag=1)``. Exceptions are wrapped in
+             ``_WorkerError`` and sent back on the same tag so root can
+             drain and re-raise.
+
+        No liveness check: if this rank crashes between map batches,
+        root's next ``bcast`` hangs until SLURM timeout. See
+        :class:`CommWorldMap` failure mode #3.
+        """
         while True:
             tag, payload = self.comm.bcast(None, root=0)
             if tag == "shutdown":
