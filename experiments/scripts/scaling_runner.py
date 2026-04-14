@@ -934,10 +934,11 @@ def main(argv: list[str] | None = None) -> None:
             def _run_workloads(methods):
                 """Run a set of methods across all k-values and replicates.
 
-                All MPI coordination now flows through CommWorldMap (Phase 2 D-03).
-                pyABC methods and non-pyABC methods share the same
-                ``run_method_distributed`` dispatch path — no dual code path, no
-                shared MPICommExecutor, no inter-communicator teardown.
+                All MPI coordination flows through CommWorldMap: pyABC methods and
+                non-pyABC methods share the same ``run_method_distributed`` dispatch
+                path. Root and worker ranks both call this function; the inner
+                CommWorldMap (constructed inside run_pyabc_smc / run_abc_smc_baseline)
+                splits them.
                 """
                 for k in k_values:
                     inference_cfg = k_inference_cfgs[k]
@@ -1023,12 +1024,11 @@ def main(argv: list[str] | None = None) -> None:
             if non_mpi_methods:
                 _run_workloads(non_mpi_methods)
 
-            # Pass 2: pyABC MPI methods via CommWorldMap (Phase 2 D-03).
+            # Pass 2: pyABC MPI methods via CommWorldMap.
             # Per-call CommWorldMap inside run_pyabc_smc / run_abc_smc_baseline
-            # handles coordination. Unlike the old shared MPICommExecutor path,
-            # all ranks now participate in _run_workloads because each pyABC call
-            # internally creates and tears down its own CommWorldMap cheaply
-            # (no inter-communicator cycles).
+            # handles coordination. All ranks participate in _run_workloads;
+            # each pyABC call internally creates and tears down its own
+            # CommWorldMap. No inter-communicator cycles.
             if mpi_methods:
                 _run_workloads(mpi_methods)
 
