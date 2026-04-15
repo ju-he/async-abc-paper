@@ -16,7 +16,7 @@
     "max_simulations": 2000,
     "k": 100,
     "tol_init": 500000.0,
-    "scheduler_type": "acceptance_rate",
+    "scheduler_type": "geometric_decay",
     "perturbation_scale": 0.8,
     "n_workers": 1,
     "propulate_budget_mode": "total_simulations",

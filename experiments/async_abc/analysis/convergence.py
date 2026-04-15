@@ -52,6 +52,7 @@ QUALITY_CURVE_COLUMNS = [
     "wall_time",
     "posterior_samples",
     "wasserstein",
+    "posterior_mean_l2",
 ]
 
 THRESHOLD_COLUMNS = [
@@ -74,6 +75,16 @@ THRESHOLD_COLUMNS = [
 ]
 
 _SYNC_METHODS = {"pyabc_smc", "abc_smc_baseline"}
+
+
+def _posterior_mean_l2(frame: pd.DataFrame, true_params: dict[str, float]) -> float:
+    """Normalized L2 from posterior mean to true params (in [0,1] space)."""
+    param_cols = [c for c in true_params if c in frame.columns]
+    if not param_cols:
+        return float("nan")
+    means = frame[param_cols].mean()
+    diffs = np.array([means[p] - true_params[p] for p in param_cols])
+    return float(np.linalg.norm(diffs) / np.sqrt(len(param_cols)))
 
 
 def _wasserstein_to_true_params(
@@ -639,6 +650,7 @@ def _quality_row(
         "wall_time": wall_time,
         "posterior_samples": posterior_samples,
         "wasserstein": _wasserstein_to_true_params(state, true_params, n_projections=n_projections),
+        "posterior_mean_l2": _posterior_mean_l2(state, true_params),
     }
 
 

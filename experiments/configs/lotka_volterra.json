@@ -19,7 +19,7 @@
     "tol_init": 500000.0,
     "n_generations": 1000,
     "max_wall_time_s": 600,
-    "scheduler_type": "acceptance_rate",
+    "scheduler_type": "geometric_decay",
     "perturbation_scale": 0.8,
     "propulate_budget_mode": "total_simulations"
   },

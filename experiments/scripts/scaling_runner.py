@@ -70,6 +70,7 @@ _THROUGHPUT_FIELDNAMES = [
     "posterior_samples",
     "throughput_sims_per_s",
     "final_quality_wasserstein",
+    "final_quality_posterior_mean_l2",
     "final_n_particles",
     "final_tolerance",
     "state_kind",
@@ -91,6 +92,7 @@ _BUDGET_FIELDNAMES = [
     "attempts_by_budget",
     "posterior_samples_by_budget",
     "quality_wasserstein_by_budget",
+    "quality_posterior_mean_l2_by_budget",
     "best_tolerance_by_budget",
     "test_mode",
 ]
@@ -376,9 +378,10 @@ def _true_params_from_cfg(example_records: Iterable[ParticleRecord], benchmark_c
             break
     true_params: Dict[str, float] = {}
     for name in param_names:
-        key = f"true_{name}"
+        clean = name.removeprefix("param_")
+        key = f"true_{clean}"
         if key in benchmark_cfg:
-            true_params[name] = float(benchmark_cfg[key])
+            true_params[clean] = float(benchmark_cfg[key])
     return true_params
 
 
@@ -435,8 +438,10 @@ def _final_summary_row(
             archive_size=int(k),
         )
     final_quality = float("nan")
+    final_quality_mean_l2 = float("nan")
     if quality_df is not None and not quality_df.empty:
         final_quality = float(quality_df.iloc[-1]["wasserstein"])
+        final_quality_mean_l2 = float(quality_df.iloc[-1].get("posterior_mean_l2", float("nan")))
         if not state_kind:
             state_kind = str(quality_df.iloc[-1]["state_kind"])
         if final_n_particles == 0:
@@ -472,6 +477,7 @@ def _final_summary_row(
         "posterior_samples": int(final_n_particles),
         "throughput_sims_per_s": float(throughput),
         "final_quality_wasserstein": float(final_quality),
+        "final_quality_posterior_mean_l2": float(final_quality_mean_l2),
         "final_n_particles": int(final_n_particles),
         "final_tolerance": float(final_tolerance) if math.isfinite(float(final_tolerance)) else "",
         "state_kind": str(state_kind),
@@ -509,12 +515,14 @@ def _budget_summary_rows(
         best_tolerance = _best_tolerance_upto(records, budget_s)
         posterior_samples = 0
         quality = float("nan")
+        quality_mean_l2 = float("nan")
         if quality_df is not None and not quality_df.empty:
             eligible = quality_df.loc[quality_df["axis_value"] <= budget_s]
             if not eligible.empty:
                 last = eligible.iloc[-1]
                 posterior_samples = int(last["posterior_samples"])
                 quality = float(last["wasserstein"])
+                quality_mean_l2 = float(last.get("posterior_mean_l2", float("nan")))
         rows.append(
             {
                 "base_method": base_method,
@@ -530,6 +538,7 @@ def _budget_summary_rows(
                 "attempts_by_budget": int(attempts),
                 "posterior_samples_by_budget": int(posterior_samples),
                 "quality_wasserstein_by_budget": float(quality),
+                "quality_posterior_mean_l2_by_budget": float(quality_mean_l2),
                 "best_tolerance_by_budget": float(best_tolerance) if math.isfinite(float(best_tolerance)) else "",
                 "test_mode": bool(test_mode),
             }
@@ -714,6 +723,7 @@ def _backfill_quality_metrics(
         )
         if qdf is not None and not qdf.empty:
             row["final_quality_wasserstein"] = float(qdf.iloc[-1]["wasserstein"])
+            row["final_quality_posterior_mean_l2"] = float(qdf.iloc[-1].get("posterior_mean_l2", float("nan")))
             if not row.get("state_kind"):
                 row["state_kind"] = str(qdf.iloc[-1]["state_kind"])
             if int(row.get("final_n_particles", 0)) == 0:
@@ -735,6 +745,7 @@ def _backfill_quality_metrics(
             eligible = qdf.loc[qdf["axis_value"] <= budget_s]
             if not eligible.empty:
                 row["quality_wasserstein_by_budget"] = float(eligible.iloc[-1]["wasserstein"])
+                row["quality_posterior_mean_l2_by_budget"] = float(eligible.iloc[-1].get("posterior_mean_l2", float("nan")))
                 row["posterior_samples_by_budget"] = int(eligible.iloc[-1]["posterior_samples"])
 
 
@@ -828,7 +839,7 @@ def rebuild_scaling_outputs(
     return aggregate_rows
 
 
-def main(argv: list[str] | None = None) -> None:
+def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     configure_logging()
     parser = make_arg_parser("Scaling experiment.")
     parser.add_argument(
@@ -843,14 +854,21 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Write per-combination shards only; skip aggregate CSV/plot rebuild.",
     )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        help="After the run, print an estimated full-run wall time extrapolated from measured elapsed times.",
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test, small_mode=args.small)
     test_mode = is_test_mode(cfg)
     small_mode = is_small_mode(cfg)
     run_mode = get_run_mode(cfg)
-    estimate_mode = run_mode != "full"
+    estimate_mode = args.estimate
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
+    if prepare_runtime_cfg is not None:
+        cfg = prepare_runtime_cfg(cfg, output_dir)
 
     if args.finalize_only:
         if is_root_rank():
@@ -1080,13 +1098,37 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
     if estimate_mode and is_root_rank():
         cfg_full = load_config(args.config, test_mode=False, small_mode=False)
-        full_sims = cfg_full["inference"]["max_simulations"]
+        full_scaling = cfg_full.get("scaling", {})
+        cur_scaling = cfg.get("scaling", {})
         full_reps = cfg_full["execution"]["n_replicates"]
-        test_sims = cfg["inference"]["max_simulations"]
-        test_reps = cfg["execution"]["n_replicates"]
-        sim_ratio = (full_sims * full_reps) / max(1, test_sims * test_reps)
-        full_worker_counts = cfg_full.get("scaling", {}).get("worker_counts", worker_counts)
-        full_k_values = cfg_full.get("scaling", {}).get("k_values", k_values)
+        cur_reps = cfg["execution"]["n_replicates"]
+        full_worker_counts = full_scaling.get("worker_counts", worker_counts)
+        full_k_values = full_scaling.get("k_values", k_values)
+
+        # Choose scale ratio based on whether runs are wall-time dominated.
+        # Wall-time dominated: elapsed ≈ wall_time_limit regardless of max_sims,
+        # so the correct scale factor is (full_reps * full_wall) / (cur_reps * cur_wall).
+        # Sim-count dominated: scale by (full_sims * full_reps) / (cur_sims * cur_reps).
+        full_wall = full_scaling.get("wall_time_limit_s") or cfg_full["inference"].get("max_wall_time_s")
+        cur_wall = cur_scaling.get("wall_time_limit_s") or cfg["inference"].get("max_wall_time_s")
+        wall_time_dominated = (
+            full_wall is not None and cur_wall is not None and float(cur_wall) > 0
+            and aggregate_throughput_rows
+            and float(sum(r.get("elapsed_wall_time_s", 0) for r in aggregate_throughput_rows))
+               / max(1, len(aggregate_throughput_rows)) > 0.85 * float(cur_wall)
+        )
+        if wall_time_dominated:
+            scale_ratio = (full_reps * float(full_wall)) / max(1e-9, cur_reps * float(cur_wall))
+            note = f"wall-time scaling: {cur_reps}rep×{cur_wall}s → {full_reps}rep×{full_wall}s"
+        else:
+            full_sims = cfg_full["inference"]["max_simulations"]
+            cur_sims = cfg["inference"]["max_simulations"]
+            scale_ratio = (full_sims * full_reps) / max(1, cur_sims * cur_reps)
+            _, _, note = compute_scaling_factor(
+                args.config,
+                small_mode=small_mode,
+                test_mode=test_mode,
+            )
 
         times_by_w: dict[int, list[float]] = {}
         for row in aggregate_throughput_rows:
@@ -1094,16 +1136,11 @@ def main(argv: list[str] | None = None) -> None:
         measured_avg = {w: sum(ts) / len(ts) for w, ts in times_by_w.items()}
         if measured_avg:
             estimated = sum(
-                _interp_time(int(w), measured_avg) * sim_ratio
+                _interp_time(int(w), measured_avg) * scale_ratio
                 for w in full_worker_counts
                 for _k in full_k_values
             )
 
-        _, _, note = compute_scaling_factor(
-            args.config,
-            small_mode=small_mode,
-            test_mode=test_mode,
-        )
         if estimated is not None:
             logger.info(
                 "[%s] Estimated full run: ~%s  (%s)",

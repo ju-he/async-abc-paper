@@ -3920,11 +3920,13 @@ def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str
     that would otherwise cause quality-vs-time plots to be silently skipped.
     """
     inferred_names = set(_param_names(records))
+    clean_names = {p.removeprefix("param_") for p in inferred_names}
     true_params: Dict[str, float] = {}
     for param in inferred_names:
-        key = f"true_{param}"
+        clean = param.removeprefix("param_")
+        key = f"true_{clean}"
         if key in benchmark_cfg:
-            true_params[param] = float(benchmark_cfg[key])
+            true_params[clean] = float(benchmark_cfg[key])
 
     # Warn about config true_* keys that have no matching inferred column.
     if inferred_names:
@@ -3933,7 +3935,7 @@ def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str
             for key, val in benchmark_cfg.items()
             if key.startswith("true_")
             and isinstance(val, (int, float))
-            and key[len("true_"):] not in inferred_names
+            and key[len("true_"):] not in clean_names
         ]
         if unmapped:
             logger.warning(

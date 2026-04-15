@@ -237,7 +237,7 @@ def _final_quality_wasserstein(
 def _true_params_from_benchmark_cfg(benchmark_cfg: Dict[str, Any]) -> Dict[str, float]:
     true_params = {}
     for key, value in benchmark_cfg.items():
-        if key.startswith("true_"):
+        if key.startswith("true_") and isinstance(value, (int, float)):
             true_params[key.removeprefix("true_")] = float(value)
     return true_params
 

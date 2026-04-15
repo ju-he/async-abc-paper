@@ -1,0 +1,58 @@
+{
+  "experiment_name": "scaling_cpm",
+  "benchmark": {
+    "name": "cellular_potts",
+    "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+    "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+    "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
+    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_motility.json",
+    "reference_data_path": "experiments/assets/cellular_potts/reference_data",
+    "output_dir": "experiments/data/cpm_sims_scaling",
+    "engine_backend": "cis",
+    "seed_param_name": "random_seed",
+    "seed_param_path": "Settings.randomseed",
+    "true_division_rate": 0.049905,
+    "true_motility": 0.2,
+    "true_params_scale": "normalized [0,1]"
+  },
+  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "inference": {
+    "max_simulations": 2000,
+    "k": 100,
+    "tol_init": 10.0,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "n_workers": 1,
+    "propulate_budget_mode": "total_simulations",
+    "max_wall_time_s": 3600.0
+  },
+  "execution": {
+    "n_replicates": 5,
+    "base_seed": 0
+  },
+  "scaling": {
+    "k_values": [10, 50, 100],
+    "test_k_values": [10, 50],
+    "worker_counts": [1, 4, 16, 48, 96],
+    "test_worker_counts": [1, 4, 48],
+    "wall_time_budgets_s": [900.0, 1800.0, 3600.0],
+    "wall_time_limit_s": 3600.0,
+    "max_simulations_policy": {
+      "min_total": 500,
+      "per_worker": 20,
+      "k_factor": 2
+    }
+  },
+  "plots": {
+    "scaling_curve": true,
+    "efficiency": true
+  },
+  "paper": {
+    "experiment_role": "hpc_performance_cpm",
+    "stop_policy": "fixed_walltime",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  }
+}
