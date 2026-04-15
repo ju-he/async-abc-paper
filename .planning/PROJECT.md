@@ -30,13 +30,13 @@ Experiments must run reliably to completion on the cluster — all paper results
 
 - [x] MPI/pyABC hang issues fixed conclusively under cluster conditions — CommWorldMap verified at 48 ranks on JUWELS ParaStationMPI (no hang, 193+ records). `MPICommExecutor` removed from all code paths. Validated in Phase 02: mpi-hardening
 - [x] Test coverage for CommWorldMap coordination, wall-time stopping (NaN-weight guard), and pyABC MPI paths — 8 regression tests across `test_mpi_hardening.py`. Validated in Phase 02: mpi-hardening
+- [x] MPI inference layer simplified and documented after multiple patch rounds — `TrackedFutureExecutor`/`MPICommExecutor` dead paths removed; `CommWorldMap` fully documented with coordination model, rank protocol, failure modes. Validated in Phase 03: code-cleanup
+- [x] All 11 paper experiment runners pass `--test` mode end-to-end — TEST-02 gate satisfied. Validated in Phase 03: code-cleanup
+- [x] Experiment reproducibility verified: `--extend` idempotency, seeding determinism, and output-existence gate all tested (REPR-01, REPR-02, REPR-03). Validated in Phase 04: reproducibility
 
 ### Active
 
 <!-- Current scope. Building toward these. -->
-
-- [ ] MPI inference layer simplified and documented after multiple patch rounds
-- [ ] Experiment reproducibility verified (configs, seeds, output structure consistent)
 
 ### Out of Scope
 
@@ -87,4 +87,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-13 — Phase 02 (mpi-hardening) complete*
+*Last updated: 2026-04-14 — Phase 04 (reproducibility) complete — v1.0 milestone done*

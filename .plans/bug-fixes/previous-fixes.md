@@ -1,5 +1,15 @@
 # Previous Bug Fixes
 
+## 2026-04-14 — Phase 3 Plan 03: runtime_heterogeneity plot generation hang in test mode
+
+**Symptom:** `run_all_paper_experiments.py --test` hangs for 60+ minutes after `runtime_heterogeneity` inference completes. Process at 100% CPU on main thread, producing no output, with matplotlib font files open.
+
+**Root cause:** `runtime_heterogeneity_runner.main()` generates matplotlib gantt charts after inference. The gantt plot calls `ax.barh(...)` once per simulation record — with 32755 records produced in a 30s test run, this renders 32755 matplotlib patches, which is O(N^2) or worse in matplotlib's backend and takes hours.
+
+**Fix:** Added `if not test_mode:` guard around all plot generation calls in `runtime_heterogeneity_runner.py`. Data outputs (raw_results.csv, timing.csv, metadata.json, runtime_performance_summary.csv, runtime_debug_summary.csv, speedup_summary.csv) are unaffected and still generated in test mode. Plots are only generated in full (non-test) runs.
+
+**Files:** `experiments/scripts/runtime_heterogeneity_runner.py`
+
 ## 2026-04-14 — Phase 3 Plan 01: Dead code removal
 
 - Removed `TrackedFutureExecutor` class and `MPICommExecutor` / `concurrent_futures` branches from `pyabc_sampler.py`, `pyabc_wrapper.py`, `abc_smc_baseline.py`

@@ -406,27 +406,32 @@ def main(argv: list[str] | None = None) -> None:
             },
         )
 
-    if is_root_rank() and cfg.get("plots", {}).get("gantt"):
-        from async_abc.plotting.reporters import plot_worker_gantt
+    # In test mode, skip plot generation: the gantt chart (and other per-record
+    # plots) render one matplotlib element per simulation record — with tens of
+    # thousands of records produced by a 30 s wall-time test run this hangs for
+    # hours.  Test mode validates functional correctness, not visual output.
+    if not test_mode:
+        if is_root_rank() and cfg.get("plots", {}).get("gantt"):
+            from async_abc.plotting.reporters import plot_worker_gantt
 
-        plot_worker_gantt(all_records, output_dir)
-    plots_cfg = cfg.get("plots", {})
-    if is_root_rank() and plots_cfg.get("idle_fraction"):
-        from async_abc.plotting.reporters import plot_idle_fraction
+            plot_worker_gantt(all_records, output_dir)
+        plots_cfg = cfg.get("plots", {})
+        if is_root_rank() and plots_cfg.get("idle_fraction"):
+            from async_abc.plotting.reporters import plot_idle_fraction
 
-        plot_idle_fraction(all_records, output_dir, summary_df=runtime_summary_df)
-    if is_root_rank() and plots_cfg.get("throughput_over_time"):
-        from async_abc.plotting.reporters import plot_throughput_over_time
+            plot_idle_fraction(all_records, output_dir, summary_df=runtime_summary_df)
+        if is_root_rank() and plots_cfg.get("throughput_over_time"):
+            from async_abc.plotting.reporters import plot_throughput_over_time
 
-        plot_throughput_over_time(all_records, output_dir)
-    if is_root_rank() and plots_cfg.get("idle_fraction_comparison"):
-        from async_abc.plotting.reporters import plot_idle_fraction_comparison
+            plot_throughput_over_time(all_records, output_dir)
+        if is_root_rank() and plots_cfg.get("idle_fraction_comparison"):
+            from async_abc.plotting.reporters import plot_idle_fraction_comparison
 
-        plot_idle_fraction_comparison(all_records, output_dir, summary_df=runtime_summary_df)
-    if is_root_rank() and plots_cfg.get("quality_by_sigma"):
-        from async_abc.plotting.reporters import plot_quality_by_sigma
+            plot_idle_fraction_comparison(all_records, output_dir, summary_df=runtime_summary_df)
+        if is_root_rank() and plots_cfg.get("quality_by_sigma"):
+            from async_abc.plotting.reporters import plot_quality_by_sigma
 
-        plot_quality_by_sigma(all_records, cfg, output_dir, summary_df=runtime_summary_df)
+            plot_quality_by_sigma(all_records, cfg, output_dir, summary_df=runtime_summary_df)
     if is_root_rank():
         from async_abc.plotting.reporters import write_runtime_debug_summary
 
