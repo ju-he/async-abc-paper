@@ -41,7 +41,8 @@
         "inference_overrides": {
           "max_simulations": 20000,
           "k": 200,
-          "tol_init": 2.0
+          "tol_init": 2.0,
+          "scheduler_type": "geometric_decay"
         }
       }
     ]

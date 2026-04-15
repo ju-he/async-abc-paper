@@ -33,7 +33,7 @@ from ..plotting.reporters import (
     plot_worker_gantt,
     write_runtime_debug_summary,
 )
-from ..io.config import get_run_mode
+from ..io.config import get_run_mode, is_test_mode
 from ..plotting.export import save_figure
 from ..utils.metadata import write_metadata
 from ..utils.runner import timing_summary_filename, write_timing_comparison_csv, write_timing_csv
@@ -432,17 +432,22 @@ def finalize_runtime_heterogeneity_experiment(
     records = load_records(tmp_output.data / "raw_results.csv")
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
-    if any(cfg.get("plots", {}).values()):
-        plot_benchmark_diagnostics(records, cfg, tmp_output)
-    plots_cfg = cfg.get("plots", {})
-    if plots_cfg.get("gantt"):
-        plot_worker_gantt(records, tmp_output)
-    if plots_cfg.get("idle_fraction"):
-        plot_idle_fraction(records, tmp_output)
-    if plots_cfg.get("throughput_over_time"):
-        plot_throughput_over_time(records, tmp_output)
-    if plots_cfg.get("idle_fraction_comparison"):
-        plot_idle_fraction_comparison(records, tmp_output)
+    test_mode = is_test_mode(cfg)
+    if not test_mode:
+        # Per-record plots (gantt etc.) render one matplotlib element per simulation
+        # record — with tens of thousands of records from a short test run this hangs
+        # for hours.  Skip in test mode, matching the non-sharded runner behaviour.
+        if any(cfg.get("plots", {}).values()):
+            plot_benchmark_diagnostics(records, cfg, tmp_output)
+        plots_cfg = cfg.get("plots", {})
+        if plots_cfg.get("gantt"):
+            plot_worker_gantt(records, tmp_output)
+        if plots_cfg.get("idle_fraction"):
+            plot_idle_fraction(records, tmp_output)
+        if plots_cfg.get("throughput_over_time"):
+            plot_throughput_over_time(records, tmp_output)
+        if plots_cfg.get("idle_fraction_comparison"):
+            plot_idle_fraction_comparison(records, tmp_output)
     write_runtime_debug_summary(records, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
