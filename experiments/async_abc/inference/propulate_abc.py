@@ -293,6 +293,16 @@ def _propulate_with_wall_time_limit(
             np.array([local_done], dtype=np.int32), global_done, op=_MPI.MIN,
         )
         if global_done[0]:
+            # Final drain: consume any messages that arrived during the Allreduce.
+            # At this point all sends are globally complete, so no new messages
+            # will be generated.  Any remaining buffered receives must already
+            # have been handed to MPI by their senders, and this pass collects
+            # them before the communicator is freed.  Without this extra pass,
+            # messages arriving in the send-complete→Allreduce window are left
+            # in propulate_comm's buffer when MPI_Comm_free is called, which
+            # corrupts pscom state and causes MPI_Mrecv failures in the next
+            # method's CommWorldMap workers.
+            propulator._receive_intra_island_individuals()
             break
 
     if intra_reqs:
