@@ -7,7 +7,7 @@
     "prior_low": -5.0,
     "prior_high": 5.0
   },
-  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "methods": ["async_propulate_abc"],
   "inference": {
     "max_simulations": 1000,
     "n_workers": 48,

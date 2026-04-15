@@ -32,11 +32,11 @@
   },
   "scaling": {
     "k_values": [48, 192, 1000],
-    "test_k_values": [48, 192, 1000],
+    "test_k_values": [48, 192],
     "worker_counts": [1, 4, 16, 48, 96],
     "test_worker_counts": [1, 4, 48],
-    "wall_time_budgets_s": [900.0, 1800.0],
-    "wall_time_limit_s": 1800.0,
+    "wall_time_budgets_s": [900.0],
+    "wall_time_limit_s": 900.0,
     "max_simulations_policy": {
       "min_total": 500,
       "per_worker": 20,
