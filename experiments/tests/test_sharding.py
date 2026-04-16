@@ -1078,11 +1078,11 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 16, 48, 96]" in out
         assert "Bundles:   [[1, 16]]" in out
         assert "Standalone:[48, 96]" in out
-        assert "k_values:  [10, 50, 100, 200, 500, 1000]" in out
+        assert "k_values:  [48, 192, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      2" in out
         assert "Wall cap:  300.0 s" in out
-        assert "Workload:  24 combos per worker-count job" in out
+        assert "Workload:  12 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
         assert len(scripts) == 3
@@ -1111,7 +1111,7 @@ class TestScalingSubmitter:
         assert "Mode:      small_test" in out
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
-        assert "k_values:  [10, 100, 1000]" in out
+        assert "k_values:  [48, 192, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      1" in out
         assert "Wall cap:  30.0 s" in out
