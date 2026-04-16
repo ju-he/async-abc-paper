@@ -43,11 +43,11 @@ def split_items(items: Sequence[int], num_shards: int) -> List[List[int]]:
     return assignments
 
 
-def split_indices(total_units: int, num_shards: int) -> List[List[int]]:
-    """Return balanced contiguous slices of ``range(total_units)``."""
+def split_indices(total_units: int, num_shards: int, offset: int = 0) -> List[List[int]]:
+    """Return balanced contiguous slices of ``range(offset, offset + total_units)``."""
     if total_units < 0:
         raise ValueError("total_units must be >= 0")
-    return split_items(list(range(total_units)), num_shards)
+    return split_items(list(range(offset, offset + total_units)), num_shards)
 
 
 def shard_indices(total_units: int, num_shards: int, shard_index: int) -> List[int]:

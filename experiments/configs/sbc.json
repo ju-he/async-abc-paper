@@ -21,13 +21,15 @@
   },
   "execution": {
     "n_replicates": 1,
-    "base_seed": 0
+    "base_seed": 0,
+    "trial_offset": 0
   },
   "sbc": {
-    "n_trials": 300,
+    "n_trials": 150,
     "coverage_levels": [0.5, 0.8, 0.9, 0.95],
     "benchmarks": [
       {
+        "enabled": true,
         "name": "gaussian_mean",
         "n_obs": 100,
         "sigma_obs": 1.0,
@@ -36,10 +38,11 @@
         "inference_overrides": {}
       },
       {
+        "enabled": false,
         "name": "gandk",
         "n_obs": 200,
         "inference_overrides": {
-          "max_simulations": 20000,
+          "max_simulations": 8000,
           "k": 200,
           "tol_init": 2.0,
           "scheduler_type": "geometric_decay"

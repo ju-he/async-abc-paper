@@ -99,10 +99,14 @@ def _resolve_benchmark_configs(cfg: dict) -> list[dict]:
     Otherwise falls back to the single ``cfg["benchmark"]`` entry for backward
     compatibility. Each returned dict is a complete benchmark config; entries
     may carry an optional ``"inference_overrides"`` key.
+
+    Benchmarks with ``"enabled": false`` are skipped, allowing a run to target
+    only a subset of benchmarks (e.g. to add gandk to an existing gaussian_mean
+    run via ``--extend``).
     """
     sbc_benchmarks = cfg.get("sbc", {}).get("benchmarks")
     if sbc_benchmarks:
-        return list(sbc_benchmarks)
+        return [b for b in sbc_benchmarks if b.get("enabled", True)]
     return [dict(cfg["benchmark"])]
 
 
@@ -211,6 +215,12 @@ def main(argv: list[str] | None = None) -> None:
     n_trials = int(sbc_cfg["n_trials"])
     coverage_levels = [float(x) for x in sbc_cfg["coverage_levels"]]
 
+    # trial_offset shifts the trial index range: this run covers trials
+    # [trial_offset, trial_offset + n_trials).  Use this to extend a previous
+    # run with additional trials without re-running already-completed ones.
+    trial_offset = int(cfg["execution"].get("trial_offset", 0))
+    n_total = trial_offset + n_trials
+
     # Resolve benchmark list (supports single or multi-benchmark configs).
     benchmark_configs = _resolve_benchmark_configs(cfg)
 
@@ -220,9 +230,9 @@ def main(argv: list[str] | None = None) -> None:
     if not _first_benchmark.limits:
         raise ValueError("SBC requires at least one inferable parameter.")
 
-    seeds = make_seeds(n_trials, int(cfg["execution"]["base_seed"]))
+    seeds = make_seeds(n_total, int(cfg["execution"]["base_seed"]))
     trial_records = []
-    selected_trials = list(range(n_trials))
+    selected_trials = list(range(trial_offset, n_total))
 
     if is_shard_mode(args):
         output_root = Path(args.output_dir)
@@ -232,13 +242,15 @@ def main(argv: list[str] | None = None) -> None:
         plan = read_json(layout.plan_path)
         if not plan:
             actual_num_shards = args.num_shards or 1
+            full_trial_offset = int(full_cfg["execution"].get("trial_offset", 0))
+            full_n_total = full_trial_offset + full_cfg["sbc"]["n_trials"]
             plan = ensure_plan(
                 layout,
                 build_plan_payload(
                     experiment_name=experiment_name,
                     config_path=str(Path(args.config).resolve()),
                     unit_kind="trial",
-                    full_total_units=full_cfg["sbc"]["n_trials"],
+                    full_total_units=full_n_total,
                     actual_total_units=n_trials,
                     target_total_units=n_trials,
                     requested_num_shards=actual_num_shards,
@@ -249,8 +261,8 @@ def main(argv: list[str] | None = None) -> None:
                     extend=args.extend,
                     run_id=args.shard_run_id,
                     completed_unit_indices=[],
-                    pending_unit_indices=list(range(n_trials)),
-                    shard_assignments=split_indices(n_trials, actual_num_shards),
+                    pending_unit_indices=list(range(trial_offset, n_total)),
+                    shard_assignments=split_indices(n_trials, actual_num_shards, offset=trial_offset),
                     runner_script=str(Path(__file__).resolve()),
                 ),
             )
