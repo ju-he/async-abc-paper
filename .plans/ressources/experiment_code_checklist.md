@@ -70,7 +70,16 @@ The codebase should support these guarantees.
 - Baseline semantics must be explicit in code and metadata:
   - `pyabc_smc` = pyABC native-style epsilon-targeted reference
   - `abc_smc_baseline` = pyABC-based synchronous fixed-generation baseline for controlled walltime comparisons
+  - Both pyABC methods use the **apples-to-apples kernel** matched to
+    `async_propulate_abc`'s `inference.kernel`. With
+    `inference.kernel="hard"` they fall back to pyABC's default
+    `UniformAcceptor`; with `"gaussian"` / `"epanechnikov"` they install a
+    probabilistic-rejection acceptor using the *same* $K_\epsilon(\rho)$
+    as the propulate side (`_pyabc_common.make_acceptor`). This isolates
+    the synchronisation regime as the only methodological difference.
 - Paper-facing performance plots must export the compared walltime budget, number of replicates, and stopping-policy semantics in metadata.
+- Method metadata should include `kernel` and `amis_snapshots` so plots
+  and tables can be sliced by kernel/AMIS configuration.
 
 ## 3. Shared Infrastructure That Must Exist
 
@@ -104,8 +113,25 @@ Valid constants (defined in `schema.py`):
 
 ```python
 VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
+VALID_KERNELS = {"hard", "gaussian", "epanechnikov"}
 VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
 ```
+
+Inference-config knobs introduced by the smooth-kernel + AMIS track (paper
+§3 / §4):
+
+- `inference.kernel` — one of `VALID_KERNELS`. Selects the ABC likelihood
+  kernel $K_\epsilon(\rho)$. **Same field used by both `async_propulate_abc`
+  (propulate side) and `abc_smc_baseline` / `pyabc_smc` (pyABC side)** —
+  this is the apples-to-apples knob. `"hard"` reproduces the legacy
+  rejection-style behaviour on both sides. Default in production configs:
+  `"gaussian"`.
+- `inference.amis_snapshots` — size of the streaming-AMIS ring buffer
+  (Cornuet et al. 2012 cumulative-mixture denominator). `0` recovers the
+  legacy single-current-proposal weighting. Default in production
+  configs: `20`. Only affects `async_propulate_abc`.
+- `inference.amis_interval` — number of calls between snapshots. Defaults
+  to `k` so each snapshot represents one archive turnover.
 
 ### 3.2 Output directory management
 
@@ -651,9 +677,17 @@ Quality curves support a `checkpoint_strategy` parameter (in `posterior_quality_
 
 Each quality row includes a `state_kind` column:
 
-- `"archive_reconstruction"` for async methods
-- `"generation_population"` for synchronous SMC methods
-- `"accepted_prefix"` for rejection ABC
+- `"archive_reconstruction"` for async methods (kernel-weighted top-$k$
+  archive under smooth-kernel ABC; bandwidth-filtered top-$k$ under hard
+  kernel). Particle weights stored in the record are the AMIS
+  balance-heuristic weights (paper §3.5) when `inference.amis_snapshots > 0`,
+  otherwise legacy single-proposal weights.
+- `"generation_population"` for synchronous SMC methods (pyABC). Under the
+  apples-to-apples acceptor (`inference.kernel != "hard"`), pyABC uses the
+  matched smooth kernel via the `_SmoothKernelAcceptor` in
+  `_pyabc_common.make_acceptor`; weights remain pyABC's standard
+  generational importance weights.
+- `"accepted_prefix"` for rejection ABC.
 
 ### 6.3 Plot metadata JSON
 

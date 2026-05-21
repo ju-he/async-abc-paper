@@ -152,52 +152,52 @@ This guarantees ( \epsilon_n ) is non-increasing across calls without any mutabl
 
 ## 3.2 Archive Definition
 
-The active archive is reconstructed from history using strict inequality:
+For smooth kernels ($K_\epsilon \neq \mathbf{1}[\rho < \epsilon]$) the archive is
+the top-$k$ by lowest discrepancy *with no hard cutoff*; every history member
+contributes proportionally through its kernel weight, so excluding far-loss
+particles via a hard threshold is unnecessary:
 
 [
-A_n = \{\theta_i \in \mathcal{H}_n : \rho_i < \epsilon_n\}
+A_n = \text{Top}_k\bigl(\{\theta_i \in \mathcal{H}_n\},\ \text{order by } \rho_i\bigr)
 ]
 
-A fixed-size top-k subset is selected by loss (ascending):
-
-[
-A_n = \text{Top}_k(A_n)
-]
-
-The archive therefore approximates the current ABC target:
-
-[
-\pi_{\epsilon_n}(\theta)
-]
+For the (legacy) hard kernel the classical filter `loss < eps` is retained
+as a back-compat option. The archive in either case approximates the current
+ABC target $\pi_{\epsilon_n}$ via the kernel-weighted mixture proposal of §3.3.
 
 ---
 
 ## 3.3 Proposal Distribution
 
-The proposal distribution is a mixture kernel centered at archive particles:
+The proposal distribution is a kernel-weighted mixture centered at archive
+particles:
 
 [
-q_n(\theta) =
-\sum_{j=1}^{k} W_j^{(n)} K(\theta \mid \theta_j)
+q_n(\theta) = \sum_{j \in A_n} \tilde W_j^{(n)}\, K_\Sigma(\theta - \theta_j),
+\qquad
+\tilde W_j^{(n)} \propto w_j \cdot K_{\epsilon_n}(\rho_j)
 ]
 
-with normalized weights
+where $w_j$ is the stored *core* importance weight $\pi(\theta_j) / \bar q_{\tau_j}(\theta_j)$
+(set at proposal time; see §3.5) and the kernel factor $K_{\epsilon_n}(\rho_j)$
+is applied **at use time**, so changes to $\epsilon$ automatically reweight
+the archive without re-evaluating the simulator. The perturbation kernel is
+Gaussian:
 
 [
-W_j^{(n)} = \frac{w_j}{\sum_i w_i}
+K_\Sigma(\theta - \theta_j) = \mathcal{N}(\theta_j,\ \Sigma_n),
+\qquad
+\Sigma_n = s \cdot \widehat{\mathrm{Cov}}_{\tilde W}(A_n).
 ]
 
-The perturbation kernel is Gaussian:
+The smoothing factor $s$ is the ``perturbation_scale`` hyperparameter. The
+weighted covariance uses the kernel-effective weights $\tilde W^{(n)}$ rather
+than the raw stored weights so the perturbation adapts to the high-likelihood
+neighbourhood as the kernel shifts.
 
-[
-K(\theta \mid \theta_j) = \mathcal{N}(\theta_j, \Sigma_n)
-]
-
-where
-
-[
-\Sigma_n = s \cdot \widehat{\mathrm{Cov}}_w(A_n)
-]
+For numerical stability with the Gaussian kernel (which can yield
+$\tilde W_j^{(n)}$ spanning many decades), all archive-weight arithmetic is
+performed in log-space (log-sum-exp normalisation, softmax).
 
 ---
 
@@ -205,19 +205,20 @@ where
 
 Given the reconstructed proposal:
 
-1. Select parent index (J \sim \text{Categorical}(W^{(n)}))
-2. Sample candidate:
+1. Select parent index $J \sim \text{Categorical}(\tilde W^{(n)})$.
+2. Draw $\theta^\star \sim \mathcal{N}(\theta_J,\ \Sigma_n)$ in batched
+   reject-resample inside the box.
+3. If reject-resample exhausts its budget (very wide kernel relative to
+   the box), fall back to a **uniform prior draw**, not boundary clipping.
+   This preserves the truncated-density semantics that the importance
+   weight assumes.
+4. Stamp candidate with $\epsilon_n$ via `child.tolerance = epsilon_n`.
+5. Evaluate simulation (outside the propagator).
 
-[
-\theta^\star \sim \mathcal{N}(\theta_J, \Sigma_n)
-]
-
-3. Clip to search-space bounds.
-4. Stamp candidate with ( \epsilon_n ) via `child.tolerance = epsilon_n`.
-5. Evaluate simulation (outside propagator).
-
-Note: there is **no inline rejection step**. The loss is evaluated externally by Propulate
-and the candidate enters history regardless of whether `loss < epsilon_n`. Archive selection
+Note: there is **no inline rejection step** at acceptance: the loss is
+evaluated externally by Propulate and the candidate enters history
+unconditionally. Archive selection in future calls handles filtering via the
+kernel.
 
 ---
 
@@ -251,29 +252,39 @@ in future calls handles filtering.
 
 ---
 
-## 3.5 Importance Weight
+## 3.5 Streaming-AMIS Importance Weight
 
-Accepted particles receive weight
-
-[
-w^\star = \frac{\pi(\theta^\star)}{q_n(\theta^\star)}
-]
-
-where
+A newly proposed particle $\theta^\star$ receives an importance weight under
+the *balance heuristic* (Veach 1997; Owen & Zhou 2000) over a sliding ring
+buffer $\mathcal{S}$ of past proposals (size $S$, default 20, sampled every
+``amis_interval`` calls):
 
 [
-q_n(\theta^\star) =
-\sum_{j=1}^{k}
-W_j^{(n)}
-\mathcal{N}(\theta^\star; \theta_j, \Sigma_n)
+w^\star = \frac{\pi(\theta^\star)}{\bar q_n(\theta^\star)},
+\qquad
+\bar q_n(\theta^\star) = \frac{1}{1 + |\mathcal{S}|}\Bigl[q_n(\theta^\star) + \sum_{s \in \mathcal{S}} q_s(\theta^\star)\Bigr].
 ]
 
-This follows the standard ABC-PMC importance weighting scheme.
+Each snapshot $q_s$ stores enough state (archive positions, normalised
+mixture weights, Cholesky factor of $\Sigma_s$) to evaluate its proposal
+density at any new $\theta^\star$ in $O(k \cdot d^2)$.
 
-**Weight staleness (known approximation):** in asynchronous execution the archive can change
-between proposal time and result arrival. The stored weight is computed against the archive at
-proposal time and is therefore an approximation. This degrades gracefully for slowly-changing
-archives and is accepted as the practical trade-off for barrier-free execution.
+This is the **streaming limit** of the AMIS scheme (Cornuet, Marin, Mira &
+Robert 2012): stage size 1, the proposal mixture updates after every single
+arrival, and every accepted particle is implicitly re-weighted against the
+cumulative mixture at every subsequent use. Consistency and a CLT follow as
+a corollary of the AMIS theorem combined with Wilkinson 2013 smooth-ABC
+under explicit conditions (paper §4).
+
+**Setting $|\mathcal{S}| = 0$ recovers the legacy single-current-proposal
+weighting** ($w^\star = \pi(\theta^\star) / q_n(\theta^\star)$), preserving
+the previous behaviour bit-for-bit.
+
+**Weight staleness is resolved under AMIS.** The previous single-proposal
+implementation computed $w_i$ against $q_{\tau_i}$ (the archive at proposal
+time) and used that stale weight forever; the AMIS denominator instead
+averages over the snapshot buffer, providing a coherent weighting against
+the cumulative proposal mixture rather than a moment-of-arrival snapshot.
 
 ---
 
@@ -338,65 +349,90 @@ Pros:
 
 Cons:
 
-* Introduces synchronization points
+* Reintroduces (soft) synchronization points — workers stall at epoch
+  boundaries while waiting for in-flight stragglers
+* Dilutes the headline "no synchronisation barrier" claim
 
 ---
 
-## 5.2 Smooth-Kernel ABC
+## 5.2 Smooth-Kernel ABC + AMIS (**adopted**)
 
-Replace hard threshold with kernel weights:
+The current design. Replace the hard threshold with a normalised kernel
 
 [
-K_\epsilon(\rho) = \exp(-\rho^2 / 2\epsilon^2)
+K_\epsilon(\rho) \in \{\,\exp(-\rho^2 / 2\epsilon^2),\ \max(0,\ 1 - \rho^2/\epsilon^2)\,\}
 ]
 
-Pros:
+and combine with **streaming Adaptive Multiple Importance Sampling** (AMIS,
+Cornuet et al. 2012) over a snapshot ring buffer of past proposals. The
+combination delivers:
 
-* Enables incremental reweighting
+* Continuous archive reweighting (no prior-vs-archive discontinuity).
+* Coherent importance weights against the cumulative proposal mixture
+  (Veach 1997 balance heuristic), resolving the moving-archive staleness
+  of the legacy single-proposal scheme.
+* Consistency + CLT as a corollary of AMIS + Wilkinson 2013 (paper §4)
+  under explicit conditions on the proposal sequence and bandwidth
+  schedule.
 
-Cons:
-
-* More expensive and deviates from classical ABC rejection
+The earlier-considered "smooth kernel deviates from classical ABC
+rejection" objection no longer applies once AMIS provides the matching
+theoretical framework.
 
 ---
 
 ## 5.3 Fully Online SMC with Reweighting
 
-Adjust weights when tolerance changes.
+Adjust weights when tolerance changes; reweight the entire archive at every
+$\epsilon$ update.
 
 Pros:
 
-* Theoretically elegant
+* Theoretically elegant.
 
 Cons:
 
-* Requires reweighting the entire particle archive
-* Hard to integrate with the Propulate interface
+* Requires re-evaluating $q_\tau$ for every archive member at every call
+  — $O(n^2 k d^2)$ cumulatively, infeasible at scale.
+* Subsumed by §5.2: the AMIS snapshot buffer is exactly a sparse,
+  finite-memory approximation to fully online reweighting that retains
+  consistency under standard conditions.
 
 ---
 
 ## 5.4 Explicit Persistent Archive
 
-Maintain archive state between proposals.
+Maintain archive state between propagator calls.
 
 Pros:
 
-* Conceptually clean
+* Conceptually clean.
 
 Cons:
 
-* Incompatible with Propulate propagator interface
+* Incompatible with Propulate's stateless-propagator interface; would
+  require deeper changes to the framework and to crash-recovery
+  semantics. The adopted design keeps the archive reconstructible from
+  evaluated history.
 
 ---
 
 # 6. Advantages of the History-Reconstructed Steady-State Approach
 
-1. Compatible with Propulate architecture
-2. Eliminates synchronization barriers
-3. Simple integration with existing evolutionary infrastructure
-4. Deterministic reconstruction from evaluated history
-5. Monotone tolerance guaranteed via `min()` over stored `ind.tolerance` values
-6. Naturally scalable in distributed environments
+1. Compatible with Propulate's stateless-propagator architecture.
+2. Eliminates synchronisation barriers entirely (not just per-generation —
+   no within-generation barrier either, unlike pyABC DYN).
+3. Smooth kernels remove the prior-vs-archive phase discontinuity that
+   complicated the legacy hard-threshold design.
+4. AMIS reweighting (§3.5) resolves the moving-archive importance-weight
+   staleness with a coherent balance-heuristic denominator.
+5. Deterministic reconstruction from evaluated history; a single-float
+   tightness floor on the propagator (cache, not algorithmic state)
+   makes the monotone-bandwidth guarantee robust to island migration.
+6. Consistency + CLT (paper §4) inherited from AMIS + Wilkinson smooth-ABC.
+7. Naturally scalable in distributed environments; per-call AMIS cost is
+   $O(S \cdot k \cdot d^2)$ at $S = 20$, $k = 100$, $d = 10$ — negligible
+   relative to typical simulator cost.
 
 ---
 
@@ -582,11 +618,15 @@ proposed individual, making the full algorithm state recoverable from history al
 
 | Issue | Status |
 |-------|--------|
-| Weight staleness in async execution | Accepted approximation; documented in `__call__` docstring |
-| O(n) cost per call over unbounded history | Not addressed; add `max_history` cap if needed for very long runs |
+| Weight staleness in async execution | **Resolved** under AMIS: the snapshot-buffer balance-heuristic denominator (§3.5) provides a coherent reweighting against the cumulative proposal mixture. Setting `amis_snapshots=0` reverts to the legacy single-proposal approximation. |
+| Prior-vs-archive phase discontinuity | **Resolved** under smooth kernels (§3.2): the bootstrap rule uses `len(history) >= k` and every history member contributes through its kernel weight. Hard kernel retains the classical prior-phase guard. |
+| Snapshot-buffer truncation | New approximation introduced by AMIS: the buffer has finite size $S$ (default 20), so AMIS denominator approximates the full cumulative mixture only when $S$ is large enough relative to the proposal mixing rate. Theorem (paper §4) requires (C4); empirically tight at $S=20$ across benchmarks. |
+| Simulation-time bias | Steady-state design keeps every accepted particle, unlike pyABC DYN's "discard latecomers" rule. Faster-simulating parameter regions may be over-represented in the archive. Measured empirically (runtime-heterogeneity experiment) but not corrected algorithmically. |
+| $O(n)$ cost per call over unbounded history | Not addressed; add `max_history` cap if needed for very long runs |
 | Categorical/integer search spaces | Not supported; ABC requires continuous (float) limits only |
 | Checkpoint granularity mismatch (async vs sync) | Addressed via `checkpoint_strategy="time_uniform"` in `posterior_quality_curve()`, which resamples both method types onto a shared time grid using LOCF |
 | Wasserstein metric interpretation | Documented: W1-to-point-mass (mean absolute deviation from truth in 1D); sliced Wasserstein for multi-D |
+| Finite-sample unbiasedness (Paige & Wood 2014 sense) | Open. AMIS is consistent but not unbiased for finite $n$. A local-decision-rule extension that recovers finite-sample unbiasedness for ABC is sketched as future work. |
 
 ---
 
@@ -594,10 +634,20 @@ proposed individual, making the full algorithm state recoverable from history al
 
 This design:
 
-* preserves the mixture proposal and importance weighting structure of ABC-PMC
-* reconstructs the active population and tolerance deterministically from evaluated history
-* encodes the tolerance schedule in `Individual.tolerance` with a monotone min guarantee
-* supports asynchronous HPC execution with no synchronization barriers
-* integrates cleanly into the Propulate propagator model
+* combines smooth-kernel ABC with streaming AMIS reweighting in a
+  single-arrival-driven (generation-free) regime
+* reconstructs the archive and bandwidth deterministically from evaluated
+  history (plus a single-float tightness floor to survive island migration)
+* applies the kernel factor $K_\epsilon(\rho)$ at use time so $\epsilon$
+  updates reweight the archive without re-evaluating the simulator
+* uses the balance heuristic over a finite snapshot ring buffer for
+  coherent importance weights against the cumulative proposal mixture
+* supports asynchronous HPC execution with no synchronisation barriers
+* integrates cleanly into the Propulate stateless-propagator model
+* admits a consistency + CLT (paper §4) as a corollary of AMIS + smooth-ABC
+  theory under explicit, stated conditions
 
-The result is a **steady-state ABC-SMC-inspired algorithm suitable for large-scale simulator-based inference on heterogeneous computing environments**.
+The result is a **generation-free, single-arrival-driven ABC algorithm**
+suitable for large-scale simulator-based inference on heterogeneous
+computing environments, with provable guarantees inherited from the
+AMIS / smooth-ABC literature.
