@@ -15,7 +15,10 @@
     "true_motility": 0.2,
     "true_params_scale": "normalized [0,1]"
   },
-  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "methods": [
+    "async_propulate_abc",
+    "abc_smc_baseline"
+  ],
   "inference": {
     "max_simulations": 2000,
     "k": 10,
@@ -24,18 +27,39 @@
     "perturbation_scale": 0.8,
     "n_workers": 1,
     "propulate_budget_mode": "total_simulations",
-    "max_wall_time_s": 1800.0
+    "max_wall_time_s": 1800.0,
+    "kernel": "gaussian",
+    "amis_snapshots": 20
   },
   "execution": {
     "n_replicates": 1,
     "base_seed": 0
   },
   "scaling": {
-    "k_values": [48, 192, 1000],
-    "test_k_values": [48, 192],
-    "worker_counts": [1, 4, 16, 48, 96],
-    "test_worker_counts": [1, 4, 48],
-    "wall_time_budgets_s": [900.0],
+    "k_values": [
+      48,
+      192,
+      1000
+    ],
+    "test_k_values": [
+      48,
+      192
+    ],
+    "worker_counts": [
+      1,
+      4,
+      16,
+      48,
+      96
+    ],
+    "test_worker_counts": [
+      1,
+      4,
+      48
+    ],
+    "wall_time_budgets_s": [
+      900.0
+    ],
     "wall_time_limit_s": 900.0,
     "max_simulations_policy": {
       "min_total": 500,

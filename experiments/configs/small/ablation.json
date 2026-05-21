@@ -9,7 +9,9 @@
     "prior_low": -5.0,
     "prior_high": 5.0
   },
-  "methods": ["async_propulate_abc"],
+  "methods": [
+    "async_propulate_abc"
+  ],
   "inference": {
     "max_simulations": 1500,
     "n_workers": 48,
@@ -19,7 +21,9 @@
     "max_wall_time_s": 120,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8,
-    "propulate_budget_mode": "total_simulations"
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
   },
   "execution": {
     "n_replicates": 2,
@@ -33,23 +37,25 @@
       "perturbation_scale": 0.8
     },
     {
+      "name": "hard_kernel_baseline",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 0.8,
+      "kernel": "hard",
+      "amis_snapshots": 0
+    },
+    {
+      "name": "no_amis",
+      "k": 100,
+      "scheduler_type": "acceptance_rate",
+      "perturbation_scale": 0.8,
+      "amis_snapshots": 0
+    },
+    {
       "name": "small_archive",
       "k": 10,
       "scheduler_type": "acceptance_rate",
       "perturbation_scale": 0.8
-    },
-    {
-      "name": "slow_decay",
-      "k": 100,
-      "scheduler_type": "geometric_decay",
-      "decay_factor": 0.9999,
-      "perturbation_scale": 0.8
-    },
-    {
-      "name": "large_perturbation",
-      "k": 100,
-      "scheduler_type": "acceptance_rate",
-      "perturbation_scale": 3.0
     },
     {
       "name": "fixed_perturbation",

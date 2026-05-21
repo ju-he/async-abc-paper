@@ -7,7 +7,10 @@
     "prior_low": -5.0,
     "prior_high": 5.0
   },
-  "methods": ["async_propulate_abc", "abc_smc_baseline"],
+  "methods": [
+    "async_propulate_abc",
+    "abc_smc_baseline"
+  ],
   "inference": {
     "max_simulations": 5000,
     "n_workers": 48,
@@ -17,7 +20,9 @@
     "max_wall_time_s": 300,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8,
-    "propulate_budget_mode": "total_simulations"
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
   },
   "execution": {
     "n_replicates": 1,
@@ -25,8 +30,13 @@
     "trial_offset": 0
   },
   "sbc": {
-    "n_trials": 150,
-    "coverage_levels": [0.5, 0.8, 0.9, 0.95],
+    "n_trials": 100,
+    "coverage_levels": [
+      0.5,
+      0.8,
+      0.9,
+      0.95
+    ],
     "benchmarks": [
       {
         "enabled": true,

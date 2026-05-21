@@ -340,7 +340,9 @@ def run_propulate_abc(
     inference_cfg:
         ``config["inference"]`` sub-dict.  Used keys:
         ``max_simulations``, ``k``, ``tol_init``,
-        ``scheduler_type``, ``perturbation_scale``.
+        ``scheduler_type``, ``perturbation_scale``, ``kernel``
+        (``"hard"`` | ``"gaussian"`` | ``"epanechnikov"``, default ``"hard"``),
+        ``amis_snapshots`` (default 0), ``amis_interval``.
     output_dir:
         :class:`~async_abc.io.paths.OutputDir` — used for Propulate checkpoint path.
     replicate:
@@ -369,6 +371,11 @@ def run_propulate_abc(
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
     perturbation_scale = inference_cfg.get("perturbation_scale", 0.8)
+    # Smooth-kernel / AMIS configuration (paper A+D track). Defaults preserve
+    # the legacy hard-threshold behaviour for backwards compatibility.
+    kernel = inference_cfg.get("kernel", "hard")
+    amis_snapshots = int(inference_cfg.get("amis_snapshots", 0))
+    amis_interval_cfg = inference_cfg.get("amis_interval")
     # Pass extra scheduler kwargs if present
     scheduler_kwargs = {}
     for key in ("percentile", "decay_factor", "low_rate", "high_rate",
@@ -378,15 +385,20 @@ def run_propulate_abc(
 
     mpi_rank = get_rank()
 
-    propagator = ABCPMC(
+    abcpmc_kwargs = dict(
         limits=limits,
         perturbation_scale=perturbation_scale,
         k=k,
         tol=tol_init,
         scheduler_type=scheduler_type,
+        kernel=kernel,
+        amis_snapshots=amis_snapshots,
         rng=random.Random(_stable_seed(seed, "propagator", mpi_rank)),
         **scheduler_kwargs,
     )
+    if amis_interval_cfg is not None:
+        abcpmc_kwargs["amis_interval"] = int(amis_interval_cfg)
+    propagator = ABCPMC(**abcpmc_kwargs)
 
     run_start = time.time()
     eval_count = 0

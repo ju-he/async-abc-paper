@@ -27,7 +27,11 @@ from .pyabc_sampler import (
     resolve_pyabc_worker_count,
 )
 
-from ._pyabc_common import db_suffix as _db_suffix, prepare_db_path as _prepare_db_path
+from ._pyabc_common import (
+    db_suffix as _db_suffix,
+    make_acceptor as _make_acceptor,
+    prepare_db_path as _prepare_db_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,7 @@ def _run_abc_smc_baseline_with_sampler(
     seed: int,
     checkpoint_tag: str = "",
     max_wall_time_s: float | None = None,
+    kernel: str = "hard",
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -88,6 +93,10 @@ def _run_abc_smc_baseline_with_sampler(
         checkpoint_tag=checkpoint_tag,
     )
 
+    # Apples-to-apples kernel matched to the propulate-side ABCPMC kernel.
+    # ``"hard"`` keeps pyABC's UniformAcceptor and reproduces the legacy
+    # behaviour.
+    acceptor = _make_acceptor(kernel, rng_seed=seed)
     abc = pyabc.ABCSMC(
         models=pyabc_model,
         parameter_priors=prior,
@@ -96,6 +105,7 @@ def _run_abc_smc_baseline_with_sampler(
         transitions=pyabc.MultivariateNormalTransition(),
         eps=pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5),
         sampler=sampler,
+        acceptor=acceptor,
     )
     abc.new(db_path, {"distance": 0.0})
 
@@ -269,6 +279,9 @@ def run_abc_smc_baseline(
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
+    # Apples-to-apples kernel matched to the propulate-side ABCPMC kernel.
+    # ``"hard"`` keeps pyABC's UniformAcceptor behaviour unchanged.
+    kernel = inference_cfg.get("kernel", "hard")
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
@@ -337,6 +350,7 @@ def run_abc_smc_baseline(
                 seed=seed,
                 checkpoint_tag=checkpoint_tag,
                 max_wall_time_s=max_wall_time_s,
+                kernel=kernel,
                 progress=progress,
             )
 
@@ -373,5 +387,6 @@ def run_abc_smc_baseline(
         seed=seed,
         checkpoint_tag=checkpoint_tag,
         max_wall_time_s=max_wall_time_s,
+        kernel=kernel,
         progress=progress,
     )

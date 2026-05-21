@@ -9,7 +9,11 @@
     "true_g": 2.0,
     "true_k": 0.5
   },
-  "methods": ["async_propulate_abc", "rejection_abc", "abc_smc_baseline"],
+  "methods": [
+    "async_propulate_abc",
+    "rejection_abc",
+    "abc_smc_baseline"
+  ],
   "inference": {
     "max_simulations": 2000,
     "n_workers": 48,
@@ -19,7 +23,9 @@
     "max_wall_time_s": 300,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8,
-    "propulate_budget_mode": "total_simulations"
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
   },
   "execution": {
     "n_replicates": 2,
