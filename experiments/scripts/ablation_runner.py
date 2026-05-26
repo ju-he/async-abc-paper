@@ -231,6 +231,18 @@ def main(argv: list[str] | None = None) -> None:
 
         plot_ablation_summary(output_dir.data, variants, output_dir, benchmark_cfg=cfg.get("benchmark", {}))
 
+    # AMIS isolation pair plot (W2.3 / paper §19 contribution 7). Enabled by
+    # default whenever the ablation grid contains both "full_model" and
+    # "no_amis" variants; can be turned off via plots.ablation_amis_isolation.
+    variant_names_set = {v.get("name") for v in variants}
+    amis_iso_default = ("full_model" in variant_names_set) and ("no_amis" in variant_names_set)
+    if plots_cfg.get("ablation_amis_isolation", amis_iso_default):
+        from async_abc.plotting.reporters import plot_ablation_amis_isolation
+
+        plot_ablation_amis_isolation(
+            output_dir.data, variants, output_dir, benchmark_cfg=cfg.get("benchmark", {})
+        )
+
     write_metadata(output_dir, cfg)
 
 

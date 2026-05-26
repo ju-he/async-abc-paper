@@ -1113,7 +1113,10 @@ def plot_quality_by_sigma(
             stripped,
             true_params=true_params,
             axis_kind="wall_time",
-            checkpoint_strategy="quantile",
+            # W2.5: paper-facing comparison plot. Use time_uniform so async and
+            # sync methods share a wall-clock checkpoint grid; LOCF resampling
+            # makes the curves directly comparable.
+            checkpoint_strategy="time_uniform",
             checkpoint_count=8,
             archive_size=archive_size,
         )
@@ -1302,7 +1305,10 @@ def plot_quality_vs_wall_time(
         records,
         true_params=true_params,
         axis_kind="wall_time",
-        checkpoint_strategy="quantile",
+        # W2.5: paper-facing comparison plot. Use time_uniform so async and
+        # sync methods share a wall-clock checkpoint grid; LOCF resampling
+        # makes the curves directly comparable.
+        checkpoint_strategy="time_uniform",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
     )
@@ -1335,12 +1341,14 @@ def plot_quality_vs_wall_time(
             output_dir=output_dir,
             extra={
                 "axis_kind": "wall_time",
+                "checkpoint_strategy": "time_uniform",
                 "ci_level": float(ci_level),
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
             },
         ) if cfg is not None else {
             "plot_name": "quality_vs_wall_time",
             "axis_kind": "wall_time",
+            "checkpoint_strategy": "time_uniform",
             "summary_plot": True,
             "ci_level": float(ci_level),
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -3512,6 +3520,125 @@ def plot_ablation_summary(
             plot_name="ablation_comparison",
             title="Ablation comparison",
             summary_plot=True,
+        ),
+    )
+
+
+def plot_ablation_amis_isolation(
+    data_dir: Path,
+    variants: List[Dict[str, Any]],
+    output_dir: OutputDir,
+    benchmark_cfg: Optional[Dict[str, Any]] = None,
+    *,
+    full_variant_name: str = "full_model",
+    no_amis_variant_name: str = "no_amis",
+) -> None:
+    """AMIS-on vs AMIS-off quality curves on a shared wall-clock axis.
+
+    Paper §19 contribution (7): isolate the contribution of streaming AMIS
+    reweighting holding everything else equal. Both variants use the same
+    kernel, perturbation, scheduler, and archive size — only the
+    ``amis_snapshots`` value differs. The plot uses
+    ``posterior_quality_curve(checkpoint_strategy="time_uniform")`` so the
+    two curves share a checkpoint grid.
+
+    Emits ``ablation_amis_isolation.{pdf,png,csv,json}``. Skips with a
+    documented reason if either variant's CSV is missing.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from ..analysis import posterior_quality_curve
+
+    benchmark_cfg = benchmark_cfg or {}
+    variant_cfg_by_name = {v.get("name", f"v{i}"): v for i, v in enumerate(variants)}
+    stem = output_dir.plots / "ablation_amis_isolation"
+
+    def _skip(reason: str) -> None:
+        write_plot_metadata(
+            stem,
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="ablation_amis_isolation",
+                title="AMIS isolation",
+                summary_plot=True,
+                extra={"skipped": True, "skip_reason": reason},
+            ),
+        )
+
+    full_csv = data_dir / f"ablation_{full_variant_name}.csv"
+    no_amis_csv = data_dir / f"ablation_{no_amis_variant_name}.csv"
+    if not full_csv.exists() or not no_amis_csv.exists():
+        _skip(f"missing variant csv ({full_variant_name=}, {no_amis_variant_name=})")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    combined_rows: list[pd.DataFrame] = []
+    for variant_label, csv_path, color in (
+        (full_variant_name, full_csv, "C0"),
+        (no_amis_variant_name, no_amis_csv, "C1"),
+    ):
+        records = load_records(csv_path)
+        true_params = _true_params_from_cfg(records, benchmark_cfg)
+        archive_size = variant_cfg_by_name.get(variant_label, {}).get("k")
+        if not records or not true_params:
+            continue
+        quality_df = posterior_quality_curve(
+            records,
+            true_params=true_params,
+            axis_kind="wall_time",
+            checkpoint_strategy="time_uniform",
+            checkpoint_count=24,
+            archive_size=archive_size,
+        )
+        if quality_df.empty:
+            continue
+        # Aggregate over replicates at each checkpoint.
+        agg = (
+            quality_df.groupby("wall_time", sort=True)["quality"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        agg["variant"] = variant_label
+        combined_rows.append(agg)
+        ax.plot(agg["wall_time"], agg["mean"], label=variant_label, color=color)
+        finite = agg[np.isfinite(agg["std"]) & (agg["count"] > 1)]
+        if not finite.empty:
+            se = finite["std"] / np.sqrt(finite["count"])
+            ax.fill_between(
+                finite["wall_time"],
+                (finite["mean"] - 1.96 * se).to_numpy(),
+                (finite["mean"] + 1.96 * se).to_numpy(),
+                color=color,
+                alpha=0.18,
+            )
+
+    if not combined_rows:
+        _skip("no usable quality rows in either variant")
+        return
+
+    ax.set_xlabel("wall-clock time (s)")
+    ax.set_ylabel("Wasserstein distance to truth")
+    ax.set_title(f"AMIS isolation: {full_variant_name} vs {no_amis_variant_name}")
+    ax.legend()
+    fig.tight_layout()
+
+    combined = pd.concat(combined_rows, ignore_index=True)
+    save_figure(
+        fig,
+        stem,
+        data=combined,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="ablation_amis_isolation",
+            title="AMIS isolation",
+            summary_plot=True,
+            extra={
+                "checkpoint_strategy": "time_uniform",
+                "compared_variants": [full_variant_name, no_amis_variant_name],
+            },
         ),
     )
 

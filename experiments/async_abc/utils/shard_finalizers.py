@@ -23,6 +23,7 @@ from ..plotting.sbc import (
     plot_rank_histogram as _plot_rank_histogram,
 )
 from ..plotting.reporters import (
+    plot_ablation_amis_isolation,
     plot_ablation_summary,
     plot_benchmark_diagnostics,
     plot_generation_timeline,
@@ -341,10 +342,20 @@ def finalize_ablation_experiment(
         merge_csv_group(_merge_sources(layout, shard_dirs, filename), tmp_output.data / filename, sort_key=_sort_raw_result_row)
     timing = _timing_payload(cfg, statuses)
     _write_batch_timing(cfg, layout, tmp_output, timing)
+    variants_in_cfg = cfg.get("ablation_variants", [])
     if cfg.get("plots", {}).get("ablation_comparison"):
         plot_ablation_summary(
             tmp_output.data,
-            cfg.get("ablation_variants", []),
+            variants_in_cfg,
+            tmp_output,
+            benchmark_cfg=cfg.get("benchmark", {}),
+        )
+    variant_name_set = {v.get("name") for v in variants_in_cfg}
+    amis_iso_default = ("full_model" in variant_name_set) and ("no_amis" in variant_name_set)
+    if cfg.get("plots", {}).get("ablation_amis_isolation", amis_iso_default):
+        plot_ablation_amis_isolation(
+            tmp_output.data,
+            variants_in_cfg,
             tmp_output,
             benchmark_cfg=cfg.get("benchmark", {}),
         )
