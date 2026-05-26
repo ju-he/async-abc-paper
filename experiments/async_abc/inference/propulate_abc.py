@@ -9,6 +9,15 @@ The loss function passed to Propulate receives a ``propulate.Individual`` which
 behaves like a dict (``ind["mu"]`` etc.).  Internally, the benchmark's
 ``simulate(params, seed)`` is called with a per-evaluation seed derived from
 the run seed and the individual's generation counter.
+
+Wall-time semantics
+-------------------
+When ``max_wall_time_s`` is configured each MPI rank polls its own local
+clock between evaluations and exits independently — *first-rank-hit*, not
+collective. After the loop the post-loop barriers synchronise the
+population. Individuals whose evaluation completes after the deadline are
+filtered out by ``run_propulate_abc`` so the produced records have a hard
+end-of-budget cap matching the pyABC and rejection-ABC paths.
 """
 import hashlib
 import json

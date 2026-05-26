@@ -3,6 +3,14 @@
 Draws parameters from the uniform prior, simulates, and accepts if the
 discrepancy is below ``tol_init``.  Stops after ``max_simulations`` total
 evaluations or ``k`` accepted particles, whichever comes first.
+
+Wall-time semantics
+-------------------
+When ``max_wall_time_s`` is configured the loop polls the centralised
+:class:`._pyabc_common.Deadline` between candidate draws and exits at the
+first rank that trips the deadline — *first-rank-hit*, not collective.
+Records produced before the deadline are kept; partial post-deadline state
+is discarded by the caller.
 """
 from typing import Callable, Dict, List
 
@@ -44,6 +52,8 @@ def run_rejection_abc(
     import numpy as np
     import time
 
+    from ._pyabc_common import Deadline
+
     max_sims = inference_cfg["max_simulations"]
     k        = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
@@ -56,10 +66,13 @@ def run_rejection_abc(
 
     accepted = []  # list of (params, loss, wall_time, attempt_count)
     sim_count = 0
+    deadline = Deadline(max_wall_time_s)
+    # run_start retained for backward-compat wall-time records (uses wall clock,
+    # not monotonic, so timestamps remain comparable across processes).
     run_start = time.time()
 
     while sim_count < max_sims and len(accepted) < k:
-        if max_wall_time_s is not None and time.time() - run_start >= max_wall_time_s:
+        if deadline.expired:
             break
         sim_count += 1
         vals     = rng.uniform(lows, highs)
