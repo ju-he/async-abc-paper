@@ -18,7 +18,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis import final_state_results
-from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
+from async_abc.analysis.sbc import empirical_coverage, gaussian_credible_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
@@ -502,8 +502,13 @@ def main(argv: list[str] | None = None) -> None:
     write_timing_comparison_csv(Path(args.output_dir))
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, coverage_levels)
+    gaussian_coverage_df = gaussian_credible_coverage(trial_records, coverage_levels)
     _write_dataframe_csv(ranks_df, output_dir.data / "sbc_ranks.csv")
     _write_dataframe_csv(coverage_df, output_dir.data / "coverage.csv")
+    # Paper §4 Theorem 2 (CLT) artefact: empirical coverage of
+    # mean ± z·sd intervals at nominal levels. Methods-venue reviewers
+    # expect this alongside equal-tailed coverage.
+    _write_dataframe_csv(gaussian_coverage_df, output_dir.data / "gaussian_ci_coverage.csv")
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("rank_histogram"):
