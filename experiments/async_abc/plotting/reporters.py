@@ -3643,6 +3643,115 @@ def plot_ablation_amis_isolation(
     )
 
 
+def plot_amis_snapshot_ess_stability(
+    data_dir: Path,
+    variants: List[Dict[str, Any]],
+    output_dir: OutputDir,
+    *,
+    window: int = 100,
+) -> None:
+    """Sliding-window relative ESS vs n for each AMIS snapshot-buffer size (W3.2).
+
+    Paper §17 acknowledges that the snapshot buffer is fixed in
+    implementation and that Condition (C4) of paper §4 requires the
+    buffer to grow with n. This figure shows the empirical answer: for
+    each variant (which differs only in ``amis_snapshots``) we plot the
+    sliding-window relative ESS as a function of evaluations. A flat,
+    high curve indicates the buffer is large enough for (C4) to be
+    empirically tight; a downward drift indicates that ``S`` is too
+    small for the run length.
+
+    Emits ``amis_snapshot_ess_stability.{pdf,png,csv,json}``.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from ..analysis import ess_vs_n_at_fixed_S
+    from ..io.records import load_records
+
+    stem = output_dir.plots / "amis_snapshot_ess_stability"
+
+    def _skip(reason: str) -> None:
+        write_plot_metadata(
+            stem,
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="amis_snapshot_ess_stability",
+                title="AMIS snapshot ESS stability",
+                summary_plot=True,
+                extra={"skipped": True, "skip_reason": reason},
+            ),
+        )
+
+    if not variants:
+        _skip("no variants in config")
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    combined_rows: list[pd.DataFrame] = []
+    for variant in variants:
+        name = variant.get("name", "variant")
+        csv_path = data_dir / f"ablation_{name}.csv"
+        if not csv_path.exists():
+            continue
+        records = load_records(csv_path)
+        if not records:
+            continue
+        ess_df = ess_vs_n_at_fixed_S(records, window=window)
+        if ess_df.empty:
+            continue
+        # Aggregate over replicates at each n (mean ± 1 std).
+        agg = (
+            ess_df.groupby("n", sort=True)["relative_ess"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        agg["variant"] = name
+        agg["amis_snapshots"] = variant.get("amis_snapshots", "?")
+        combined_rows.append(agg)
+        ax.plot(agg["n"], agg["mean"], label=f"S={variant.get('amis_snapshots', '?')}")
+        finite = agg[np.isfinite(agg["std"]) & (agg["count"] > 1)]
+        if not finite.empty:
+            se = finite["std"] / np.sqrt(finite["count"])
+            ax.fill_between(
+                finite["n"],
+                (finite["mean"] - 1.96 * se).to_numpy(),
+                (finite["mean"] + 1.96 * se).to_numpy(),
+                alpha=0.15,
+            )
+
+    if not combined_rows:
+        _skip("no usable records across variants")
+        plt.close(fig)
+        return
+
+    ax.set_xlabel("evaluations n")
+    ax.set_ylabel(f"relative ESS (sliding window={window})")
+    ax.set_title("AMIS snapshot-buffer ESS stability")
+    ax.set_ylim(0.0, 1.05)
+    ax.legend()
+    fig.tight_layout()
+
+    combined = pd.concat(combined_rows, ignore_index=True)
+    save_figure(
+        fig,
+        stem,
+        data=combined,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="amis_snapshot_ess_stability",
+            title="AMIS snapshot ESS stability",
+            summary_plot=True,
+            extra={
+                "window": window,
+                "compared_variants": [v.get("name") for v in variants],
+            },
+        ),
+    )
+
+
 def plot_benchmark_diagnostics(
     records: List[ParticleRecord],
     cfg: Dict[str, Any],

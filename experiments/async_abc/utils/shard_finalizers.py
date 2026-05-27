@@ -25,6 +25,7 @@ from ..plotting.sbc import (
 from ..plotting.reporters import (
     plot_ablation_amis_isolation,
     plot_ablation_summary,
+    plot_amis_snapshot_ess_stability,
     plot_benchmark_diagnostics,
     plot_generation_timeline,
     plot_idle_fraction,
@@ -359,6 +360,10 @@ def finalize_ablation_experiment(
             tmp_output,
             benchmark_cfg=cfg.get("benchmark", {}),
         )
+    distinct_S = {v.get("amis_snapshots") for v in variants_in_cfg if "amis_snapshots" in v}
+    snapshot_sweep_default = len(distinct_S) >= 2
+    if cfg.get("plots", {}).get("amis_snapshot_ess_stability", snapshot_sweep_default):
+        plot_amis_snapshot_ess_stability(tmp_output.data, variants_in_cfg, tmp_output)
     write_metadata(tmp_output, cfg, extra=_metadata_extra(cfg, layout, statuses, tmp_output))
     _publish_temp_output(layout, tmp_output)
     _rewrite_root_timing_summary(layout.output_root)
@@ -543,6 +548,7 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "sensitivity": finalize_sensitivity_experiment,
     "sensitivity_gandk": finalize_sensitivity_experiment,
     "ablation": finalize_ablation_experiment,
+    "amis_snapshot_sweep": finalize_ablation_experiment,
     "straggler": finalize_straggler_experiment,
     "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,
     "sbc": finalize_sbc_experiment,

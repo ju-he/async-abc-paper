@@ -1,0 +1,43 @@
+{
+  "experiment_name": "amis_snapshot_sweep",
+  "benchmark": {
+    "name": "gaussian_mean",
+    "observed_data_seed": 42,
+    "n_obs": 100,
+    "true_mu": 0.0,
+    "sigma_obs": 1.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 1500,
+    "n_workers": 48,
+    "k": 50,
+    "tol_init": 5.0,
+    "n_generations": 1000,
+    "max_wall_time_s": 120,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
+  },
+  "execution": {
+    "n_replicates": 2,
+    "base_seed": 0
+  },
+  "ablation_variants": [
+    {"name": "S00", "amis_snapshots": 0},
+    {"name": "S05", "amis_snapshots": 5},
+    {"name": "S20", "amis_snapshots": 20},
+    {"name": "S40", "amis_snapshots": 40}
+  ],
+  "plots": {
+    "ablation_comparison": false,
+    "ablation_amis_isolation": false,
+    "amis_snapshot_ess_stability": true
+  }
+}
