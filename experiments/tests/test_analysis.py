@@ -493,3 +493,202 @@ def test_posterior_quality_curve_checkpoint_strategy_parameter():
     # Invalid strategy raises ValueError
     with pytest.raises(ValueError, match="Unsupported checkpoint_strategy"):
         posterior_quality_curve(**common_kwargs, checkpoint_strategy="bogus")
+
+
+# ===========================================================================
+# W3.3 — simulation_time_bias_report
+# ===========================================================================
+
+
+def _bias_test_records(*, slow_high_loss: bool, n: int = 200):
+    """Synthetic records where sim_time correlates (or not) with loss.
+
+    When slow_high_loss=True, slow simulations correlate with high losses
+    (a strong bias signal). When False, sim_time and loss are independent.
+    """
+    rng = np.random.default_rng(0 if slow_high_loss else 1)
+    records = []
+    for i in range(n):
+        if slow_high_loss:
+            # loss in [0, 1]; sim_time proportional to loss → high correlation.
+            loss = float(rng.uniform(0.0, 1.0))
+            base = 0.01 + 0.5 * loss
+        else:
+            loss = float(rng.uniform(0.0, 1.0))
+            base = float(rng.uniform(0.01, 0.5))
+        sim_jitter = float(rng.normal(0.0, 0.005))
+        sim_time = max(1e-6, base + sim_jitter)
+        records.append(
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=42,
+                step=i + 1,
+                params={"x": loss},  # arbitrary
+                loss=loss,
+                weight=1.0,
+                tolerance=0.5,  # accepted iff loss < 0.5
+                wall_time=float(i),
+                sim_start_time=float(i),
+                sim_end_time=float(i) + sim_time,
+                record_kind="accepted_particle",
+                time_semantics="event_end",
+            )
+        )
+    return records
+
+
+def test_simulation_time_bias_report_detects_bias():
+    from async_abc.analysis import simulation_time_bias_report
+
+    report = simulation_time_bias_report(_bias_test_records(slow_high_loss=True))
+    assert report["skip_reason"] is None
+    assert report["n_records"] == 200
+    # Bias direction: slow sims = high loss = REJECTED → mean_sim_time_rejected > mean_sim_time_accepted.
+    assert report["mean_sim_time_rejected"] > report["mean_sim_time_accepted"]
+    # Pearson correlation is positive and large under the bias model.
+    assert report["pearson_corr_simtime_loss"] > 0.5
+    # χ² should reject independence.
+    assert report["chi2_p_value"] < 0.01
+
+
+def test_simulation_time_bias_report_null_case():
+    from async_abc.analysis import simulation_time_bias_report
+
+    report = simulation_time_bias_report(_bias_test_records(slow_high_loss=False))
+    assert report["skip_reason"] is None
+    # Pearson correlation should be near zero under the null.
+    assert abs(report["pearson_corr_simtime_loss"]) < 0.2
+    # χ² independence p-value should be larger than under the strong-bias case.
+    assert report["chi2_p_value"] > 0.05
+
+
+def test_simulation_time_bias_report_empty_records():
+    from async_abc.analysis import simulation_time_bias_report
+
+    report = simulation_time_bias_report([])
+    assert report["n_records"] == 0
+    assert report["skip_reason"] == "empty_records"
+    assert np.isnan(report["mean_sim_time_accepted"])
+
+
+def test_simulation_time_bias_report_skips_when_sim_times_missing():
+    """Records without sim_start/sim_end (sync methods) produce a skip reason."""
+    from async_abc.analysis import simulation_time_bias_report
+
+    records = [
+        ParticleRecord(
+            method="abc_smc_baseline",
+            replicate=0,
+            seed=42,
+            step=i + 1,
+            params={"x": 0.1},
+            loss=0.1,
+            weight=1.0,
+            tolerance=0.5,
+            wall_time=float(i),
+            sim_start_time=None,
+            sim_end_time=None,
+            record_kind="accepted_particle",
+            time_semantics="event_end",
+        )
+        for i in range(10)
+    ]
+    report = simulation_time_bias_report(records)
+    assert report["skip_reason"] == "no_finite_sim_time_or_loss"
+    assert np.isnan(report["mean_sim_time_accepted"])
+
+
+# ===========================================================================
+# W3.2 — ess_vs_n_at_fixed_S
+# ===========================================================================
+
+
+def _uniform_weight_records(n: int):
+    """Records with all weights equal to 1 → relative ESS should be 1.0."""
+    return [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=i + 1,
+            params={"x": 0.5},
+            loss=0.1,
+            weight=1.0,
+            tolerance=1.0,
+            wall_time=float(i),
+            record_kind="accepted_particle",
+            time_semantics="event_end",
+        )
+        for i in range(n)
+    ]
+
+
+def _heavily_skewed_weight_records(n: int):
+    """One huge weight + many tiny ones → relative ESS → 0 (degenerate)."""
+    weights = [1e-3] * (n - 1) + [1e3]
+    return [
+        ParticleRecord(
+            method="async_propulate_abc",
+            replicate=0,
+            seed=1,
+            step=i + 1,
+            params={"x": 0.5},
+            loss=0.1,
+            weight=float(w),
+            tolerance=1.0,
+            wall_time=float(i),
+            record_kind="accepted_particle",
+            time_semantics="event_end",
+        )
+        for i, w in enumerate(weights)
+    ]
+
+
+def test_ess_vs_n_at_fixed_S_uniform_returns_one():
+    from async_abc.analysis import ess_vs_n_at_fixed_S
+
+    df = ess_vs_n_at_fixed_S(_uniform_weight_records(200), window=50)
+    assert not df.empty
+    # All sliding windows over equal weights have relative ESS = 1.0.
+    assert np.allclose(df["relative_ess"].to_numpy(), 1.0)
+
+
+def test_ess_vs_n_at_fixed_S_degenerate_low_when_skewed():
+    from async_abc.analysis import ess_vs_n_at_fixed_S
+
+    df = ess_vs_n_at_fixed_S(_heavily_skewed_weight_records(100), window=50)
+    # The last sliding window contains the giant weight, dominating the rest.
+    last = df[df["n"] == df["n"].max()]
+    assert float(last["relative_ess"].iloc[0]) < 0.5
+
+
+def test_ess_vs_n_at_fixed_S_empty_returns_empty_with_schema():
+    from async_abc.analysis import ess_vs_n_at_fixed_S
+
+    df = ess_vs_n_at_fixed_S([], window=50)
+    assert df.empty
+    assert set(df.columns) == {"method", "replicate", "n", "ess", "relative_ess"}
+
+
+def test_ess_vs_n_at_fixed_S_filters_by_method():
+    from async_abc.analysis import ess_vs_n_at_fixed_S
+
+    records = _uniform_weight_records(20) + [
+        ParticleRecord(
+            method="pyabc_smc",
+            replicate=0,
+            seed=2,
+            step=i + 1,
+            params={"x": 0.5},
+            loss=0.1,
+            weight=1.0,
+            tolerance=1.0,
+            wall_time=float(i),
+            record_kind="accepted_particle",
+            time_semantics="event_end",
+        )
+        for i in range(20)
+    ]
+    df = ess_vs_n_at_fixed_S(records, window=10, method_label="async_propulate_abc")
+    assert set(df["method"].unique()) == {"async_propulate_abc"}
