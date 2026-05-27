@@ -1929,3 +1929,51 @@ class TestMpiIntegration:
         assert data["pyabc_mpi_sampler"] == "mapping"
         assert data["barrier_reached"]
 
+
+
+# ===========================================================================
+# W3.4 — MPI teardown hardening
+# ===========================================================================
+
+
+def test_free_propulate_comm_honors_skip_disconnect_env(monkeypatch):
+    """PROPULATE_SKIP_DISCONNECT=1 must skip the MPI_Comm_free call."""
+    from async_abc.inference.propulate_abc import _free_propulate_comm
+
+    free_calls = []
+
+    class _FakeComm:
+        def Free(self):
+            free_calls.append("called")
+
+    monkeypatch.setenv("PROPULATE_SKIP_DISCONNECT", "1")
+    _free_propulate_comm(_FakeComm())
+    assert free_calls == [], "Free() was called despite PROPULATE_SKIP_DISCONNECT=1"
+
+
+def test_free_propulate_comm_calls_free_by_default(monkeypatch):
+    """Without the env var the helper performs the MPI_Comm_free call."""
+    from async_abc.inference.propulate_abc import _free_propulate_comm
+
+    monkeypatch.delenv("PROPULATE_SKIP_DISCONNECT", raising=False)
+    free_calls = []
+
+    class _FakeComm:
+        def Free(self):
+            free_calls.append("called")
+
+    _free_propulate_comm(_FakeComm())
+    assert free_calls == ["called"]
+
+
+def test_free_propulate_comm_handles_truthy_values(monkeypatch):
+    """Accepts 1 / true / yes (case-insensitive trimmed)."""
+    from async_abc.inference.propulate_abc import _free_propulate_comm
+
+    class _FakeComm:
+        def Free(self):  # pragma: no cover - asserted not called
+            raise AssertionError("Free() should not be called")
+
+    for value in ("1", "true", "yes", " 1 "):
+        monkeypatch.setenv("PROPULATE_SKIP_DISCONNECT", value)
+        _free_propulate_comm(_FakeComm())

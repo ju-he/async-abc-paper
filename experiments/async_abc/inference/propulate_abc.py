@@ -23,6 +23,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import random
 import shutil
 import time
@@ -57,8 +58,22 @@ def _make_propulate_comm():
 
 
 def _free_propulate_comm(comm) -> None:
-    """Best-effort communicator cleanup after a completed Propulate run."""
+    """Best-effort communicator cleanup after a completed Propulate run.
+
+    On ParaStation MPI at ≥48 ranks, ``MPI_Comm_free`` can take 30+ seconds
+    or hang outright in ``pscom_close`` (W3.4). Operators can opt out of
+    the Free() call by setting ``PROPULATE_SKIP_DISCONNECT=1`` in the job
+    environment; the communicator is then leaked and reclaimed when the
+    Python interpreter exits, which is acceptable for batch runs and
+    avoids the teardown hang.
+    """
     if comm is None:
+        return
+    if os.environ.get("PROPULATE_SKIP_DISCONNECT", "").strip() in ("1", "true", "yes"):
+        logger.debug(
+            "PROPULATE_SKIP_DISCONNECT set; skipping MPI_Comm_free on the "
+            "Propulate run communicator."
+        )
         return
     try:
         comm.Free()
