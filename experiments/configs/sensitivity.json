@@ -35,14 +35,18 @@
     ],
     "perturbation_scale": [
       0.4,
+      0.8,
       1.5
     ],
     "scheduler_type": [
       "acceptance_rate",
-      "quantile"
+      "quantile",
+      "geometric_decay"
     ],
     "tol_init_multiplier": [
+      0.5,
       1.0,
+      2.0,
       5.0
     ],
     "kernel": [

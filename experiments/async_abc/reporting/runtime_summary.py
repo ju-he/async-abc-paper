@@ -7,7 +7,12 @@ from typing import Any, Dict, Iterable, List
 import numpy as np
 import pandas as pd
 
-from ..analysis import barrier_overhead_fraction, base_method_name, final_state_results, posterior_quality_curve
+from ..analysis import barrier_overhead_fraction, base_method_name, final_state_results
+
+# posterior_quality_curve transitively pulls in scipy/POT via convergence.py;
+# defer its import to the one function that uses it so sensitivity_runner
+# and other lightweight scripts can import runtime_summary without paying
+# that cost (verified by test_importing_sensitivity_runner_does_not_load_convergence).
 from ..io.records import ParticleRecord
 
 
@@ -220,6 +225,8 @@ def _final_quality_wasserstein(
 ) -> float:
     if not true_params:
         return float("nan")
+    from ..analysis import posterior_quality_curve  # deferred — see module docstring
+
     quality_df = posterior_quality_curve(
         records,
         true_params=true_params,

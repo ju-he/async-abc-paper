@@ -288,9 +288,14 @@ def _propulate_with_wall_time_limit(
     # were already pruned escape to a barrier while senders still need them to
     # post matching recvs — deadlocking under MPI rendezvous mode.
     intra_reqs = getattr(propulator, "intra_requests", None)
-    from mpi4py import MPI as _MPI
+    # Reuse the guarded MPI import from the top of this function rather than
+    # re-importing at function scope. Without mpi4py installed (e.g. unit-test
+    # CI without an MPI stack), MPI is None and the rendezvous-safe collective
+    # drain is unnecessary — fake comms and single-process runs both fall
+    # through to the buffer clear below.
+    _MPI = MPI
 
-    while True:
+    while _MPI is not None:
         propulator._receive_intra_island_individuals()
         try:
             sends_done = not intra_reqs or _MPI.Request.Testall(intra_reqs)
@@ -435,15 +440,20 @@ def run_propulate_abc(
     propulate_comm = _make_propulate_comm()
     propulator_kwargs = {}
     if propulate_comm is not None:
+        propulator_kwargs = {
+            "island_comm": propulate_comm,
+            "propulate_comm": propulate_comm,
+        }
         try:
-            from mpi4py import MPI
-            propulator_kwargs = {
-                "island_comm": propulate_comm,
-                "propulate_comm": propulate_comm,
-                "worker_sub_comm": MPI.COMM_SELF,
-            }
+            from mpi4py import MPI as _MPI_for_worker
+
+            propulator_kwargs["worker_sub_comm"] = _MPI_for_worker.COMM_SELF
         except Exception:
-            propulator_kwargs = {}
+            # No mpi4py available (unit-test path with a fake comm). The
+            # propulator gets the fake comm in island/propulate slots; the
+            # worker_sub_comm slot is left to its default and the drain loop
+            # in _propulate_with_wall_time_limit no-ops when MPI is None.
+            pass
 
     propulator = Propulator(
         loss_fn=loss_fn,

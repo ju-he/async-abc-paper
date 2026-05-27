@@ -1051,10 +1051,14 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
                 _run_workloads(mpi_methods)
 
             # Post-pass Barrier: ensure all ranks finish pass 2 before proceeding
-            # to finalization / shard writes.
+            # to finalization / shard writes. Without mpi4py installed (unit
+            # tests) there is no collective context to synchronise, so skip.
             if int(n_workers) > 1:
-                from mpi4py import MPI
-                if MPI.COMM_WORLD.Get_size() > 1:
+                try:
+                    from mpi4py import MPI
+                except ImportError:
+                    MPI = None
+                if MPI is not None and MPI.COMM_WORLD.Get_size() > 1:
                     MPI.COMM_WORLD.Barrier()
 
             # Flush per-k combo data.

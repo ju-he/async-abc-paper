@@ -11,6 +11,22 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _stub_slurm_site_env(monkeypatch):
+    """Provide SLURM override env vars when not already set.
+
+    experiments/jobs/_site.detect_defaults() raises on unknown SYSTEMNAME,
+    which trips every test that imports the submit_*.py launchers. Tests
+    don't care about the actual account/partition values, so stub them.
+    Real runs (on Jureca/Juwels/Jupiter) keep their existing SYSTEMNAME and
+    bypass this stub.
+    """
+    if not os.environ.get("SLURM_ACCOUNT_OVERRIDE"):
+        monkeypatch.setenv("SLURM_ACCOUNT_OVERRIDE", "test-account")
+    if not os.environ.get("SLURM_PARTITION_OVERRIDE"):
+        monkeypatch.setenv("SLURM_PARTITION_OVERRIDE", "test-partition")
+
 # Make async_abc importable from the experiments/ directory
 EXPERIMENTS_DIR = Path(__file__).parent.parent
 SCRIPTS_DIR = EXPERIMENTS_DIR / "scripts"

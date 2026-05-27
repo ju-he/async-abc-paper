@@ -1055,6 +1055,9 @@ class TestPyabcWrapperFixes:
             assert record.attempt_count is not None and record.attempt_count >= 0
 
     def test_multicore_parallel_population_losses_are_finite(self, tmp_output_dir):
+        # The wrapper auto-promotes parallel_backend=multicore to MPI when
+        # n_workers > 1 (see pyabc_sampler logger warning); requires mpi4py.
+        pytest.importorskip("mpi4py", reason="parallel pyABC requires mpi4py")
         from async_abc.io.paths import OutputDir
         from async_abc.inference.pyabc_wrapper import run_pyabc_smc
 
@@ -1250,6 +1253,9 @@ class TestAbcSmcBaseline:
         assert all(record.sim_end_time >= record.sim_start_time for record in timed)
 
     def test_multicore_parallel_population_losses_are_finite(self, tmp_output_dir):
+        # The wrapper auto-promotes parallel_backend=multicore to MPI when
+        # n_workers > 1 (see pyabc_sampler logger warning); requires mpi4py.
+        pytest.importorskip("mpi4py", reason="parallel pyABC requires mpi4py")
         from async_abc.io.paths import OutputDir
         from async_abc.inference.abc_smc_baseline import run_abc_smc_baseline
 
