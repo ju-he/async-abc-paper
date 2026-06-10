@@ -40,8 +40,8 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 from async_abc.io.config import compose_run_mode, load_config  # noqa: E402
 from async_abc.utils.sharding import make_run_id  # noqa: E402
 
-DEFAULT_ACCOUNT = "tissuetwin"
-DEFAULT_PARTITION = "batch"
+sys.path.insert(0, str(SCRIPT_DIR))
+import _site  # noqa: E402
 
 
 def _format_time(hours: float) -> str:
@@ -297,15 +297,22 @@ def main() -> None:
     )
     parser.add_argument(
         "--account",
-        default=DEFAULT_ACCOUNT,
-        help=f"SLURM account (default: {DEFAULT_ACCOUNT}).",
+        default=None,
+        help="SLURM account (default: auto-detect from $SYSTEMNAME via _site.py).",
     )
     parser.add_argument(
         "--partition",
-        default=DEFAULT_PARTITION,
-        help=f"SLURM partition (default: {DEFAULT_PARTITION}).",
+        default=None,
+        help="SLURM partition (default: auto-detect from $SYSTEMNAME via _site.py).",
     )
     args = parser.parse_args()
+
+    if args.account is None or args.partition is None:
+        site_account, site_partition = _site.detect_defaults()
+        if args.account is None:
+            args.account = site_account
+        if args.partition is None:
+            args.partition = site_partition
 
     run_mode = compose_run_mode("small" if args.small else "full", args.test)
     config_path = Path(args.config).resolve()
