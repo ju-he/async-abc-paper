@@ -10,6 +10,7 @@ import time
 import types
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from async_abc.benchmarks.gaussian_mean import GaussianMean
@@ -119,6 +120,19 @@ class _FakeABCPMC:
         self.scheduler_type = scheduler_type
         self.rng = rng
         self.extra = kwargs
+
+    def extract_posterior(self, inds):
+        # Stand-in for the real retroactive estimator: returns deterministic,
+        # normalised, non-uniform weights aligned to ``inds`` (distinct from the
+        # frozen streaming weight=1.0) so the wiring is exercised end-to-end.
+        n = len(inds)
+        if n == 0:
+            return np.zeros((0, 1)), np.zeros(0)
+        losses = np.array([float(getattr(ind, "loss", 0.0)) for ind in inds], dtype=float)
+        w = 1.0 / (1.0 + np.abs(losses))
+        total = float(w.sum())
+        weights = w / total if total > 0 else np.full(n, 1.0 / n)
+        return np.zeros((n, 1)), weights
 
 
 class _FakePropulator:
@@ -706,6 +720,15 @@ class TestRunPropulateAbc:
 
     def test_returns_list_of_particle_records(self, propulate_records_default):
         assert all(isinstance(record, ParticleRecord) for record in propulate_records_default)
+
+    def test_records_carry_retroactive_posterior_weight(self, propulate_records_default):
+        # extract_posterior is wired in: every record carries a retroactive
+        # posterior_weight, normalised over the population and kept separate from
+        # the frozen streaming weight (which ess.py uses for ESS-over-time).
+        pweights = [record.posterior_weight for record in propulate_records_default]
+        assert all(pw is not None for pw in pweights)
+        assert sum(pweights) == pytest.approx(1.0, abs=1e-6)
+        assert all(record.weight == 1.0 for record in propulate_records_default)
 
     def test_records_have_required_fields(self, propulate_records_default):
         record = propulate_records_default[0]

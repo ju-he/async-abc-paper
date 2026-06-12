@@ -28,7 +28,7 @@ import random
 import shutil
 import time
 from contextlib import contextmanager
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -525,11 +525,32 @@ def run_propulate_abc(
             int(getattr(ind, "rank", 0) or 0),
         ),
     )
+    # Retroactive AMIS posterior weights. This is the estimator the paper's
+    # consistency + CLT are stated for: every particle reweighted against the
+    # cumulative proposal mixture, reconstructed from history (off the timed
+    # inference path; see ABCPMC.extract_posterior). The streaming proposal-time
+    # `ind.weight` is kept separately (records' `weight`) for the ESS-over-time
+    # diagnostic. Computed on `population` in record order so the weights align
+    # index-for-index; falls back to None on any error, in which case downstream
+    # consumers (SBC) revert to the streaming weight.
+    posterior_weights: List[Optional[float]] = [None] * len(population)
+    if population:
+        try:
+            _, _retro = propagator.extract_posterior(population)
+            if len(_retro) == len(population):
+                posterior_weights = [float(w) for w in _retro]
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "extract_posterior failed (%s); SBC will fall back to streaming weights.",
+                exc,
+            )
+
     records: List[ParticleRecord] = []
     current_tolerance = float(tol_init)
     for step, ind in enumerate(population, start=1):
         params = _individual_params(ind, limits)
         weight = float(ind.weight) if ind.weight is not None else None
+        posterior_weight = posterior_weights[step - 1]
         if ind.tolerance is not None:
             current_tolerance = min(current_tolerance, float(ind.tolerance))
             tolerance = current_tolerance
@@ -554,6 +575,7 @@ def run_propulate_abc(
             params=params,
             loss=float(ind.loss),
             weight=weight,
+            posterior_weight=posterior_weight,
             tolerance=tolerance,
             wall_time=sim_end_time if sim_end_time is not None else 0.0,
             worker_id=str(ind.rank) if getattr(ind, "rank", None) is not None else None,

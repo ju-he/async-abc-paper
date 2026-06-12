@@ -79,17 +79,33 @@ def _posterior_samples(
     *,
     archive_size: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (samples, weights) arrays for the final archive of a single trial."""
+    """Return (samples, weights) arrays for the final archive of a single trial.
+
+    Weights are the **retroactive AMIS** posterior weights (``posterior_weight``)
+    when present — the estimator the consistency + CLT are stated for — falling
+    back to the streaming ``weight`` and then to 1.0 for methods (e.g. pyABC) or
+    legacy records that do not carry it.
+    """
     final = []
     for result in final_state_results(records, archive_size=archive_size):
         final.extend(result.records)
     param_records = [r for r in final if param_name in r.params]
     samples = np.asarray([r.params[param_name] for r in param_records], dtype=float)
     weights = np.asarray(
-        [float(r.weight) if r.weight is not None else 1.0 for r in param_records],
+        [_posterior_weight_of(r) for r in param_records],
         dtype=float,
     )
     return samples, weights
+
+
+def _posterior_weight_of(record) -> float:
+    """Retroactive posterior weight if available, else the streaming weight, else 1.0."""
+    pw = getattr(record, "posterior_weight", None)
+    if pw is not None:
+        return float(pw)
+    if record.weight is not None:
+        return float(record.weight)
+    return 1.0
 
 
 def _resolve_benchmark_configs(cfg: dict) -> list[dict]:

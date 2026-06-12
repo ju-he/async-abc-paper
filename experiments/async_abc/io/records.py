@@ -29,7 +29,15 @@ class ParticleRecord:
     loss:
         Simulation distance / loss value.
     weight:
-        Importance weight (None during prior phase).
+        Streaming (proposal-time) importance weight stored during the run
+        (None during the prior phase). This is the online quantity used by the
+        ESS-over-time diagnostic; it is *not* the reported posterior weight.
+    posterior_weight:
+        Retroactive AMIS posterior weight computed off-line over the full final
+        history (``ABCPMC.extract_posterior``). This is the estimator the
+        consistency + CLT are stated for and the one SBC consumes. ``None`` for
+        methods that do not produce it (e.g. pyABC, which carries its own
+        posterior weight in ``weight``).
     tolerance:
         Effective tolerance at the time of proposal (None during prior phase).
     wall_time:
@@ -51,6 +59,7 @@ class ParticleRecord:
     params: Dict[str, float]
     loss: float
     weight: Optional[float] = None
+    posterior_weight: Optional[float] = None
     tolerance: Optional[float] = None
     wall_time: float = 0.0
     worker_id: Optional[str] = None
@@ -72,6 +81,7 @@ class ParticleRecord:
             row[f"param_{key}"] = self.params.get(key, "")
         row["loss"] = self.loss
         row["weight"] = "" if self.weight is None else self.weight
+        row["posterior_weight"] = "" if self.posterior_weight is None else self.posterior_weight
         row["tolerance"] = "" if self.tolerance is None else self.tolerance
         row["wall_time"] = self.wall_time
         row["worker_id"] = "" if self.worker_id is None else self.worker_id
@@ -98,6 +108,7 @@ class ParticleRecord:
             params=params,
             loss=float(row["loss"]),
             weight=_parse_optional_float(row.get("weight")),
+            posterior_weight=_parse_optional_float(row.get("posterior_weight")),
             tolerance=_parse_optional_float(row.get("tolerance")),
             wall_time=float(row.get("wall_time", 0.0) or 0.0),
             worker_id=_parse_optional_str(row.get("worker_id")),
@@ -115,6 +126,7 @@ _PREFIX_COLS = ["method", "replicate", "seed", "step"]
 _SUFFIX_COLS = [
     "loss",
     "weight",
+    "posterior_weight",
     "tolerance",
     "wall_time",
     "worker_id",

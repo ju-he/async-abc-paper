@@ -414,6 +414,39 @@ def test_posterior_samples_reconstructs_async_final_archive_per_replicate():
     assert np.allclose(np.sort(samples), np.array([-4.0, -3.0, 1.5, 2.5]))
 
 
+def test_posterior_samples_prefers_retroactive_posterior_weight():
+    """SBC must use the retroactive posterior_weight (the estimator the CLT is
+    stated for), not the frozen streaming weight."""
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    records = [
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=1,
+                       params={"mu": 1.0}, loss=0.1, weight=1.0, posterior_weight=0.25,
+                       tolerance=1.0, wall_time=1.0),
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=2,
+                       params={"mu": 2.0}, loss=0.2, weight=1.0, posterior_weight=0.75,
+                       tolerance=1.0, wall_time=2.0),
+    ]
+    samples, weights = module._posterior_samples(records, "mu", archive_size=2)
+    order = np.argsort(samples)
+    assert np.allclose(samples[order], [1.0, 2.0])
+    assert np.allclose(weights[order], [0.25, 0.75])  # from posterior_weight, not weight=1.0
+
+
+def test_posterior_samples_falls_back_to_streaming_weight():
+    """When posterior_weight is absent (pyABC / legacy records), fall back to
+    the streaming weight."""
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    records = [
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=1,
+                       params={"mu": 1.0}, loss=0.1, weight=0.4, tolerance=1.0, wall_time=1.0),
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=2,
+                       params={"mu": 2.0}, loss=0.2, weight=0.6, tolerance=1.0, wall_time=2.0),
+    ]
+    samples, weights = module._posterior_samples(records, "mu", archive_size=2)
+    order = np.argsort(samples)
+    assert np.allclose(weights[order], [0.4, 0.6])
+
+
 def test_sbc_full_config_treats_abc_smc_baseline_as_all_ranks_under_mpi():
     cfg = load_config(EXPERIMENTS_DIR / "configs" / "sbc.json", test_mode=False, small_mode=False)
     benchmark = make_benchmark(cfg["benchmark"])
