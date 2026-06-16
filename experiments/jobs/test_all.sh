@@ -7,14 +7,15 @@
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
 #SBATCH --job-name=abc_test_all
-#SBATCH --output=/p/scratch/tissuetwin/herold2/async-abc/test/abc_test_all-%j.out
+#SBATCH --output=/tmp/abc_test_all-%j.out
 # Override SLURM log path at submission time: sbatch --output=<dir>/abc_test_all-%j.out ...
 
-nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
-default_output_root=/p/scratch/tissuetwin/herold2/async-abc/test
+# Paths are injected by experiments/jobs/submit.sh via `sbatch --export`.
+nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
+default_output_root="${SITE_SCRATCH_ROOT:?SITE_SCRATCH_ROOT not set — submit via experiments/jobs/submit.sh}/test"
 output_dir=""
 extend_flag=""
-experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
 
 usage() {
     echo "Usage: $(basename "$0") [output_dir] [--extend]" >&2

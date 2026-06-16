@@ -19,8 +19,9 @@
 
 set -u
 
-nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
-experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
+# Paths are injected by experiments/jobs/submit.sh via `sbatch --export`.
+nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
 
 output_dir="${1:?Usage: $(basename "$0") <output_dir>}"
 mkdir -p "$output_dir"

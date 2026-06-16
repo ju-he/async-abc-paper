@@ -16,7 +16,6 @@ REPO_ROOT = EXPERIMENTS_DIR.parent
 CORES_PER_NODE = 48
 DEFAULT_TIME = "04:00:00"
 DEFAULT_MAX_TIME = "24:00:00"
-DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
 
 sys.path.insert(0, str(SCRIPT_DIR))
 import _site  # noqa: E402
@@ -212,7 +211,11 @@ def main() -> None:
         default=DEFAULT_MAX_TIME,
         help=f"Maximum auto-derived SLURM wall time for estimated runs (default: {DEFAULT_MAX_TIME}).",
     )
-    parser.add_argument("--nastjapy-path", default=DEFAULT_NASTJAPY, help="Path containing the cluster virtualenv.")
+    parser.add_argument(
+        "--nastjapy-path",
+        default=None,
+        help="Path containing the cluster virtualenv (default: auto-detect from $SYSTEMNAME via _site.py, or $NASTJAPY_PATH).",
+    )
     args = parser.parse_args()
 
     if args.account is None or args.partition is None:
@@ -221,6 +224,9 @@ def main() -> None:
             args.account = site_account
         if args.partition is None:
             args.partition = site_partition
+
+    if args.nastjapy_path is None:
+        args.nastjapy_path = _site.detect_nastjapy_path()
 
     experiment_names = _resolve_experiments(args.experiments)
 
