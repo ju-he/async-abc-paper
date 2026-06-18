@@ -1,5 +1,23 @@
 # Previous Bug Fixes
 
+## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
+
+**Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
+```
+finalize_ablation_experiment → plot_ablation_amis_isolation (reporters.py:3600)
+  quality_df.groupby("wall_time", sort=True)["quality"]
+KeyError: 'Column not found: quality'
+```
+No ablation plots/metadata were produced; shard data in `_shards/ablation/` was intact.
+
+**Root cause:** `plot_ablation_amis_isolation` referenced a non-existent `"quality"` column. `posterior_quality_curve` returns the metric in the `"wasserstein"` column (see `QUALITY_CURVE_COLUMNS` in `analysis/convergence.py`); the plot's own y-label is already "Wasserstein distance to truth". The bug never surfaced in tests because the only ablation test config uses variants `full_model`/`small_archive` — without a `no_amis` variant the plotter early-returns via `_skip` (line 3573) before reaching the aggregation. The real `ablation.json` has both `full_model` and `no_amis`, so the full run hits the groupby. It would have crashed the full ablation run identically.
+
+**Fix:** `reporters.py:3600` `["quality"]` → `["wasserstein"]`. Added regression test `test_plot_ablation_amis_isolation_exports_files_when_both_variants_present` (writes both `ablation_full_model.csv` + `ablation_no_amis.csv`, asserts the plot is produced and `not skipped`) so the aggregation path is covered. Verified by reproducing the exact finalizer call against the real merged variant CSVs from the failed run — produces `ablation_amis_isolation.{pdf,png}` with no error.
+
+**Recovery for the failed run:** re-run finalize-only on the existing shard data (no recompute needed).
+
+**Files:** `experiments/async_abc/plotting/reporters.py`, `experiments/tests/test_plotting.py`
+
 ## 2026-04-14 — Phase 3 Plan 03: runtime_heterogeneity plot generation hang in test mode
 
 **Symptom:** `run_all_paper_experiments.py --test` hangs for 60+ minutes after `runtime_heterogeneity` inference completes. Process at 100% CPU on main thread, producing no output, with matplotlib font files open.

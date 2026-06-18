@@ -40,6 +40,7 @@ from async_abc.plotting.reporters import (
     _compute_idle_fraction,
     _final_population,
     _parse_variant_stem,
+    plot_ablation_amis_isolation,
     plot_ablation_summary,
     plot_attempts_to_target_summary,
     plot_benchmark_diagnostics,
@@ -395,6 +396,22 @@ class TestPhase3Reporters:
         sync_lanes = {row["lane_label"] for row in rows if row["base_method"] == "abc_smc_baseline"}
         assert async_lanes == {"rep 0 | worker 0", "rep 1 | worker 0"}
         assert sync_lanes == {"rep 0 | worker 0", "rep 1 | worker 0"}
+
+    def test_plot_ablation_amis_isolation_exports_files_when_both_variants_present(self, tmp_path, sample_records):
+        # Regression: when both full_model and no_amis variant CSVs exist, the
+        # finalizer reaches the per-checkpoint aggregation. It previously raised
+        # KeyError('quality') — the metric column is "wasserstein". No test had
+        # the no_amis variant, so the path was uncovered and shipped broken.
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        data_dir = output_dir.data
+        write_records(data_dir / "ablation_full_model.csv", sample_records)
+        write_records(data_dir / "ablation_no_amis.csv", sample_records)
+        variants = [{"name": "full_model", "k": 20}, {"name": "no_amis", "k": 20}]
+        plot_ablation_amis_isolation(data_dir, variants, output_dir, benchmark_cfg={"true_mu": 0.0})
+        assert (output_dir.plots / "ablation_amis_isolation.pdf").exists()
+        assert (output_dir.plots / "ablation_amis_isolation.png").exists()
+        meta = json.loads((output_dir.plots / "ablation_amis_isolation_meta.json").read_text())
+        assert not meta.get("skipped"), f"plot was skipped, aggregation path not exercised: {meta.get('skip_reason')}"
 
     def test_plot_quality_vs_time_exports_files(self, tmp_path, sample_records):
         output_dir = OutputDir(tmp_path, "plots").ensure()

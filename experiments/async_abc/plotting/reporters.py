@@ -3595,9 +3595,11 @@ def plot_ablation_amis_isolation(
         )
         if quality_df.empty:
             continue
-        # Aggregate over replicates at each checkpoint.
+        # Aggregate over replicates at each checkpoint. The quality metric
+        # column is "wasserstein" (see QUALITY_CURVE_COLUMNS); there is no
+        # "quality" column — referencing it raised KeyError at finalize.
         agg = (
-            quality_df.groupby("wall_time", sort=True)["quality"]
+            quality_df.groupby("wall_time", sort=True)["wasserstein"]
             .agg(["mean", "std", "count"])
             .reset_index()
         )
