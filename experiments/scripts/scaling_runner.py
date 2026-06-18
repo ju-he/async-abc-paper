@@ -859,6 +859,30 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
         action="store_true",
         help="After the run, print an estimated full-run wall time extrapolated from measured elapsed times.",
     )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=None,
+        help="Run only this single archive size k (one-combo-per-process mode).",
+    )
+    parser.add_argument(
+        "--replicate",
+        type=int,
+        default=None,
+        help="Run only this single replicate index (one-combo-per-process mode).",
+    )
+    parser.add_argument(
+        "--print-combos",
+        action="store_true",
+        dest="print_combos",
+        help=(
+            "Print the 'k replicate' grid (one pair per line) for this config and "
+            "exit, without running anything. The scaling wrappers use this to launch "
+            "one srun per combo so each Propulate run gets its own process and MPI "
+            "teardown — avoiding the ParaStation pscom MPI_Comm_free hang that "
+            "repeated per-combo teardowns trigger at >=48 ranks."
+        ),
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test, small_mode=args.small)
@@ -886,6 +910,9 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     k_values = list(scaling_cfg.get("k_values", [cfg["inference"].get("k", 100)]))
     if test_mode:
         k_values = list(scaling_cfg.get("test_k_values", k_values))
+    if args.k is not None:
+        # One-combo-per-process mode: restrict to the single requested k.
+        k_values = [int(args.k)]
 
     wall_time_budgets_s = [
         float(value) for value in scaling_cfg.get("wall_time_budgets_s", [])
@@ -908,6 +935,16 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     n_replicates = cfg["execution"]["n_replicates"]
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
+
+    if args.print_combos:
+        # Emit the (k, replicate) grid for the wrappers to launch one srun per
+        # combo. The grid is independent of n_workers, so it is the same whether
+        # or not --n-workers is passed.
+        if is_root_rank():
+            for k in k_values:
+                for replicate in range(n_replicates):
+                    print(f"{int(k)} {int(replicate)}")
+        return
 
     done = (
         _find_completed_scaling(output_dir, ["n_workers", "k", "base_method", "replicate"])
@@ -970,6 +1007,10 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
                         elif "max_wall_time_s" in method_inference_cfg:
                             method_inference_cfg.pop("max_wall_time_s", None)
                         for replicate, seed in enumerate(seeds):
+                            if args.replicate is not None and int(replicate) != int(args.replicate):
+                                # One-combo-per-process mode: this process runs a
+                                # single replicate; seed stays seeds[replicate].
+                                continue
                             if (str(n_workers), str(k), base_method, str(replicate)) in done:
                                 logger.info(
                                     "[scaling] --extend: skipping n_workers=%s k=%s %s replicate=%s",

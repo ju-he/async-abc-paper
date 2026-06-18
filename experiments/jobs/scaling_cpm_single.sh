@@ -88,10 +88,40 @@ source "$nastjapy_path/.venv/bin/activate"
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
-srun -n "$n_workers" python "$experiments_dir/scripts/scaling_cpm_runner.py" \
+# One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
+# (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. CPM's slow
+# sims keep message volume low so it has not hit the pscom teardown hang, but
+# isolating combos keeps it robust as the grid grows. Aggregates rebuilt at end.
+runner="$experiments_dir/scripts/scaling_cpm_runner.py"
+status=0
+while read -r k rep; do
+    [ -z "$k" ] && continue
+    srun -n "$n_workers" python "$runner" \
+        --config "$config_path" \
+        --output-dir "$output_dir" \
+        --n-workers "$n_workers" \
+        --k "$k" \
+        --replicate "$rep" \
+        --skip-finalize \
+        ${test_flag:+"$test_flag"} \
+        ${small_flag:+"$small_flag"} \
+        ${extend_flag:+"$extend_flag"} || status=1
+done < <(python "$runner" \
     --config "$config_path" \
     --output-dir "$output_dir" \
     --n-workers "$n_workers" \
+    --print-combos \
     ${test_flag:+"$test_flag"} \
-    ${small_flag:+"$small_flag"} \
-    ${extend_flag:+"$extend_flag"}
+    ${small_flag:+"$small_flag"})
+
+# Rebuild aggregate CSVs/plots/metadata from the per-combo shards (single rank,
+# no MPI teardown).
+python "$runner" \
+    --config "$config_path" \
+    --output-dir "$output_dir" \
+    --n-workers "$n_workers" \
+    --finalize-only \
+    ${test_flag:+"$test_flag"} \
+    ${small_flag:+"$small_flag"}
+
+exit "$status"
