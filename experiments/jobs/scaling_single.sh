@@ -94,9 +94,23 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 # pscom_close (see .plans/bug-fixes); isolating each combo in its own process
 # sidesteps the repeated teardown entirely. Aggregates are rebuilt at the end.
 runner="$experiments_dir/scripts/scaling_runner.py"
+
+# Read the (k, replicate) grid into an array FIRST, then loop. Do NOT feed the
+# grid into a `while read ... done < <(...)` loop: srun reads stdin and swallows
+# the rest of the list, so only the first combo would run. `< /dev/null` on srun
+# is belt-and-suspenders against the same footgun.
+mapfile -t combos < <(python "$runner" \
+    --config "$config_path" \
+    --output-dir "$output_dir" \
+    --n-workers "$n_workers" \
+    --print-combos \
+    ${test_flag:+"$test_flag"} \
+    ${small_flag:+"$small_flag"})
+
 status=0
-while read -r k rep; do
-    [ -z "$k" ] && continue
+for combo in "${combos[@]}"; do
+    [ -z "$combo" ] && continue
+    read -r k rep <<< "$combo"
     srun -n "$n_workers" python "$runner" \
         --config "$config_path" \
         --output-dir "$output_dir" \
@@ -106,14 +120,8 @@ while read -r k rep; do
         --skip-finalize \
         ${test_flag:+"$test_flag"} \
         ${small_flag:+"$small_flag"} \
-        ${extend_flag:+"$extend_flag"} || status=1
-done < <(python "$runner" \
-    --config "$config_path" \
-    --output-dir "$output_dir" \
-    --n-workers "$n_workers" \
-    --print-combos \
-    ${test_flag:+"$test_flag"} \
-    ${small_flag:+"$small_flag"})
+        ${extend_flag:+"$extend_flag"} < /dev/null || status=1
+done
 
 # Rebuild aggregate CSVs/plots/metadata from the per-combo shards (single rank,
 # no MPI teardown).
