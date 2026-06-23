@@ -71,16 +71,33 @@ def main() -> None:
     k = int(os.environ.get("REPRO_K", "1000"))
     out = OutputDir(os.environ.get("REPRO_OUT", "/tmp/repro_pscom"), "repro").ensure()
 
-    # Wrap the teardown with per-rank timing. A rank that prints "FREE start"
-    # but never "FREE end" is wedged in MPI_Comm_free -> pscom_close: that is the
-    # rank/PID to attach py-spy to. Skip-disconnect short-circuits before this.
+    # Per-rank marker file on SHARED scratch (REPRO_OUT), so the decisive
+    # drain-vs-Free signal survives the job and is readable off the mount — no
+    # py-spy and no node access needed. Line-buffered + flushed so the last marker
+    # before a hang is durable. Read after a hang: if a combo has no "FREE start"
+    # line, the hang is BEFORE _free_propulate_comm (the post-loop intra-island
+    # drain); "FREE start" with no "FREE end" means the Free itself hangs.
+    markers_dir = Path(out.root) / "markers"
+    markers_dir.mkdir(parents=True, exist_ok=True)
+    _marker_f = open(markers_dir / f"rank_{rank:03d}.log", "a", buffering=1)
+
+    def mark(msg: str) -> None:
+        line = f"{time.time():.2f} [rank {rank}/{size}] {msg}"
+        print(line, flush=True)
+        _marker_f.write(line + "\n")
+        _marker_f.flush()
+
+    # Wrap the teardown with per-rank timing. A rank that records "FREE start"
+    # but never "FREE end" is wedged in MPI_Comm_free -> pscom_close. No FREE
+    # start at all => wedged earlier, in the post-loop drain. Skip-disconnect
+    # short-circuits the Free.
     _orig_free = pabc._free_propulate_comm
 
     def _timed_free(comm):  # noqa: ANN001
         t0 = time.time()
-        print(f"[rank {rank}/{size}] FREE start", flush=True)
+        mark("FREE start")
         _orig_free(comm)
-        print(f"[rank {rank}/{size}] FREE end {time.time() - t0:.2f}s", flush=True)
+        mark(f"FREE end {time.time() - t0:.2f}s")
 
     pabc._free_propulate_comm = _timed_free
 
@@ -112,22 +129,15 @@ def main() -> None:
         )
 
     for i in range(combos):
-        if is_root_rank():
-            print(f"[repro] === COMBO {i + 1}/{combos} start ===", flush=True)
+        mark(f"COMBO {i + 1}/{combos} start (k={k})")
         t0 = time.time()
         records = run_method_distributed(
             "async_propulate_abc", simulate, limits, inference_cfg, out, i, 1234 + i
         )
-        if is_root_rank():
-            n = len(records) if records else 0
-            print(
-                f"[repro] === COMBO {i + 1}/{combos} done in {time.time() - t0:.1f}s, "
-                f"records={n} ===",
-                flush=True,
-            )
+        n = len(records) if records else 0
+        mark(f"COMBO {i + 1}/{combos} done in {time.time() - t0:.1f}s records={n}")
 
-    if is_root_rank():
-        print(f"[repro] ALL {combos} COMBOS COMPLETED — no teardown hang.", flush=True)
+    mark(f"ALL {combos} COMBOS COMPLETED — no teardown hang.")
 
 
 if __name__ == "__main__":

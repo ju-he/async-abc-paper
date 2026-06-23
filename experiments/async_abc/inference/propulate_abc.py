@@ -310,12 +310,29 @@ def _propulate_with_wall_time_limit(
     # through to the buffer clear below.
     _MPI = MPI
 
+    # Bound the collective drain. At very high message volume (large k, many
+    # ranks) the outstanding intra-island isends may never fully drain over
+    # ParaStation pscom, so the unbounded loop spins forever and SLURM force-kills
+    # the step (observed: k>=192 at 48/96 ranks hang here ~6s after the wall-time
+    # loop ends — BEFORE _free_propulate_comm, which is why PROPULATE_SKIP_DISCONNECT
+    # did not help). Every rank shares the same deadline (run_start + max_wall_time_s
+    # + grace), so once it passes all ranks report "done" and the Allreduce(MIN)
+    # breaks the loop collectively. Leftover messages are reclaimed at process exit —
+    # immediate for the one-combo-per-process scaling jobs. Override via
+    # PROPULATE_DRAIN_TIMEOUT_S (seconds; default 120).
+    drain_grace_s = float(os.environ.get("PROPULATE_DRAIN_TIMEOUT_S", "120"))
+    drain_deadline = float(run_start) + float(max_wall_time_s) + drain_grace_s
+    drain_timed_out = False
+
     while _MPI is not None:
         propulator._receive_intra_island_individuals()
         try:
             sends_done = not intra_reqs or _MPI.Request.Testall(intra_reqs)
         except TypeError:
             sends_done = True
+        if not sends_done and time.time() >= drain_deadline:
+            sends_done = True
+            drain_timed_out = True
         local_done = 1 if sends_done else 0
         global_done = np.zeros(1, dtype=np.int32)
         propulate_comm.Allreduce(
@@ -333,6 +350,14 @@ def _propulate_with_wall_time_limit(
             # method's CommWorldMap workers.
             propulator._receive_intra_island_individuals()
             break
+
+    if drain_timed_out:
+        logger.warning(
+            "Propulate post-loop intra-island drain exceeded its %.0fs deadline with "
+            "pending sends; proceeding to teardown (leftover messages reclaimed at "
+            "process exit). Override via PROPULATE_DRAIN_TIMEOUT_S.",
+            drain_grace_s,
+        )
 
     if intra_reqs:
         propulator.intra_requests.clear()
