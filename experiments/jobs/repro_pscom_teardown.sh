@@ -40,9 +40,19 @@ mkdir -p "$output_dir"
 export REPRO_OUT="$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
-module restore nastjapy
-module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+# Environment setup. Override SCALING_ENV_SETUP to point at a script that loads a
+# different MPI stack + activates a matching venv — e.g. an OpenMPI-linked mpi4py
+# venv to sidestep the ParaStation pscom teardown hang at high message volume.
+# Default keeps ParaStation+nastja unchanged. The setup script owns both the
+# module loads AND `source <venv>/bin/activate`.
+if [ -n "${SCALING_ENV_SETUP:-}" ]; then
+    # shellcheck source=/dev/null
+    source "$SCALING_ENV_SETUP"
+else
+    module restore nastjapy
+    module load ParaStationMPI
+    source "$nastjapy_path/.venv/bin/activate"
+fi
 
 # --- Optional py-spy watchdog: if the step hangs past the expected runtime, dump
 #     native C stacks of the local ranks. A rank wedged in pscom_close shows the
