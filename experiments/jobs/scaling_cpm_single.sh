@@ -88,6 +88,13 @@ source "$nastjapy_path/.venv/bin/activate"
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
+# Skip the ParaStation MPI_Comm_free that hangs in pscom_close at high message
+# volume (see scaling_single.sh). With one combo per process, skipping Free
+# leaks one communicator per process, reclaimed at process exit — safe. CPM's
+# slow sims keep volume low so it has not hit the hang, but enabling this keeps
+# it robust. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce.
+export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
+
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
 # (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. CPM's slow
 # sims keep message volume low so it has not hit the pscom teardown hang, but

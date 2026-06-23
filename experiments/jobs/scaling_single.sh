@@ -88,6 +88,15 @@ source "$nastjapy_path/.venv/bin/activate"
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
+# Skip the ParaStation MPI_Comm_free that hangs in pscom_close at high message
+# volume. Confirmed on JUWELS (run_20260623_133045): with one combo per process
+# (below), the low-k combos teardown fine but each k>=192 combo runs its full
+# wall budget then hangs its SINGLE teardown -> Force Terminated (not a time
+# limit; --time was 2h29m). Skipping Free leaks one communicator per process,
+# reclaimed at process exit — safe precisely because of the per-combo isolation,
+# not an accumulating leak. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce the hang.
+export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
+
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
 # (k, replicate) combo. At >=48 ranks, sweeping many combos inside one
 # long-lived process makes the per-combo MPI_Comm_free hang in ParaStation
