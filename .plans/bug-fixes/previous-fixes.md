@@ -157,11 +157,16 @@ intra-island message volume in the propulate fork (batch/throttle the all-to-all
   requests grow without bound → pscom per-connection resource exhaustion → a rank crashes (~180s in).
   w48 stays under the limit; w96 (2× the fan-out) does not.
 
-**Recommended fix:** add **send backpressure** to the eval loop — bound the in-flight `intra_requests`
-(drain via recv-interleaved `Testsome`/`Waitsome` when over a cap, so it cannot deadlock). This caps
-pscom resource use without changing results. Pragmatic alternative for the paper: cap the scaling sweep
-at 48 workers (1 node) — w48 is 100% reliable — yielding a clean 1/16/48 curve, or bound the w96
-population (fewer sims / shorter wall cap).
+**Fix implemented (wrapper-side, no propulate-fork change):** added **send backpressure** to the eval
+loop in `_cleanup_propulate_intra_requests` (propulate_abc.py). When outstanding `intra_requests` exceed
+`PROPULATE_MAX_INFLIGHT_SENDS` (env, default 4096 ≈ 43/peer at 96 ranks), it runs bounded rounds of
+(drain incoming via `_receive_intra_island_individuals` → `Testsome`-retire our completed sends).
+Draining incoming FIRST lets peers progress and receive our sends, so the retire makes progress — all
+non-blocking ⇒ cannot deadlock even if every rank backpressures at once; bounded round count ⇒ never
+spins. Results unchanged; only send pacing. The ABCPMC propagator is untouched (this is the propulator's
+intra-island worker sync, not the proposal). Unit-tested via an injected `_testsome` seam
+(`test_intra_send_backpressure_*`); real validation is a 2-node MCP run. Pragmatic alternative if it
+needs more tuning: cap the scaling sweep at 48 workers (w48 is 100% reliable → clean 1/16/48 curve).
 
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 

@@ -81,29 +81,62 @@ def _free_propulate_comm(comm) -> None:
         pass
 
 
-def _cleanup_propulate_intra_requests(propulator) -> int:
-    """Prune completed intra-island nonblocking sends.
+# Max bounded (recv + Testsome) rounds when applying send backpressure, so the
+# loop can never spin forever even if traffic momentarily stalls. Each round is
+# non-blocking and makes progress (drains incoming so peers can retire our sends),
+# so the cap is reached well within this bound in practice.
+_BACKPRESSURE_MAX_ROUNDS = 1000
 
-    Without periodic pruning, ``intra_requests`` grows unboundedly during a
-    wall-time-limited run.  High-throughput configurations (e.g. ablation with
-    k=10) can accumulate tens of thousands of outstanding ``isend`` requests,
-    exhausting ParaStationMPI/pscom internal resources and causing ``isend`` to
-    block.  Calling ``Testsome`` each iteration retires completed sends so the
-    outstanding count stays bounded.
+
+def _cleanup_propulate_intra_requests(
+    propulator, *, max_inflight=None, drain_recv=None, _testsome=None
+) -> int:
+    """Prune completed intra-island nonblocking sends, with optional backpressure.
+
+    Without pruning, ``intra_requests`` grows unboundedly during a wall-time-
+    limited run.  ``Testsome`` retires *already-completed* sends each iteration —
+    but it never blocks, so when peers' receives lag (high rank counts: 96 ranks
+    post 95 ``isend``s per evaluation) the outstanding set still grows without
+    bound and exhausts ParaStation pscom's per-connection resources, crashing a
+    rank mid-run (segfault on UCX, socket drop on TCP — transport-independent).
+
+    With ``max_inflight`` set, this additionally applies **backpressure**: while
+    the outstanding count exceeds the cap, it runs bounded rounds of (drain
+    incoming via ``drain_recv`` → ``Testsome``-retire our completed sends).
+    Draining incoming FIRST lets peers progress and receive our sends, so the
+    retire makes progress — all non-blocking, so it cannot deadlock even if every
+    rank backpressures at once.  Results are unchanged; only the send pacing is.
     """
     requests = getattr(propulator, "intra_requests", None)
     if not requests:
         return 0
     try:
-        from mpi4py import MPI as _MPI
-        indices = _MPI.Request.Testsome(requests)
-        if indices is not None:
-            # Remove completed entries in reverse order to preserve indices.
-            buffers = getattr(propulator, "intra_buffers", None)
+        if _testsome is None:
+            from mpi4py import MPI as _MPI
+
+            _testsome = _MPI.Request.Testsome
+
+        buffers = getattr(propulator, "intra_buffers", None)
+
+        def _retire(indices) -> int:
+            if not indices:
+                return 0
             for idx in sorted(indices, reverse=True):
                 del requests[idx]
                 if buffers is not None and idx < len(buffers):
                     del buffers[idx]
+            return len(indices)
+
+        _retire(_testsome(requests))
+
+        if max_inflight and len(requests) > int(max_inflight):
+            cap = int(max_inflight)
+            for _ in range(_BACKPRESSURE_MAX_ROUNDS):
+                if drain_recv is not None:
+                    drain_recv()  # receive incoming so peers can retire our sends
+                _retire(_testsome(requests))
+                if len(requests) <= cap:
+                    break
         return len(requests)
     except Exception:
         logger.debug("Propulate intra-request cleanup failed", exc_info=True)
@@ -290,6 +323,11 @@ def _propulate_with_wall_time_limit(
     dump = bool(getattr(getattr(propulator, "island_comm", None), "rank", None) == 0)
     propulate_comm.barrier()
 
+    # Cap on outstanding intra-island isends (0 disables). Bounds ParaStation pscom
+    # per-connection resource use so a worker cannot crash mid-run under the 95-way
+    # fan-out at >=2-node scale (see .plans/bug-fixes). 4096 ~= 43/peer at 96 ranks.
+    max_inflight_sends = int(os.environ.get("PROPULATE_MAX_INFLIGHT_SENDS", "4096"))
+
     while propulator.generations <= -1 or propulator.generation < propulator.generations:
         if _wall_time_exceeded(run_start, max_wall_time_s):
             break
@@ -299,7 +337,11 @@ def _propulate_with_wall_time_limit(
 
         propulator._evaluate_individual()
         propulator._receive_intra_island_individuals()
-        _cleanup_propulate_intra_requests(propulator)
+        _cleanup_propulate_intra_requests(
+            propulator,
+            max_inflight=max_inflight_sends,
+            drain_recv=propulator._receive_intra_island_individuals,
+        )
 
         if dump:
             propulator._dump_checkpoint()

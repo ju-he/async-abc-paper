@@ -730,6 +730,55 @@ class TestRunPropulateAbc:
         assert sum(pweights) == pytest.approx(1.0, abs=1e-6)
         assert all(record.weight == 1.0 for record in propulate_records_default)
 
+    def test_intra_send_backpressure_bounds_inflight(self):
+        # Send backpressure: when outstanding intra-island isends exceed the cap,
+        # the cleanup drains (recv + Testsome) until under it. Validates the
+        # deadlock-safety-critical loop with an injected Testsome (no live MPI):
+        # it must drain to the cap, retire matching buffers, and call drain_recv.
+        from async_abc.inference.propulate_abc import _cleanup_propulate_intra_requests
+
+        class _P:
+            def __init__(self):
+                self.intra_requests = list(range(100))
+                self.intra_buffers = list(range(100))
+                self.recv_calls = 0
+
+            def _receive(self):
+                self.recv_calls += 1
+
+        p = _P()
+        # Each Testsome retires the 5 lowest indices (simulates 5 sends completing).
+        def fake_testsome(reqs):
+            return list(range(min(5, len(reqs))))
+
+        n = _cleanup_propulate_intra_requests(
+            p, max_inflight=10, drain_recv=p._receive, _testsome=fake_testsome
+        )
+        assert n <= 10, "must drain down to the cap"
+        assert len(p.intra_requests) == len(p.intra_buffers), "buffers stay aligned"
+        assert p.recv_calls > 0, "backpressure must drain incoming to avoid deadlock"
+
+    def test_intra_send_backpressure_off_by_default_is_noop_drain(self):
+        # Without max_inflight, only the single non-blocking Testsome runs — no
+        # backpressure loop, drain_recv never called (the post-loop final cleanup
+        # path must keep this behaviour).
+        from async_abc.inference.propulate_abc import _cleanup_propulate_intra_requests
+
+        class _P:
+            def __init__(self):
+                self.intra_requests = list(range(100))
+                self.intra_buffers = list(range(100))
+                self.recv_calls = 0
+
+            def _receive(self):
+                self.recv_calls += 1
+
+        p = _P()
+        n = _cleanup_propulate_intra_requests(
+            p, drain_recv=p._receive, _testsome=lambda reqs: list(range(min(5, len(reqs))))
+        )
+        assert n == 95 and p.recv_calls == 0
+
     def test_records_root_only_skips_build_on_non_root(
         self, fake_propulate_env, tmp_path_factory, monkeypatch
     ):
