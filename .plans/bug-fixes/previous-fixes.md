@@ -81,6 +81,34 @@ again.
 full and `small/`. A flag present in one tier and absent in the sibling is invisible until the exact
 tier that's missing it runs in production.
 
+### 2026-06-25 (part 2) — residual 2-node teardown kill: redundant post-run build on non-root ranks
+
+**Symptom (after extract_posterior was fixed):** with the gate working, the w48 combos finalized
+cleanly at ~1.5M records, but `w96_k192` (96 ranks across 2 nodes) was **reproducibly** Force
+Terminated at teardown — both replicates, two runs in a row — while w48 (1 node) had **zero** Force
+Terminated. Per-step data: async_propulate ran to ~329s (past the 300s budget) but only **~26 of 96
+ranks** reached `status=finish`; the other ~70 were still in the post-run, and `abc_smc_baseline` never
+started.
+
+**Root cause:** `run_method_distributed` keeps only ROOT's records in `all_ranks` mode
+(`return records if root_rank else []`), but `run_propulate_abc` ran the post-run **sort + per-particle
+record build on every rank**. At ~6e5–1e6 individuals/rank that O(n log n) + O(n) Python build is slow
+and highly variable under 96-way CPU contention across 2 nodes, so ranks desynced: the fast ones hit
+the post-method `allgather`/teardown while the slow ones were still building, and the step missed the
+(~wall+40s) teardown window and was killed. 1 node stayed inside the window; 2 nodes did not.
+
+**Fix:** gate the discarded post-run build to **root only**. `run_method_distributed` sets
+`inference_cfg["_records_root_only"]=True` for `all_ranks` mode; `run_propulate_abc` returns `[]` on
+non-root immediately after the existing post-`Free` `COMM_WORLD.Barrier` (so no desync into the next
+Dup). Output is **identical** — root's records are exactly what was already returned — but the 95
+non-root ranks now skip straight to the collective, removing both the 95x redundant work and the
+desync. Testable via the `_comm_world_is_root()` seam; tests assert non-root returns `[]` and root still
+builds.
+
+**Files:** `experiments/async_abc/utils/runner.py` (set the flag for all_ranks),
+`experiments/async_abc/inference/propulate_abc.py` (`_comm_world_is_root` + non-root early return),
+`experiments/tests/test_inference.py` (root-only build tests).
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:

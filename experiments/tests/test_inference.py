@@ -730,6 +730,27 @@ class TestRunPropulateAbc:
         assert sum(pweights) == pytest.approx(1.0, abs=1e-6)
         assert all(record.weight == 1.0 for record in propulate_records_default)
 
+    def test_records_root_only_skips_build_on_non_root(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        # In all_ranks mode only root's records are kept, so non-root ranks must
+        # skip the discarded post-run sort+build (the redundant work that desyncs
+        # >=2-node teardowns). With the flag set and this rank pretending to be
+        # non-root, run_propulate_abc returns [] instead of building records.
+        monkeypatch.setattr(fake_propulate_env, "_comm_world_is_root", lambda: False)
+        cfg = {**_test_inference_cfg(), "_records_root_only": True}
+        records = _run_fake_propulate(tmp_path_factory, cfg=cfg, seed=31)
+        assert records == []
+
+    def test_records_root_only_still_builds_on_root(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        # Same flag, but on root: records ARE built (root's are the ones returned).
+        monkeypatch.setattr(fake_propulate_env, "_comm_world_is_root", lambda: True)
+        cfg = {**_test_inference_cfg(), "_records_root_only": True}
+        records = _run_fake_propulate(tmp_path_factory, cfg=cfg, seed=32)
+        assert len(records) > 0
+
     def test_compute_posterior_weights_false_skips_extract_posterior(
         self, fake_propulate_env, tmp_path_factory, monkeypatch
     ):

@@ -848,6 +848,12 @@ def run_method_distributed(
 
     should_run_here = execution_mode == "all_ranks" or root_rank
 
+    if execution_mode == "all_ranks":
+        # Only root's records are retained below; signal the method to skip the
+        # discarded post-run record build on non-root ranks (avoids 95x redundant
+        # work and the post-run desync that Force-Terminates >=2-node teardowns).
+        inference_cfg = {**inference_cfg, "_records_root_only": True}
+
     records: List[ParticleRecord] = []
     error_payload: Optional[Tuple[str, str]] = None
 

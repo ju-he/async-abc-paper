@@ -123,6 +123,16 @@ def _propulate_world_size() -> int:
         return 1
 
 
+def _comm_world_is_root() -> bool:
+    """Return whether this process is COMM_WORLD rank 0 (or single-process)."""
+    try:
+        from mpi4py import MPI
+
+        return int(MPI.COMM_WORLD.Get_rank()) == 0
+    except Exception:  # noqa: BLE001 - single process / no mpi4py
+        return True
+
+
 def _effective_generation_budget(max_sims: int, inference_cfg: Dict) -> int:
     """Return the Propulate generation count for this run.
 
@@ -549,6 +559,20 @@ def run_propulate_abc(
                 _MPI.COMM_WORLD.Barrier()
         except Exception:
             pass
+
+    # In all-ranks execution mode, run_method_distributed keeps only ROOT's
+    # records (runner.py: `return records if root_rank else []`); the post-run
+    # sort + per-particle record build on every other rank is computed and then
+    # discarded. At scaling volumes (~1e6 individuals/rank) that redundant build
+    # is both 95x wasteful AND the dominant source of post-run rank desync: at 96
+    # ranks across 2 nodes the slow ranks miss the teardown window and srun Force
+    # Terminates the step (observed: only ~26/96 reach status=finish). Skip it on
+    # non-root — the output is identical (root's records are the ones returned).
+    # The barrier above already resynchronised all ranks, so non-root returning
+    # here cannot desync the next replicate's Dup(). Flag set by
+    # run_method_distributed only for all_ranks mode.
+    if inference_cfg.get("_records_root_only") and not _comm_world_is_root():
+        return []
 
     # Sort by completion time so the record order reflects the observable
     # event stream rather than generation assignment alone.
