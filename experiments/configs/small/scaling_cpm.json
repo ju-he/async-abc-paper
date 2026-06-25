@@ -29,7 +29,8 @@
     "propulate_budget_mode": "total_simulations",
     "max_wall_time_s": 1800.0,
     "kernel": "gaussian",
-    "amis_snapshots": 20
+    "amis_snapshots": 20,
+    "compute_posterior_weights": false
   },
   "execution": {
     "n_replicates": 1,

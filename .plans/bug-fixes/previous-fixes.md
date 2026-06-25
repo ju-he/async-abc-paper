@@ -47,6 +47,40 @@ in the scaling wrappers, bounded drain via `PROPULATE_DRAIN_TIMEOUT_S`, `PROPULA
 default, `SCALING_ENV_SETUP` MPI-swap hook) are correct hardening and were kept, but they do **not**
 address this headline hang — this fix does.
 
+### 2026-06-25 (addendum) — the fix initially missed the `--small` config tier
+
+**Symptom after the first fix:** the A/B repro (which sets `compute_posterior_weights` directly)
+completed, but the real `--small` scaling sweep STILL wedged at exactly k>=192 (k48 finalized at ~1.5M
+records; w48/w96 × {k192,k1000} were Force Terminated ~5s after the wall-time break, same 2 ranks
+SIGKILLed). It looked like a *separate* teardown bug.
+
+**Diagnosis:** captured per-rank Python tracebacks via an env-gated `faulthandler.dump_traceback_later`
+in `scaling_runner` (`SCALING_FAULTHANDLER_S`) — ptrace-free, because py-spy/gdb are blocked by
+`ptrace_scope` on the compute nodes (the watchdog is a sibling, not parent, of the ranks). All 48 ranks'
+last frame was `extract_posterior -> run_propulate_abc:574`. So it was never a second bug — it was the
+SAME extract_posterior, still running.
+
+**Root cause of the miss:** `load_config(small_mode=True)` does not merge — it loads
+`configs/small/<name>.json` **standalone** (`_resolve_small_config_path`). Every real scaling run uses
+`--small`, so it reads `configs/small/scaling.json`, which did **not** have the flag. The full-tier
+`configs/scaling.json` I patched is only used by non-`--small` runs. (The k48 shard's empty
+`posterior_weight` that suggested the fix was active was a red herring: extract_posterior ran but raised
+and was caught -> None; at k=1000 the same call is ~20x slower per the `*k` factor, so it wedges instead
+of returning.)
+
+**Fix:** add `"compute_posterior_weights": false` to `configs/small/scaling.json` and
+`configs/small/scaling_cpm.json` too. Regression test `TestScalingPosteriorWeightsDisabled` asserts the
+flag holds through ALL real load paths (full+small x test+no-test) so the tiers cannot silently diverge
+again.
+
+**Files:** `experiments/configs/small/scaling.json`, `experiments/configs/small/scaling_cpm.json`,
+`experiments/scripts/scaling_runner.py` (faulthandler dumper), `experiments/tests/test_config.py`,
+`experiments/jobs/scaling_single_combo.sh` (diagnostic harness).
+
+**Lesson:** when gating behaviour via config, patch (and test) EVERY tier the loader can resolve —
+full and `small/`. A flag present in one tier and absent in the sibling is invisible until the exact
+tier that's missing it runs in production.
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
