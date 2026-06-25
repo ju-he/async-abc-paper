@@ -34,6 +34,8 @@ Tunables (environment variables)
   REPRO_WALL_S   wall-time budget per combo, seconds     (default 20)
   REPRO_K        archive size k per combo                (default 1000)
   REPRO_OUT      scratch output dir                      (default /tmp/repro_pscom)
+  REPRO_COMPUTE_POSTERIOR  1 = run extract_posterior (reproduces the hang),
+                           0 = skip it (the scaling fix; combos complete)  (default 1)
 
 Run with one rank per worker, e.g. ``srun -n 48 python repro_pscom_teardown.py``.
 """
@@ -108,6 +110,14 @@ def main() -> None:
     def simulate(params, seed):  # noqa: ANN001, ARG001
         return abs(float(params["mu"]))
 
+    # A/B knob for the actual root cause: the post-run extract_posterior is
+    # O(n_history * amis_snapshots * k) and unbounded by wall-time, so at the
+    # large histories these unbounded combos build it dominates and the slowest
+    # rank wedges everyone at the post-method allgather. Default 1 reproduces the
+    # hang; set REPRO_COMPUTE_POSTERIOR=0 to take the scaling-config code path and
+    # confirm the combos now complete ("COMBO done").
+    compute_posterior = os.environ.get("REPRO_COMPUTE_POSTERIOR", "1") != "0"
+
     inference_cfg = {
         "max_simulations": 10_000_000,  # effectively unbounded; wall-time bounds the combo
         "k": k,
@@ -119,6 +129,7 @@ def main() -> None:
         "max_wall_time_s": wall_s,
         "n_workers": size,
         "progress_log_interval_s": 10.0,
+        "compute_posterior_weights": compute_posterior,
     }
 
     if is_root_rank():
@@ -130,6 +141,7 @@ def main() -> None:
         mark(f"MPI: {mpi_banner}")
         mark(
             f"world_size={size} combos={combos} wall_s={wall_s} k={k} "
+            f"compute_posterior_weights={compute_posterior} "
             f"skip_disconnect={os.environ.get('PROPULATE_SKIP_DISCONNECT', '<unset>')} "
             f"drain_timeout_s={os.environ.get('PROPULATE_DRAIN_TIMEOUT_S', '<default120>')}"
         )
