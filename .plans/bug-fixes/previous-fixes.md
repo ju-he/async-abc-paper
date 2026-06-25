@@ -165,8 +165,16 @@ Draining incoming FIRST lets peers progress and receive our sends, so the retire
 non-blocking ⇒ cannot deadlock even if every rank backpressures at once; bounded round count ⇒ never
 spins. Results unchanged; only send pacing. The ABCPMC propagator is untouched (this is the propulator's
 intra-island worker sync, not the proposal). Unit-tested via an injected `_testsome` seam
-(`test_intra_send_backpressure_*`); real validation is a 2-node MCP run. Pragmatic alternative if it
-needs more tuning: cap the scaling sweep at 48 workers (w48 is 100% reliable → clean 1/16/48 curve).
+(`test_intra_send_backpressure_*`).
+
+**VALIDATED on the cluster (MCP job 14053142, 2 nodes / 96 ranks, ParaStation MPI 5.10.0-1,
+`PROPULATE_MAX_INFLIGHT_SENDS=4096`):** w96_k192 — which segfaulted at ~180s on **every** prior attempt
+(6/6 reps across 3 production runs + 2 MCP runs) — **completed cleanly**: `srun rc=0`, both methods
+finished (`async_propulate_abc` then `abc_smc_baseline`), and all shards written
+(`raw_results_w96_k192.csv` 121 MB, `throughput_summary`, `budget_summary`, the abc_smc `.db`). The
+backpressure fix resolves the >=2-node pscom crash; the full 12/12 small scaling grid is now reachable.
+The fix is already pulled onto the cluster, so a normal `submit_scaling.py ... --small --extend` will
+fill in w96_k192. Default cap 4096 worked first try (no tuning needed).
 
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
