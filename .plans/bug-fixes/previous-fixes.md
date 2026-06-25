@@ -144,6 +144,25 @@ intra-island message volume in the propulate fork (batch/throttle the all-to-all
 11/12 small-grid combos. Deploy of the fork mitigation needs `cd /p/project1/tissuetwin/herold2/propulate
 && git pull` (editable install).
 
+**Further MCP investigation (2026-06-25, continued):**
+- OpenMPI venv (`/p/.../scaling_openmpi_venv`) is **half-built** — no `scaling_openmpi_env.sh`, its python
+  fails with `libpython3.12.so.1.0: cannot open` (Python module not loaded), `module avail OpenMPI`
+  empty under Stages/2025. Not turnkey; the swap would need the module stack reverse-engineered.
+- **Transport is NOT the cause.** Forced verbs/TCP via `PSP_UCP=0` (job 14053021): the crash *changed
+  mode* — no segfault, instead `mpid_irecv_done: read from socket failed ... Failure during collective`
+  (a peer connection dropped mid-Bcast). UCX → segfault, TCP → socket drop ⇒ **a rank dies regardless of
+  transport**. The trigger is the unbounded high-volume async messaging, not a transport bug.
+- **The real culprit: no send backpressure.** `_cleanup_propulate_intra_requests` only `Testsome`s
+  (retires *completed* sends). At 96 ranks each eval posts 95 `isend`s; if peers' recvs lag, outstanding
+  requests grow without bound → pscom per-connection resource exhaustion → a rank crashes (~180s in).
+  w48 stays under the limit; w96 (2× the fan-out) does not.
+
+**Recommended fix:** add **send backpressure** to the eval loop — bound the in-flight `intra_requests`
+(drain via recv-interleaved `Testsome`/`Waitsome` when over a cap, so it cannot deadlock). This caps
+pscom resource use without changing results. Pragmatic alternative for the paper: cap the scaling sweep
+at 48 workers (1 node) — w48 is 100% reliable — yielding a clean 1/16/48 curve, or bound the w96
+population (fewer sims / shorter wall cap).
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
