@@ -135,9 +135,10 @@ rc=$?
 kill "$watchdog_pid" 2>/dev/null || true
 echo "[combo-dbg] srun rc=$rc"
 
-# Did the combo actually finish and write its shard? (present => --wait=0 alone
-# unblocks it; absent => the wedge is terminal.)
-shard="$output_dir/data/raw_results_w${n_workers}_k${combo_k}.csv"
+# Did the combo actually finish and write its shard? (present => the combo
+# completed; absent => the wedge is terminal.) The runner nests outputs under an
+# experiment-name subdir, so the shard lives at <out>/scaling/data/.
+shard="$output_dir/scaling/data/raw_results_w${n_workers}_k${combo_k}.csv"
 if [ -f "$shard" ]; then
     echo "[combo-dbg] SHARD WRITTEN: $shard ($(($(wc -l < "$shard") - 1)) records) — teardown completed."
 else
