@@ -88,50 +88,64 @@ fi
 # --- Stack watchdog: once teardown has started (some ranks gone) but stragglers
 #     remain, dump the survivors' native stacks. Repeats so we both (a) capture
 #     the wedged frame and (b) observe whether the stragglers ever clear. ---
-watch_start="${STACK_WATCH_START:-290}"
-watch_interval="${STACK_WATCH_INTERVAL:-6}"
-watch_count="${STACK_WATCH_COUNT:-60}"
+# Wall-time break is ~300s; start dumping just after it and continue through the
+# teardown window (the step is killed ~wall+40s, so ~15 rounds at 5s covers it).
+watch_start="${STACK_WATCH_START:-300}"
+watch_interval="${STACK_WATCH_INTERVAL:-5}"
+watch_count="${STACK_WATCH_COUNT:-15}"
 host="$(hostname -s)"
 dump_dir="$output_dir/stacks"
 mkdir -p "$dump_dir"
 
+# Match only the python rank processes (exclude the `srun` launcher, whose
+# cmdline also contains scaling_runner.py).
+rank_pat="python[0-9.]* ${runner}"
 (
     sleep "$watch_start"
-    echo "[watchdog] start: ntasks=$n_workers; watching for teardown stragglers on ${host}"
-    dumped=0
+    echo "[watchdog] start: ntasks=$n_workers on ${host}; dumping every ${watch_interval}s through the teardown window"
+    prev_live=-1
     for i in $(seq 1 "$watch_count"); do
-        pids=$(pgrep -u "$USER" -f "scaling_runner.py" 2>/dev/null)
+        pids=$(pgrep -u "$USER" -f "$rank_pat" 2>/dev/null)
         live=$(printf '%s\n' "$pids" | grep -c .)
-        echo "[watchdog] check $i: live=${live}/${n_workers} ranks"
+        echo "[watchdog] check $i: live_ranks=${live}/${n_workers}"
         if [ "$live" -eq 0 ]; then
-            echo "[watchdog] all ranks exited — teardown completed (slow, not a deadlock)."
+            echo "[watchdog] all ranks exited — teardown completed (slow, NOT a deadlock)."
             break
         fi
-        # Teardown in progress (some ranks gone) and we have not dumped enough:
-        # the survivors are the wedged ranks — capture them.
-        if [ "$live" -lt "$n_workers" ] && [ "$dumped" -lt 3 ]; then
-            seq_tag="$(printf '%02d' "$dumped")"
-            echo "[watchdog] STRAGGLERS DETECTED (${live} of ${n_workers}); dumping survivor stacks (round $seq_tag)"
-            for pid in $pids; do
-                out="$dump_dir/stack_${host}_${pid}_${seq_tag}.txt"
-                if command -v py-spy >/dev/null 2>&1; then
-                    py-spy dump --native --pid "$pid" > "$out" 2>&1 || true
-                else
-                    gdb -p "$pid" -batch -ex "thread apply all bt" > "$out" 2>&1 || true
-                fi
-            done
-            dumped=$((dumped + 1))
-            echo "[watchdog] stacks -> $dump_dir/stack_${host}_*_${seq_tag}.txt"
-        fi
+        # Dump UNCONDITIONALLY through the window — the wall-time break is at
+        # ~300s so by watch_start we are in drain/post-run/teardown. Capturing
+        # every round shows the progression (numpy sort/build -> the wedged
+        # collective) and survives the step kill: dumps taken before the kill
+        # are durable on scratch. A rank stuck across consecutive rounds at the
+        # same frame is the wedge.
+        seq_tag="$(printf '%02d' "$i")"
+        echo "[watchdog] dumping ${live} rank stacks IN PARALLEL (round $seq_tag)"
+        # Parallel snapshot: all ranks stay blocked at the collective until the
+        # step is killed (~wall+40s), so we must catch all 48 within a few seconds
+        # — sequential gdb (~1s each) would not finish before the kill. Each pid
+        # is dumped in its own background job; we wait for the batch.
+        for pid in $pids; do
+            out="$dump_dir/stack_${host}_${pid}_${seq_tag}.txt"
+            if command -v py-spy >/dev/null 2>&1; then
+                ( py-spy dump --native --pid "$pid" > "$out" 2>&1 || true ) &
+            else
+                ( gdb -p "$pid" -batch -ex "thread apply all bt" > "$out" 2>&1 || true ) &
+            fi
+        done
+        wait
+        echo "[watchdog] round $seq_tag stacks -> $dump_dir/stack_${host}_*_${seq_tag}.txt"
+        prev_live="$live"
         sleep "$watch_interval"
     done
     echo "[watchdog] done."
 ) &
 watchdog_pid=$!
 
-# One combo, one MPI world, one teardown. --wait=0 makes srun wait indefinitely
-# after the first task exits (do NOT kill stragglers), so a wedge persists and is
-# observable instead of being force-terminated ~5s after the wall-time break.
+# One combo, one MPI world, one teardown. NOTE: an earlier run showed the step is
+# still SIGTERMed at ~wall+40s even with --wait=0 --kill-on-bad-exit=0, so the
+# ~305s kill is NOT srun's straggler grace (likely an MPI_Abort when a rank exits
+# mid-collective). We keep these flags (harmless) but rely on the watchdog dumping
+# the wedged stacks BEFORE that kill rather than on keeping the step alive.
 srun --wait=0 --kill-on-bad-exit=0 -n "$n_workers" \
     python "$runner" \
     --config "$config_path" \
