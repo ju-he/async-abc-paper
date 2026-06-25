@@ -430,6 +430,16 @@ def run_propulate_abc(
     kernel = inference_cfg.get("kernel", "hard")
     amis_snapshots = int(inference_cfg.get("amis_snapshots", 0))
     amis_interval_cfg = inference_cfg.get("amis_interval")
+    # Retroactive AMIS posterior reweighting (extract_posterior) is the reported
+    # estimator for posterior-quality experiments (SBC etc.), but it costs
+    # O(n_history * amis_snapshots * k) on the post-run analysis path and is NOT
+    # bounded by the inference wall-time. On cheap-simulator scaling sweeps the
+    # history reaches ~1e6 individuals, where at k=1000 this is 10-16 min of
+    # single-threaded NumPy per combo — it overruns the SLURM wall clock and
+    # looks like a post-teardown MPI hang. Experiments that do not consume
+    # ``posterior_weight`` (the throughput/scaling sweeps) set this False; the
+    # weights remain recomputable offline from the saved history if ever needed.
+    compute_posterior_weights = bool(inference_cfg.get("compute_posterior_weights", True))
     # Pass extra scheduler kwargs if present
     scheduler_kwargs = {}
     for key in ("percentile", "decay_factor", "low_rate", "high_rate",
@@ -559,7 +569,7 @@ def run_propulate_abc(
     # index-for-index; falls back to None on any error, in which case downstream
     # consumers (SBC) revert to the streaming weight.
     posterior_weights: List[Optional[float]] = [None] * len(population)
-    if population:
+    if population and compute_posterior_weights:
         try:
             _, _retro = propagator.extract_posterior(population)
             if len(_retro) == len(population):
@@ -569,6 +579,12 @@ def run_propulate_abc(
                 "extract_posterior failed (%s); SBC will fall back to streaming weights.",
                 exc,
             )
+    elif population and not compute_posterior_weights:
+        logger.info(
+            "compute_posterior_weights=False: skipping retroactive AMIS reweighting "
+            "for %d individuals (posterior_weight left empty; recompute offline if needed).",
+            len(population),
+        )
 
     records: List[ParticleRecord] = []
     current_tolerance = float(tol_init)

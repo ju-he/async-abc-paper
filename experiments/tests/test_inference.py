@@ -730,6 +730,35 @@ class TestRunPropulateAbc:
         assert sum(pweights) == pytest.approx(1.0, abs=1e-6)
         assert all(record.weight == 1.0 for record in propulate_records_default)
 
+    def test_compute_posterior_weights_false_skips_extract_posterior(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        # The throughput/scaling sweeps set compute_posterior_weights=False because
+        # extract_posterior is O(n_history * amis_snapshots * k) on the unbounded
+        # post-run analysis path — at ~1e6 individuals it overruns the SLURM wall
+        # clock and presents as a post-teardown MPI hang. With the flag off the
+        # estimator must NOT be invoked at all (not merely discarded), and every
+        # record's posterior_weight stays empty while the rest of the record is
+        # produced normally.
+        calls = {"n": 0}
+        original = _FakeABCPMC.extract_posterior
+
+        def _counting_extract_posterior(self, inds):
+            calls["n"] += 1
+            return original(self, inds)
+
+        monkeypatch.setattr(_FakeABCPMC, "extract_posterior", _counting_extract_posterior)
+
+        cfg = {**_test_inference_cfg(), "compute_posterior_weights": False}
+        records = _run_fake_propulate(tmp_path_factory, cfg=cfg, seed=29)
+
+        assert calls["n"] == 0, "extract_posterior must not run when the flag is off"
+        assert records, "records should still be produced"
+        assert all(record.posterior_weight is None for record in records)
+        # Streaming weight and the rest of the record are unaffected by the opt-out.
+        assert all(record.weight == 1.0 for record in records)
+        assert all(record.method == "async_propulate_abc" for record in records)
+
     def test_records_have_required_fields(self, propulate_records_default):
         record = propulate_records_default[0]
         assert record.method == "async_propulate_abc"

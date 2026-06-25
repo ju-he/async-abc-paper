@@ -1,5 +1,52 @@
 # Previous Bug Fixes
 
+## 2026-06-25 — CPU scaling "MPI teardown hang" was extract_posterior O(n·S·k) on the analysis path
+
+**Symptom:** The CPU `scaling` (lotka_volterra) sweep wedges on JUWELS at high worker counts ×
+high archive size — specifically the **w48/w96 × k192/k1000** combos never finalize (no
+`throughput_summary` shard), while every `scaling_cpm` combo and every w1/w16 and `*_k48` combo
+completes. The job dies with no Python traceback, not OOM, ~minutes into the allocation, at a combo
+boundary "after teardown". A standalone reproducer (`repro_pscom_teardown.{sh,py}`) showed all 48
+ranks reach `_free_propulate_comm` end (`FREE end 0.00s`) and then wedge before the next combo —
+**identically under ParaStation MPI and Open MPI v5.0.5** (confirmed via the `mpi4py.Get_library_version()`
+marker), so it is **MPI-independent**.
+
+**Wrong turns (kept here so they are not repeated):** diagnosed in sequence as OOM (disproved by
+sacct: 1.7 GB/188 GB), the ParaStation `MPI_Comm_free`/pscom teardown (disproved: `PROPULATE_SKIP_DISCONNECT=1`
+did not help and `FREE` is 0.00 s), and the post-loop intra-island drain (disproved: markers show it
+finishes in ~10 s, far under the 120 s bound). Each was a guess from heuristics; the fix only came
+from (a) reading the markers/`job.log` off the shared mount, and (b) a local micro-benchmark.
+
+**Root cause:** After the timed inference loop and communicator free, `run_propulate_abc` calls
+`ABCPMC.extract_posterior(population)` (the retroactive AMIS reweighting — the reported posterior) on
+**every** rank. Its cost is **O(n_history · amis_snapshots · k)** and it is **not bounded by the
+inference wall-time** — `log_mixture_density` builds `(n, k)` arrays for each of `amis_snapshots`
+snapshots. On cheap-simulator scaling sweeps (fixed-walltime, `_stop_policy_for_method` =
+`wall_time_exact`) the history reaches ~2e5–1e6 individuals. A local benchmark at k=1000 measured
+~0.8 ms/particle (2k→2.7 s, 200k→160 s, ~8 GB), so the hung combos are **10–16 min of single-threaded
+NumPy per combo, per rank** — overrunning the SLURM wall clock. The other ranks block at the
+post-method `allgather` (`runner.py:876`) waiting for the slowest, which presents as a post-teardown
+hang. k-dependence is the `·k` factor (k=48 combos finish in ~30 s even at 8e5 records; k=1000 do not);
+CPM survives because its expensive simulator caps the history at ≤41k records.
+
+**Fix:** Gate the estimator behind `inference_cfg["compute_posterior_weights"]` (default **True**, so
+all posterior-quality experiments — SBC, gaussian_mean, ablation — are unchanged). The throughput
+`scaling`/`scaling_cpm` configs set it **False**: they never consume `posterior_weight` (only
+`analysis/sbc.py` does), and `extract_posterior` is a pure function of the saved history, so the
+weights are recomputable offline from the raw CSV if ever needed. With the flag off the post-run path
+is just the O(n log n) population sort + record build (~tens of seconds even at 1e6 records). No silent
+fallback — when skipped, an INFO line records it (CLAUDE.md "crash loudly" compliance).
+
+**Files:** `experiments/async_abc/inference/propulate_abc.py` (flag read + gated `extract_posterior`
+block), `experiments/configs/scaling.json`, `experiments/configs/scaling_cpm.json`,
+`experiments/tests/test_inference.py` (`test_compute_posterior_weights_false_skips_extract_posterior`
+asserts the estimator is not invoked and `posterior_weight` stays empty).
+
+**Note:** The layered ParaStation robustness changes from the wrong turns (per-combo process isolation
+in the scaling wrappers, bounded drain via `PROPULATE_DRAIN_TIMEOUT_S`, `PROPULATE_SKIP_DISCONNECT`
+default, `SCALING_ENV_SETUP` MPI-swap hook) are correct hardening and were kept, but they do **not**
+address this headline hang — this fix does.
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
