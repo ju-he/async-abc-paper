@@ -40,6 +40,14 @@ mkdir -p "$output_dir"
 export REPRO_OUT="$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
+# Mirror ALL job output (incl. the bash -x module-load trace and srun/python
+# output) to the shared scratch dir. The #SBATCH --output above goes to the
+# compute node's /tmp, which is NOT on any shared mount, so without this the log
+# is unreadable from a login node / the sshfs mount. job.log lands next to the
+# markers and is readable off the mount.
+exec > "$output_dir/job.log" 2>&1
+echo "[repro] full log -> $output_dir/job.log"
+
 # Environment setup. Override SCALING_ENV_SETUP to point at a script that loads a
 # different MPI stack + activates a matching venv — e.g. an OpenMPI-linked mpi4py
 # venv to sidestep the ParaStation pscom teardown hang at high message volume.
@@ -54,20 +62,27 @@ else
     source "$nastjapy_path/.venv/bin/activate"
 fi
 
-# --- Optional py-spy watchdog: if the step hangs past the expected runtime, dump
-#     native C stacks of the local ranks. A rank wedged in pscom_close shows the
-#     ParaStation teardown frames; that confirms the Free() is the stuck call. ---
+# --- Stack-dump watchdog: if the run hasn't finished by the expected time, dump
+#     native stacks of the local ranks so a hang shows its wedged frame (the MPI/
+#     pscom call, or wherever it is stuck after teardown). Defaults ON for this
+#     diagnostic script; set REPRO_PYSPY=0 to skip. Uses py-spy if available, else
+#     falls back to gdb (a system tool). Stacks land on the scratch mount. ---
 watchdog_pid=""
-if [ "${REPRO_PYSPY:-0}" = "1" ] && command -v py-spy >/dev/null 2>&1; then
+if [ "${REPRO_PYSPY:-1}" != "0" ]; then
     watchdog_after=$(( ${REPRO_COMBOS:-6} * ${REPRO_WALL_S:-20} + 120 ))
     (
         sleep "$watchdog_after"
         host="$(hostname -s)"
-        echo "[watchdog] run exceeded ${watchdog_after}s — dumping local python stacks on ${host}" >&2
-        for pid in $(pgrep -u "$USER" -f 'repro_pscom_teardown'); do
-            py-spy dump --native --pid "$pid" > "$output_dir/pyspy_${host}_${pid}.txt" 2>&1 || true
+        echo "[watchdog] run exceeded ${watchdog_after}s — dumping local rank stacks on ${host}" >&2
+        for pid in $(pgrep -u "$USER" -f 'repro_pscom_teardown.py'); do
+            out="$output_dir/stack_${host}_${pid}.txt"
+            if command -v py-spy >/dev/null 2>&1; then
+                py-spy dump --native --pid "$pid" > "$out" 2>&1 || true
+            else
+                gdb -p "$pid" -batch -ex "thread apply all bt" > "$out" 2>&1 || true
+            fi
         done
-        echo "[watchdog] dumps written to $output_dir/pyspy_${host}_*.txt" >&2
+        echo "[watchdog] stacks -> $output_dir/stack_${host}_*.txt" >&2
     ) &
     watchdog_pid=$!
 fi

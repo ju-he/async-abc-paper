@@ -122,10 +122,16 @@ def main() -> None:
     }
 
     if is_root_rank():
-        print(
-            f"[repro] world_size={size} combos={combos} wall_s={wall_s} k={k} "
-            f"skip_disconnect={os.environ.get('PROPULATE_SKIP_DISCONNECT', '<unset>')}",
-            flush=True,
+        try:
+            from mpi4py import MPI as _MPIlib
+            mpi_banner = _MPIlib.Get_library_version().splitlines()[0].strip()
+        except Exception as exc:  # noqa: BLE001
+            mpi_banner = f"<unavailable: {exc}>"
+        mark(f"MPI: {mpi_banner}")
+        mark(
+            f"world_size={size} combos={combos} wall_s={wall_s} k={k} "
+            f"skip_disconnect={os.environ.get('PROPULATE_SKIP_DISCONNECT', '<unset>')} "
+            f"drain_timeout_s={os.environ.get('PROPULATE_DRAIN_TIMEOUT_S', '<default120>')}"
         )
 
     for i in range(combos):
