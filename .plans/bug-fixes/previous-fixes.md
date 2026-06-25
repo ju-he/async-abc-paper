@@ -109,6 +109,41 @@ builds.
 `experiments/async_abc/inference/propulate_abc.py` (`_comm_world_is_root` + non-root early return),
 `experiments/tests/test_inference.py` (root-only build tests).
 
+### 2026-06-25 (part 3) — residual w96/2-node failure is a pscom SEGFAULT (not a hang)
+
+**Symptom:** after all the above, `w96_k192` (96 ranks / 2 nodes) still reproducibly fails; w48 (1
+node) never does. Every w96 "Force Terminated" is the downstream of **one rank crashing**.
+
+**Diagnosis (direct, via the jsc-mpc MCP):** reproduced the exact combo standalone with a ptrace-free
+per-rank `faulthandler` dumper (`SCALING_FAULTHANDLER_S`). Findings, all from the cluster:
+- The job dies at **~180s** (not the 300s wall-time) when **`srun: error: ... task 8: Segmentation
+  fault (core dumped)`** → srun Force-Terminates the step. So it is **not** a timeout, **not** the
+  teardown window, **not** a deadlock (0 ranks reached `status=finish`; all 96 were still in the eval
+  loop).
+- **Not OOM**: sacct MaxRSS 871 MB / MaxVMSize 3.4 GB per task against a 188 GB node.
+- No Python `Fatal Python error` dump despite `faulthandler.enable()` → the fault is a **C-level crash
+  in the ParaStation pscom / mpi4py transport**, under the high-volume intra-island all-to-all
+  messaging (each eval isends to all 95 peers) that only exists at >=2 nodes. MPI confirmed ParaStation
+  MPI 5.10.0-1.
+- The crashing rank's periodic dumps sat in `population.__repr__` <- `propulator.py:343` (the debug
+  log f-string) inside the high-frequency receive loop.
+
+**Status: root-caused, not yet resolved.** It is the original "pscom" concern — vindicated — but a
+crash *during* the run, not at teardown. The skip-disconnect / drain-bound / per-combo-isolation /
+root-only changes do not address it (they target teardown, not an in-run pscom crash).
+
+**Mitigation shipped (propulate fork `ju-he/propulate@eb70297`, branch feature/async-abc):** gate the
+per-generation debug log-string (incl. `Individual.__repr__` on every received individual) and the O(N)
+`_get_active_individuals` in `_receive_intra_island_individuals` behind `log.isEnabledFor(DEBUG)`.
+Removes a large per-message cost in the exact crash-site receive loop → faster drain, less pscom
+backlog pressure. Likely-helpful but NOT a guaranteed fix for a C-level pscom segfault.
+
+**Candidate real fixes (open):** (a) run w96 under OpenMPI instead of ParaStation (different transport;
+the most promising sidestep — testable via the MCP); (b) pscom tuning (`PSP_*`); (c) reduce
+intra-island message volume in the propulate fork (batch/throttle the all-to-all isend); (d) accept
+11/12 small-grid combos. Deploy of the fork mitigation needs `cd /p/project1/tissuetwin/herold2/propulate
+&& git pull` (editable install).
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
