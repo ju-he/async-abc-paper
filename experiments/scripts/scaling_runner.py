@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import logging
 import math
+import os
 import re
 import shutil
 import sys
@@ -839,8 +840,45 @@ def rebuild_scaling_outputs(
     return aggregate_rows
 
 
+def _install_faulthandler_dumper() -> None:
+    """Env-gated diagnostic: each rank periodically dumps its OWN Python
+    traceback (all threads) to a per-rank file via ``faulthandler``.
+
+    Works from inside the process, so it needs no ptrace — unlike py-spy/gdb,
+    which compute nodes block (``ptrace_scope``). Used to localize the k>=192
+    post-wall-time teardown wedge: a rank stuck across snapshots at the same
+    frame is the wedge. Off unless ``SCALING_FAULTHANDLER_S`` is set.
+    See experiments/jobs/scaling_single_combo.sh.
+    """
+    interval = os.environ.get("SCALING_FAULTHANDLER_S")
+    if not interval:
+        return
+    import faulthandler
+
+    try:
+        from mpi4py import MPI as _MPI
+
+        rank = _MPI.COMM_WORLD.Get_rank()
+    except Exception:  # noqa: BLE001 - single-process / no mpi4py
+        rank = 0
+    trace_dir = Path(os.environ.get("SCALING_FAULTHANDLER_DIR", "."))
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    # Keep the file handle alive for the process lifetime (module global) so the
+    # repeating timer thread can keep writing to it.
+    global _FAULTHANDLER_FILE
+    _FAULTHANDLER_FILE = open(trace_dir / f"rank_{rank:03d}.txt", "w", buffering=1)
+    faulthandler.enable(file=_FAULTHANDLER_FILE)
+    faulthandler.dump_traceback_later(
+        float(interval), repeat=True, file=_FAULTHANDLER_FILE
+    )
+
+
+_FAULTHANDLER_FILE = None
+
+
 def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     configure_logging()
+    _install_faulthandler_dumper()
     parser = make_arg_parser("Scaling experiment.")
     parser.add_argument(
         "--n-workers",
