@@ -173,8 +173,16 @@ intra-island worker sync, not the proposal). Unit-tested via an injected `_tests
 finished (`async_propulate_abc` then `abc_smc_baseline`), and all shards written
 (`raw_results_w96_k192.csv` 121 MB, `throughput_summary`, `budget_summary`, the abc_smc `.db`). The
 backpressure fix resolves the >=2-node pscom crash; the full 12/12 small scaling grid is now reachable.
-The fix is already pulled onto the cluster, so a normal `submit_scaling.py ... --small --extend` will
-fill in w96_k192. Default cap 4096 worked first try (no tuning needed).
+The fix is already pulled onto the cluster. **Small scaling grid is now 12/12 complete** (MCP jobs
+14057684 fresh 2-rep recompute + 14058045 finalize): w96_k192 finalized with both replicates (978,034
+records); async_propulate_abc at w96/k192 = 871-941 sims/s vs abc_smc_baseline 303-563. Default cap 4096
+worked first try.
+
+**Operational gotcha for recompute:** a *previously-crashed* combo leaves a propulate checkpoint that is
+RESUMED on the next run (independent of `--extend`; `--small` doesn't reset checkpoints), and resuming a
+crashed-state checkpoint re-triggers the crash even with the fix. So a normal `submit_scaling --extend`
+will NOT fix a crashed combo — clear `scaling/logs/propulate_*__<combo>` (and `abc_smc_baseline_*__<combo>*`)
+first, then recompute fresh. Only combos that crashed under the OLD (pre-backpressure) code are affected.
 
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
