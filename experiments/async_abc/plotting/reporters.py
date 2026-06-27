@@ -3754,6 +3754,52 @@ def plot_amis_snapshot_ess_stability(
     )
 
 
+def _subsample_history_for_plots(records, cfg, archive_size):
+    """Bound the per-(method,replicate) evaluated history fed to the benchmark
+    plots so a fast simulator's multi-million-record history cannot OOM the
+    finalize. The ``archive_size`` lowest-loss records per group are ALWAYS kept
+    (final-state / posterior reconstruction stays exact); the remaining dense
+    attempt stream is uniformly down-sampled in time order to a cap. Convergence
+    curves already collapse to <=500 checkpoints, so figures are unchanged in
+    shape and the reported posterior/quality (computed on the full history) are
+    unaffected. Disable by setting plots.max_history_records_for_plots to null.
+    """
+    import logging
+    cap = cfg.get("plots", {}).get("max_history_records_for_plots", 200_000)
+    if cap is None or len(records) <= cap:
+        return records
+    by_group: Dict[tuple, list] = defaultdict(list)
+    for r in records:
+        by_group[(r.method, int(r.replicate))].append(r)
+    per_group_cap = max(1, int(cap) // max(1, len(by_group)))
+    keep_floor = int(archive_size or 0)
+    out: list = []
+    dropped = 0
+    for group in by_group.values():
+        if len(group) <= per_group_cap:
+            out.extend(group)
+            continue
+        order = sorted(range(len(group)),
+                       key=lambda i: (group[i].loss if group[i].loss is not None else float("inf")))
+        keep = set(order[:keep_floor])                       # exact top-k by loss
+        remaining = [i for i in range(len(group)) if i not in keep]  # original (time) order
+        budget = max(0, per_group_cap - len(keep))
+        if budget and remaining:
+            step = max(1, len(remaining) // budget)
+            keep.update(remaining[::step][:budget])
+        kept = [group[i] for i in sorted(keep)]              # time-ordered
+        dropped += len(group) - len(kept)
+        out.extend(kept)
+    if dropped:
+        logging.getLogger(__name__).warning(
+            "plot_benchmark_diagnostics: down-sampled evaluated history for plotting "
+            "(%d -> %d records, dropped %d; cap=%d). Posterior/quality use the full "
+            "history; only dense convergence curves are thinned.",
+            len(records), len(out), dropped, int(cap),
+        )
+    return out
+
+
 def plot_benchmark_diagnostics(
     records: List[ParticleRecord],
     cfg: Dict[str, Any],
@@ -3766,6 +3812,7 @@ def plot_benchmark_diagnostics(
     analysis_cfg = cfg.get("analysis", {})
     true_params = _true_params_from_cfg(records, benchmark_cfg)
     archive_size = inference_cfg.get("k")
+    records = _subsample_history_for_plots(records, cfg, archive_size)
     emit_paper = bool(plots_cfg.get("emit_paper_summaries", True))
     emit_diagnostics = bool(plots_cfg.get("emit_diagnostics", True))
     ci_level = float(analysis_cfg.get("ci_level", 0.95))
