@@ -184,6 +184,45 @@ crashed-state checkpoint re-triggers the crash even with the fix. So a normal `s
 will NOT fix a crashed combo — clear `scaling/logs/propulate_*__<combo>` (and `abc_smc_baseline_*__<combo>*`)
 first, then recompute fresh. Only combos that crashed under the OLD (pre-backpressure) code are affected.
 
+### 2026-06-26 — 256-rank (6-node) import-time SEGFAULT: eager `import GPy` in the propulate fork
+
+**Symptom:** the FULL-tier `scaling` combo `w256_k1000` (256 ranks / 6 nodes) crashes **at import time** —
+all ranks log `elapsed=0.0s status=start` and then one rank takes a `Segmentation fault (core dumped)`
+**before the eval loop starts** (MCP job 14058701: `task 21: Segmentation fault`, srun rc=143, no shards).
+Lower rank counts (w1…w96, including the 2-node w96 backpressure validation) all run fine — the crash is
+specific to the 6-node / 256-rank import.
+
+**Wrong turn (kept so it is not repeated):** first labelled a generic "import storm" from a sloppy
+`grep -rl exec_module` that matches NORMAL startup imports in *every* rank file. The user correctly pushed
+back (CPM / gaussian ran fine at lower ranks). The real wedge frame only emerged from reading **each rank's
+LAST `faulthandler` snapshot** (the text after the final `Timeout`) — NOT grepping for a frame that appears
+in *any* snapshot.
+
+**Root cause:** the propulate fork's `surrogate.py` did an **eager top-level `import GPy`**, so plain
+`import propulate` dragged in the heavy GPy → IPython → astroid dependency tree. At 256 ranks across 6 nodes
+the simultaneous heavy-import storm (import-machinery + shared-FS metadata contention over that large tree)
+crashes a rank during import. The async-ABC eval loop itself was never reached, so none of the prior
+teardown/backpressure fixes could have addressed it.
+
+**Fix (propulate fork `feature/async-abc@1d8dfdc`):** make the GPy import **lazy** in `propulate/surrogate.py`
+— `import propulate` no longer pulls in GPy/IPython/astroid (verified locally: GPy absent from `sys.modules`
+after `import propulate`). Deployed to the cluster by `git pull` on a login node (compute nodes have no
+git/internet; editable install).
+
+**VALIDATED on the cluster (MCP job 14060522, 256 ranks / 6 nodes, ParaStation MPI 5.10.0-1,
+`PROPULATE_MAX_INFLIGHT_SENDS=4096`, async-only 300s):** `w256_k1000` — which segfaulted at import on the
+prior attempt — **completed cleanly**: `srun rc=0`, all 256 ranks reached `status=finish` (rank 0
+`evaluations=21 records=212919`), `[scaling] Done in 5m 20s`, **no segfault / no GPy import chain** in any
+trace. Shards written: `raw_results_w256_k1000.csv` (59 MB), `throughput_summary`, `budget_summary`,
+`timing.csv`. Throughput **709.7 sims/s** over the full 300s budget. This confirms BOTH that the import
+crash is gone AND that the 256-rank eval-loop teardown is stable at cap=4096 (the secondary concern). The
+full-tier 128/256-worker scaling points are now viable.
+
+**Note (not a bug):** `worker_utilization=0.0215` (2.1%) at w256 — expected for the cheap lotka simulator at
+256 workers (workers idle between fast sims); it is part of the scaling story the paper measures, not a
+stability defect. Raising the backpressure cap above 4096 for throughput fidelity at 256 ranks remains an
+optional tuning knob, not a correctness fix.
+
 ## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
 
 **Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
@@ -450,3 +489,51 @@ records.
 **Symptom:** Collective allreduce each iteration caused synchronization overhead.
 
 **Fix:** Each rank checks its own clock independently; no collective ops in hot loop.
+
+## 2026-06-27: gaussian_mean benchmark OOM (54 GB) — extract_posterior O(n·k) over full history (propulate fork)
+
+**Symptom:** `gaussian_mean` production job (14061000) FAILED — sacct MaxRSS 53.96 GB / 94 GB, `task 0: Killed`
+at the end of the run, after all methods (async, abc_smc_baseline, rejection) logged `status=finish`. No
+plots, no timing/budget published (only the down-sampled 73 MB raw_results.csv). Only gaussian_mean failed;
+gandk/lotka/CPM finalize fine.
+
+**False lead:** the post-run posterior-quality/plotting stage. DISPROVED by profiling the real saved history —
+replaying the full `plot_benchmark_diagnostics` over the persisted 325k-record raw_results.csv peaks at 1.3 GB.
+
+**Root cause:** the async method's retroactive AMIS estimator `ABCPMC.extract_posterior(population)` runs on the
+FULL IN-MEMORY evaluated history. The Gaussian simulator is fast enough that the history is millions of
+individuals (~1e3 sims/s/worker × 48 × 300 s ≈ 1e7); raw_results is heavily down-sampled on persist (→325k),
+which is why the saved-history replay looked cheap. Each AMIS snapshot's `log_mixture_density` built an
+**(n, k)** Mahalanobis matrix over all n → tens of GB → OOM on rank 0. This is the O(n·k) path the docstring
+flags; gaussian_mean is the only benchmark whose simulator is fast enough to reach it (it sets
+compute_posterior_weights=true, unlike the scaling sweeps which set it false — see the 2026-06 scaling fixes).
+
+**Fix:** `extract_posterior` now evaluates the cumulative proposal mixture in CHUNKS over the n history points
+(`_EXTRACT_POSTERIOR_CHUNK = 65536` in `propulate/propulate/propagators/abcpmc.py`) → peak memory O(chunk·k)
+instead of O(n·k). logsumexp is column-wise so each particle's weight is independent of chunk boundaries:
+result is bit-identical (regression test `tests/test_abcpmc.py::TestExtractPosterior::test_chunking_matches_unchunked`;
+full TestExtractPosterior green). **This is a propulate-FORK change** — commit+push it and `git pull` on a
+JUWELS login node (compute nodes have no git) before re-running. gaussian_mean must be RE-RUN to produce the
+missing plots (1-rep repro first to confirm bounded RSS). gaussian_mean's SBC calibration (separate experiment)
+already succeeded; only the posterior-recovery-vs-time plots are missing.
+
+## 2026-06-28 — gaussian_mean OOM cause 2 (multi-method plotting) FIXED + full re-run VALIDATED
+
+**Second cause (the chunking fix alone was insufficient):** the full multi-method run still OOM'd at ~49 GB
+inside `plot_benchmark_diagnostics`, which held the full un-downsampled multi-method/multi-rep history in
+memory (async + abc_smc_baseline + rejection × 5 reps). The async-only profiler missed it.
+
+**Fix:** `_subsample_history_for_plots` in `experiments/async_abc/plotting/reporters.py` (async-abc
+`refactor/general@9423cc9`) — computes final-state (top-k) posteriors from the FULL history first, then
+uniformly subsamples the dense simulation-attempt stream per (method, replicate) before plotting (cfg
+`plots.max_history_records_for_plots`, default 200k; curves already cap at 500 eval pts; final posteriors
+preserved exactly).
+
+**Deploy (was a blocker — "deploy mechanism unknown"):** the async-abc repo has NO push alias; deploy is the
+same rsync pattern as `pushpropulate`, target `/p/project1/tissuetwin/herold2/async-abc-paper`. Recipe saved
+to memory `reference_asyncabc_cluster_deploy.md`.
+
+**VALIDATION (2026-06-28):** full gaussian_mean re-run (job 14066112, both fixes live +
+`PROPULATE_SKIP_DISCONNECT=1`, 1 node / 48 ranks) COMPLETED, exit 0:0, **MaxRSS 28.8 GB** (was 49–54 GB →
+OOM), 16 plots produced. async recovers the analytic posterior mean to 0.002–0.013 abs err (≈ sync baseline,
+≪ rejection). `quality_vs_wall_time.pdf` wired into the paper as Fig. `gaussian-recovery`. OOM closed.

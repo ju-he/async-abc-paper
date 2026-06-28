@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 04-03-PLAN.md — REPR-03 output-existence gate implemented
-last_updated: "2026-04-14T17:46:50.055Z"
+stopped_at: context exhaustion at 77% (2026-06-27)
+last_updated: "2026-06-27T20:12:01.160Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 4
   completed_phases: 4
   total_plans: 11
   completed_plans: 11
-  percent: 0
+  percent: 100
 ---
 
 # Project State
@@ -102,6 +102,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-14T17:43:17.005Z
-Stopped at: Completed 04-03-PLAN.md — REPR-03 output-existence gate implemented
-Resume file: None
+Last session: 2026-06-28 (resume-work)
+Stopped at: Resume complete — both open paper data-panels filled. Deployed async-abc 9423cc9 to cluster
+(deploy mechanism found: rsync, no alias); sensitivity merged over shards 1-3 + heatmap (job 14066118);
+gaussian_mean re-run COMPLETED with both OOM fixes (job 14066112, MaxRSS 28.8 GB, 16 plots); both figures
+wired into latex/sn-article-template/sn-article.tex; paper recompiles clean (0 undefined refs). Working tree
+uncommitted. Ad-hoc paper effort tracked in .planning/.continue-here.md (NOT a GSD phase; v1.0 milestone done).
+Resume file: .planning/.continue-here.md
