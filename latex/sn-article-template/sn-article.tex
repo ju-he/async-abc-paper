@@ -207,13 +207,19 @@ Unless noted, results are five-replicate medians on JUWELS; figures show the mat
 \caption{Throughput versus straggler slowdown factor. The synchronous baseline degrades sharply at the generation barrier; the asynchronous method is robust.}\label{fig:straggler}
 \end{figure}
 
-\paragraph{Runtime heterogeneity.} Under stochastic log-normal runtime noise the asynchronous method sustains higher utilization (lower idle fraction) than the synchronous baseline, which idles at generation barriers (Fig.~\ref{fig:hetero}).
+\paragraph{Runtime heterogeneity.} Under stochastic log-normal runtime noise the asynchronous method sustains higher utilization (lower idle fraction) than the synchronous baseline, which idles at generation barriers (Fig.~\ref{fig:hetero}). Crucially, this utilization converts directly into inference quality: at a fixed wall-clock budget the synchronous baseline completes fewer and fewer simulations as the runtime spread $\sigma$ grows --- it idles at every barrier --- and its posterior-mean error to the analytic Gaussian posterior climbs by roughly an order of magnitude, whereas the asynchronous method completes several-fold more simulations and holds its error essentially flat (Fig.~\ref{fig:hetero-quality}). Removing the barrier therefore preserves not just the simulation rate but the \emph{inference} delivered per unit wall-clock.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.48\linewidth]{figures/fig_hetero_idle.pdf}\hfill
 \includegraphics[width=0.48\linewidth]{figures/fig_hetero_throughput.pdf}
 \caption{Runtime heterogeneity: utilization-loss fraction by noise level (left) and throughput over time (right).}\label{fig:hetero}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_hetero_quality.pdf}
+\caption{Inferential efficiency under runtime heterogeneity (Gaussian-mean benchmark, analytic posterior, fixed $60$\,s budget, five replicates; bands are inter-quartile ranges). Left: posterior-mean error to the analytic posterior versus runtime-noise spread $\sigma$ --- the synchronous baseline degrades sharply while the asynchronous method stays flat. Right: simulations completed within the budget --- the synchronous baseline is starved by barrier idling as $\sigma$ grows, whereas the asynchronous method sustains several-fold higher completion.}\label{fig:hetero-quality}
 \end{figure}
 
 \paragraph{Strong scaling.} At fixed wall-clock budget the asynchronous method overtakes the synchronous baseline from moderate worker counts upward and is markedly more consistent across replicates (Fig.~\ref{fig:scaling}, Table~\ref{tab:scaling}). On the cheap Lotka--Volterra simulator the asynchronous throughput rises to a coordination-bound plateau (the per-arrival proposal/AMIS reconstruction and single-island coordination dominate once the simulator is near-instantaneous), so very large worker counts show diminishing returns --- consistent with the paper's thesis that the asynchronous advantage is largest for \emph{slow or heterogeneous} simulators rather than trivially fast ones. At a single worker the asynchronous method is slower than the baseline, as expected when there is no parallelism to amortize the per-arrival overhead.
