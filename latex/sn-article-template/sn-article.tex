@@ -279,13 +279,12 @@ Asynchronous (ours) & 0.46 & 0.84 & 0.86 & 0.94 \\
 \end{figure}
 
 \subsection{Realistic simulator: Cellular Potts (RQ3)}\label{sec:results-cpm}
-The Cellular Potts benchmark runs end-to-end with the real \texttt{cellsInSilico} simulator at scale. The asynchronous method completes more simulation attempts than the synchronous baseline at matched budget (Fig.~\ref{fig:cpm-scaling}), and recovers a sensible posterior for the cell-motility and division-rate parameters (Fig.~\ref{fig:posterior-recovery}, right). This is the headline HPC use case: a realistic, heterogeneous-runtime simulator where the barrier cost is substantial.
+The Cellular Potts benchmark runs end-to-end with the real \texttt{cellsInSilico} simulator at 48 workers --- a realistic, expensive, heterogeneous-runtime workload. On it the asynchronous method produces a posterior comparable to the synchronous baseline (Fig.~\ref{fig:cpm-posterior}): the cell-motility parameter concentrates near its reference value, while the division rate is only weakly identified by the chosen summaries for \emph{all} methods (the baseline included), both improving on rejection ABC. This establishes that the method is practical on a realistic simulator; its throughput and barrier-removal advantages are quantified in the straggler, heterogeneity, and scaling studies above (\S\ref{sec:results-hpc}).
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=0.48\linewidth]{figures/fig_cpm_scaling_throughput.pdf}\hfill
-\includegraphics[width=0.48\linewidth]{figures/fig_cpm_scaling_quality.pdf}
-\caption{Cellular Potts scaling: throughput versus workers (left) and posterior quality versus budget by worker count (right).}\label{fig:cpm-scaling}
+\includegraphics[width=0.62\linewidth]{figures/fig_cpm_corner.pdf}
+\caption{Cellular Potts posterior (division rate, motility) on the real \texttt{cellsInSilico} simulator: the asynchronous method (orange) tracks the synchronous baseline (blue), with motility concentrating near its reference value (dashed) while the division rate is only weakly identified by the summaries for all methods. Both improve on rejection ABC (green).}\label{fig:cpm-posterior}
 \end{figure}
 
 \subsection{Ablation}\label{sec:results-ablation}
@@ -308,7 +307,7 @@ Across the full hyperparameter grid the asynchronous method's posterior quality 
 \end{figure}
 
 \section{Discussion}\label{sec:discussion}
-The results support the three claims. Asynchronous execution helps most where it should: under a persistent straggler and under runtime heterogeneity, the generation barrier is the dominant cost and removing it preserves throughput that the synchronous baseline loses. For homogeneous, near-instantaneous simulators on small worker counts the asynchronous overhead does not pay off --- the single-worker and very-large-worker Lotka--Volterra points make this honest boundary explicit. The realistic Cellular Potts workload, where simulations are expensive and heterogeneous, is exactly the regime the method targets.
+The results support the three claims. Asynchronous execution helps most where it should: under a persistent straggler and under runtime heterogeneity, the generation barrier is the dominant cost and removing it preserves throughput that the synchronous baseline loses. For homogeneous, near-instantaneous simulators on small worker counts the asynchronous overhead does not pay off --- the single-worker and very-large-worker Lotka--Volterra points make this honest boundary explicit. The realistic Cellular Potts workload demonstrates that the method is practical on an expensive, heterogeneous-runtime simulator, producing a posterior comparable to the synchronous baseline.
 
 \section{Limitations}\label{sec:limitations}
 We are explicit about what \S\ref{sec:theory} does and does not give. (i) AMIS estimators are consistent but not finite-sample unbiased, since proposals depend on past particles; a local-decision rule in the spirit of \cite{paige2014cascade} that recovers finite-sample unbiasedness for ABC is future work. (ii) The bandwidth floor $\epsilon_\infty>0$ in Condition~\ref{cond:c3} means the theorem characterizes the smooth-ABC posterior at the limit bandwidth, not the exact posterior at $\epsilon=0$. (iii) Condition~\ref{cond:c1} is assumed for the specific archive-evolution rule, not proved. (iv) Keeping every accepted particle (unlike pyABC's discard-latecomers rule) can over-represent fast-simulator parameter regions; we measure this empirically but do not correct for it algorithmically. (v) The snapshot buffer is fixed at $S=20$; adaptive sizing is a natural extension. Separately, on a methodological note for reproducibility: the post-run retroactive estimator builds its cumulative-mixture denominator over the full evaluated history; for a near-instantaneous simulator that history reaches many millions of particles, so the denominator is evaluated in bounded memory chunks --- a fix that does not change the estimate.
