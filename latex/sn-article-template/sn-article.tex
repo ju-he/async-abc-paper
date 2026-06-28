@@ -32,7 +32,7 @@
 
 \affil*[1]{\orgdiv{Department}, \orgname{Organization}, \orgaddress{\city{City}, \country{Country}}}
 
-\abstract{Sequential approximate Bayesian computation (ABC-SMC/PMC) is the standard tool for likelihood-free inference, but its generation-staged structure imposes synchronization barriers that waste compute when simulator runtimes vary across parameters --- precisely the regime of large heterogeneous high-performance computing (HPC) workloads. We introduce a \emph{generation-free, single-arrival-driven} ABC algorithm that combines smooth-kernel ABC with a streaming limit of Adaptive Multiple Importance Sampling (AMIS): the proposal mixture and importance weights update after \emph{every} evaluated particle rather than at population boundaries. The algorithm is \emph{stateless} --- a pure function of the evaluated history --- which makes it crash-recoverable and a natural fit for the barrier-free island model of the Propulate optimization engine. We state consistency and a central limit theorem for the estimator as a corollary of the AMIS theory under the Wilkinson smooth-likelihood framework, with explicit conditions. Empirically, against a matched-kernel pyABC baseline that isolates the synchronization regime as the sole methodological difference, the method (i) is well calibrated --- simulation-based calibration on a model with analytic posterior yields empirical coverage close to nominal --- and (ii) delivers substantial HPC benefits: under a persistent straggler the synchronous baseline's throughput collapses by roughly $3\times$ while the asynchronous method holds essentially flat, and at fixed wall-clock budget the asynchronous method sustains several-fold higher simulation throughput at moderate-to-large worker counts. We demonstrate the approach on a realistic Cellular Potts tissue-simulation workload. This manuscript is a results-complete first draft.}
+\abstract{Sequential approximate Bayesian computation (ABC-SMC/PMC) is the standard tool for likelihood-free inference, but its generation-staged structure imposes synchronization barriers that waste compute when simulator runtimes vary across parameters --- precisely the regime of large heterogeneous high-performance computing (HPC) workloads. We introduce a \emph{generation-free, single-arrival-driven} ABC algorithm that combines smooth-kernel ABC with a streaming limit of Adaptive Multiple Importance Sampling (AMIS): the proposal mixture and importance weights update after \emph{every} evaluated particle rather than at population boundaries. The algorithm is \emph{stateless} --- a pure function of the evaluated history --- which makes it crash-recoverable and a natural fit for the barrier-free island model of the Propulate optimization engine. We state consistency and a central limit theorem for the estimator as a corollary of the AMIS theory under the Wilkinson smooth-likelihood framework, with explicit conditions. Empirically, against a synchronous pyABC baseline matched on the ABC kernel and bandwidth schedule --- so the systems comparison turns on synchronization rather than the acceptance rule --- the method (i) is well calibrated --- simulation-based calibration on a model with analytic posterior yields empirical coverage close to nominal --- and (ii) delivers substantial HPC benefits: under a persistent straggler the synchronous baseline's throughput collapses by roughly $3\times$ while the asynchronous method holds essentially flat, and at fixed wall-clock budget the asynchronous method sustains several-fold higher simulation throughput at moderate-to-large worker counts. We demonstrate the approach on a realistic Cellular Potts tissue-simulation workload.}
 
 \keywords{approximate Bayesian computation, sequential Monte Carlo, adaptive multiple importance sampling, asynchronous algorithms, high-performance computing, likelihood-free inference}
 
@@ -48,7 +48,7 @@ This paper introduces a generation-free alternative designed for exactly that re
 \item A \textbf{history-reconstructed particle archive} that makes the algorithm \emph{stateless} (a pure function of the evaluated history) and therefore crash-recoverable.
 \item \textbf{Integration into Propulate}, exploiting its barrier-free island model for true asynchronous execution on HPC.
 \item \textbf{Consistency and a central limit theorem} for the estimator as a corollary of the AMIS theorem under the Wilkinson smooth-likelihood framework, with explicit conditions on the proposal sequence and bandwidth schedule.
-\item An \textbf{apples-to-apples empirical evaluation against pyABC} \cite{klinger2018pyabc,schalte2022pyabc} in which pyABC's acceptor is replaced by a probabilistic-rejection acceptor using the \emph{same} ABC kernel, so that the synchronization regime is the sole methodological difference between the two methods.
+\item An \textbf{apples-to-apples empirical evaluation against pyABC} \cite{klinger2018pyabc,schalte2022pyabc} in which pyABC's acceptor is replaced by a probabilistic-rejection acceptor using the \emph{same} ABC kernel and bandwidth schedule. This matched-kernel baseline lets us attribute the throughput and utilization gains to barrier removal, while we separately verify --- via SBC and matched-budget posterior error --- that the streaming estimator's inference quality is non-inferior.
 \end{enumerate}
 
 The remainder of the paper summarizes the relevant ABC and importance-sampling background (\S\ref{sec:background}), develops the method (\S\ref{sec:method}) and its theory (\S\ref{sec:theory}), describes the implementation (\S\ref{sec:implementation}), lays out the experimental program (\S\ref{sec:experiments}), and reports results (\S\ref{sec:results}).
@@ -84,13 +84,13 @@ Off-barrier SMC has been studied for state-space models --- asynchronous anytime
 \subsection{Design constraints and history-based state}\label{sec:method-constraints}
 The implementation target is Propulate, whose propagator exposes a single stateless call \texttt{\_\_call\_\_(inds) -> Individual}: the propagator receives the entire evaluated history and must emit the next candidate without persistent archive state or assimilation callbacks. This forces a history-based reconstruction of all algorithmic state. Define the evaluated history at call $n$ as
 \begin{equation}
-\mathcal{H}_n = \bigl\{(\theta_i,\rho_i,\tau_i,w_i)\bigr\}_{i=1}^{n},
+\mathcal{H}_n = \bigl\{(\theta_i,\rho_i,\epsilon_i,\tau_i,w_i)\bigr\}_{i=1}^{n},
 \label{eq:history}
 \end{equation}
-where $\theta_i$ is the parameter, $\rho_i$ the discrepancy, $\tau_i$ the proposal-time index, and $w_i$ the stored core importance weight $\pi/q_{\tau_i}$.
+where $\theta_i$ is the parameter, $\rho_i$ the discrepancy, $\epsilon_i$ the bandwidth active when $\theta_i$ was proposed, $\tau_i$ the proposal-time index, and $w_i$ the stored core importance weight $\pi/q_{\tau_i}$.
 
 \subsection{Tolerance reconstruction and monotonicity}\label{sec:method-tolerance}
-Each proposed individual stores the bandwidth active at proposal time. The effective bandwidth reconstructed from history is the running minimum $\epsilon_{\text{hist}} = \min_{i:\tau_i\neq\varnothing}\tau_i$ (falling back to the initial tolerance on an empty history). The scheduler proposes $\epsilon_{\text{sched}}$, and the bandwidth used is $\epsilon_n = \min(\epsilon_{\text{hist}}, \epsilon_{\text{sched}})$, giving a monotone-decrease guarantee with no mutable propagator state.
+Each proposed individual stores the bandwidth active at proposal time. The effective bandwidth reconstructed from history is the running minimum of these stored bandwidths, $\epsilon_{\text{hist}} = \min_{i}\epsilon_i$ (falling back to the initial tolerance on an empty history). The scheduler proposes $\epsilon_{\text{sched}}$, and the bandwidth used is $\epsilon_n = \min(\epsilon_{\text{hist}}, \epsilon_{\text{sched}})$, giving a monotone-decrease guarantee with no mutable propagator state.
 
 \subsection{Archive and smooth-kernel proposal}\label{sec:method-proposal}
 The reconstructed archive is the top-$k$ history members by lowest discrepancy, $A_n = \mathrm{Top}_k(\{\theta_i\},\,\text{order by }\rho_i)$. The proposal mixture uses kernel-weighted archive members,
@@ -166,7 +166,7 @@ w_i^{\mathrm{bal}}(n) = \frac{\pi(\theta_i)\,K_{\epsilon_n}(\rho_i)}{\bar q_n(\t
 \emph{Proof sketch.} The numerator and denominator are sample averages of $w_i^{\mathrm{bal}}(n)f(\theta_i)$ over $\theta_i\sim q_{\tau_i}$. Conditions \ref{cond:c1}--\ref{cond:c2} bound the conditional weight variance; \ref{cond:c3} makes $\pi_{\epsilon_n}\Rightarrow\pi_{\epsilon_\infty}$; \ref{cond:c4} makes the AMIS denominator converge to the true cumulative mixture. The result follows from \cite[Thm.~1--2]{cornuet2012amis} applied to the streaming limit with the smooth ABC likelihood as target \cite{wilkinson2013}. The CLT yields confidence intervals for posterior expectations, which generational ABC-PMC does not provide without extra machinery. Limitations are discussed in \S\ref{sec:limitations}.
 
 \section{Implementation in Propulate}\label{sec:implementation}
-The algorithm is a stateless Propulate propagator: tolerance schedulers are pure functions of history; the archive is the top-$k$ accepted particles under the reconstructed bandwidth; the smooth-kernel mixture weights are formed in log-space for numerical stability. The reported posterior is the retroactive AMIS estimator \eqref{eq:amis-weight}, computed off the timed inference path from the saved history (a pure function of it, hence identical whether computed online or after a crash/restart); the streaming proposal-time weight is retained separately for the effective-sample-size diagnostic. For an apples-to-apples comparison, pyABC's \texttt{UniformAcceptor} is replaced by a probabilistic-rejection acceptor using the same $K_\epsilon(\rho)$ and bandwidth schedule as the asynchronous side, so the synchronization regime is the only methodological difference between the two methods. Distributed execution uses Propulate's barrier-free island model over MPI; for wall-time-limited HPC experiments the synchronous baseline uses fixed populations/generations, which yields more interpretable comparisons than contrasting methods that stop under different $\epsilon$ rules.
+The algorithm is a stateless Propulate propagator: tolerance schedulers are pure functions of history; the archive is the top-$k$ history members by smallest discrepancy under the reconstructed bandwidth; the smooth-kernel mixture weights are formed in log-space for numerical stability. The reported posterior is the retroactive AMIS estimator \eqref{eq:amis-weight}, computed off the timed inference path from the saved history (a pure function of it, hence identical whether computed online or after a crash/restart); the streaming proposal-time weight is retained separately for the effective-sample-size diagnostic. For an apples-to-apples comparison, pyABC's \texttt{UniformAcceptor} is replaced by a probabilistic-rejection acceptor using the same $K_\epsilon(\rho)$ and bandwidth schedule as the asynchronous side. The acceptor and kernel are thus matched across methods; the synchronous baseline differs in its generation-staged \emph{execution} (the systems variable under test) and, on the inference side, in retaining classical population weighting rather than the streaming AMIS estimator, whose quality we check separately (\S\ref{sec:results-validity}). Distributed execution uses Propulate's barrier-free island model over MPI; for wall-time-limited HPC experiments the synchronous baseline uses fixed populations/generations, which yields more interpretable comparisons than contrasting methods that stop under different $\epsilon$ rules.
 
 \section{Experimental Design}\label{sec:experiments}
 
@@ -195,9 +195,51 @@ Cellular Potts & realistic HPC workload & throughput, utilization, scaling, post
 Three dedicated studies probe the asynchrony claim: (i) \emph{stochastic runtime heterogeneity} (a log-normal post-evaluation delay with sweep over spread $\sigma$); (ii) \emph{straggler tolerance} (one worker permanently slowed by $1\times,5\times,10\times,20\times$); and (iii) \emph{strong scaling} at fixed wall-clock budget over worker counts $1,4,16,48,128,256$ and archive sizes $k\in\{100,1000\}$, with five replicates each. A hyperparameter \emph{sensitivity} grid (archive size, perturbation scale, tolerance scheduler, initial tolerance) and an \emph{ablation} (hard vs.\ smooth kernel; with vs.\ without AMIS reweighting) complete the suite.
 
 \section{Results}\label{sec:results}
-Unless noted, results are five-replicate medians on JUWELS; figures show the matched-kernel synchronous baseline (\texttt{abc\_smc\_baseline}) against the proposed asynchronous method (\texttt{async\_propulate\_abc}).
+Unless noted, results are five-replicate medians on JUWELS; figures show the matched-kernel synchronous baseline (\texttt{abc\_smc\_baseline}) against the proposed asynchronous method (\texttt{async\_propulate\_abc}). We lead with the computational evidence (RQ2) --- the paper's central claim --- then verify that inference quality is not sacrificed (RQ1), and close with the realistic workload (RQ3).
+
+\subsection{Computational advantage (RQ2)}\label{sec:results-hpc}
+\paragraph{Straggler robustness.} This is the cleanest demonstration of the barrier-free advantage (Fig.~\ref{fig:straggler}). As a single worker is slowed from $1\times$ to $5\times$, the synchronous baseline's throughput collapses by roughly $3\times$ (median $\approx 965 \to 311$ simulations/s) because each generation blocks on the straggler, whereas the asynchronous method routes work to available workers and holds essentially flat ($\approx 538 \to 520$ simulations/s), at comparable posterior quality.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.6\linewidth]{figures/fig_straggler_throughput.pdf}
+\caption{Throughput versus straggler slowdown factor. The synchronous baseline degrades sharply at the generation barrier; the asynchronous method is robust.}\label{fig:straggler}
+\end{figure}
+
+\paragraph{Runtime heterogeneity.} Under stochastic log-normal runtime noise the asynchronous method sustains higher utilization (lower idle fraction) than the synchronous baseline, which idles at generation barriers (Fig.~\ref{fig:hetero}).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\linewidth]{figures/fig_hetero_idle.pdf}\hfill
+\includegraphics[width=0.48\linewidth]{figures/fig_hetero_throughput.pdf}
+\caption{Runtime heterogeneity: utilization-loss fraction by noise level (left) and throughput over time (right).}\label{fig:hetero}
+\end{figure}
+
+\paragraph{Strong scaling.} At fixed wall-clock budget the asynchronous method overtakes the synchronous baseline from moderate worker counts upward and is markedly more consistent across replicates (Fig.~\ref{fig:scaling}, Table~\ref{tab:scaling}). On the cheap Lotka--Volterra simulator the asynchronous throughput rises to a coordination-bound plateau (the per-arrival proposal/AMIS reconstruction and single-island coordination dominate once the simulator is near-instantaneous), so very large worker counts show diminishing returns --- consistent with the paper's thesis that the asynchronous advantage is largest for \emph{slow or heterogeneous} simulators rather than trivially fast ones. At a single worker the asynchronous method is slower than the baseline, as expected when there is no parallelism to amortize the per-arrival overhead.
+
+\begin{table}[t]
+\caption{Strong scaling on Lotka--Volterra: median simulation throughput (sims/s) at a 900\,s budget, $k=100$. Asynchronous (ours) vs.\ matched synchronous baseline.}\label{tab:scaling}
+\centering
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+Workers & 1 & 4 & 16 & 48 & 128 & 256 \\
+\midrule
+Synchronous & 148 & 86 & 111 & 146 & 121 & 121 \\
+Asynchronous & 16 & 115 & 295 & 595 & 525 & 416 \\
+\botrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.48\linewidth]{figures/fig_scaling_throughput.pdf}\hfill
+\includegraphics[width=0.48\linewidth]{figures/fig_scaling_attempts.pdf}
+\caption{Strong scaling on Lotka--Volterra: throughput versus workers (left) and simulation attempts at a fixed 900\,s budget (right), all methods and archive sizes.}\label{fig:scaling}
+\end{figure}
 
 \subsection{Posterior validity (RQ1)}\label{sec:results-validity}
+Having established the systems advantage, we verify it does not come at the cost of inference quality: across calibration and matched-budget posterior recovery, the streaming estimator is statistically non-inferior to the matched synchronous baseline.
+
 \paragraph{Calibration.} Table~\ref{tab:sbc} reports SBC empirical coverage on the Gaussian-mean model (100 trials). The asynchronous method is well calibrated --- coverage tracks the nominal level closely and is, if anything, better than the matched synchronous baseline, which under-covers at the higher levels. Figure~\ref{fig:sbc} shows the corresponding coverage curve and rank histogram.
 
 \begin{table}[t]
@@ -233,47 +275,7 @@ Asynchronous (ours) & 0.46 & 0.84 & 0.86 & 0.94 \\
 \begin{figure}[t]
 \centering
 \includegraphics[width=0.6\linewidth]{figures/fig_gaussian_recovery.pdf}
-\caption{Gaussian-mean posterior recovery: Wasserstein distance to the analytic posterior versus wall-clock time. The asynchronous method (archive) tracks the synchronous baseline (generation) closely, both converging far below the rejection-ABC reference.}\label{fig:gaussian-recovery}
-\end{figure}
-
-\subsection{Computational advantage (RQ2)}\label{sec:results-hpc}
-\paragraph{Straggler robustness.} This is the cleanest demonstration of the barrier-free advantage (Fig.~\ref{fig:straggler}). As a single worker is slowed from $1\times$ to $5\times$, the synchronous baseline's throughput collapses by roughly $3\times$ (median $\approx 965 \to 311$ simulations/s) because each generation blocks on the straggler, whereas the asynchronous method routes work to available workers and holds essentially flat ($\approx 538 \to 520$ simulations/s), at comparable posterior quality.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.6\linewidth]{figures/fig_straggler_throughput.pdf}
-\caption{Throughput versus straggler slowdown factor. The synchronous baseline degrades sharply at the generation barrier; the asynchronous method is robust.}\label{fig:straggler}
-\end{figure}
-
-\paragraph{Runtime heterogeneity.} Under stochastic log-normal runtime noise the asynchronous method sustains higher utilization (lower idle fraction) than the synchronous baseline, which idles at generation barriers (Fig.~\ref{fig:hetero}).
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/fig_hetero_idle.pdf}\hfill
-\includegraphics[width=0.48\linewidth]{figures/fig_hetero_throughput.pdf}
-\caption{Runtime heterogeneity: utilization-loss fraction by noise level (left) and throughput over time (right).}\label{fig:hetero}
-\end{figure}
-
-\paragraph{Strong scaling.} At fixed wall-clock budget the asynchronous method overtakes the synchronous baseline from moderate worker counts upward and is markedly more consistent across replicates (Fig.~\ref{fig:scaling}, Table~\ref{tab:scaling}). On the cheap Lotka--Volterra simulator the asynchronous throughput rises to a coordination-bound plateau (the per-arrival proposal/AMIS reconstruction and single-island coordination dominate once the simulator is near-instantaneous), so very large worker counts show diminishing returns --- consistent with the paper's thesis that the asynchronous advantage is largest for \emph{slow or heterogeneous} simulators rather than trivially fast ones. At a single worker the asynchronous method is slower than the baseline, as expected when there is no parallelism to amortize the per-arrival overhead.
-
-\begin{table}[t]
-\caption{Strong scaling on Lotka--Volterra: median simulation throughput (sims/s) at a 900\,s budget, $k=100$. Asynchronous (ours) vs.\ matched synchronous baseline.}\label{tab:scaling}
-\centering
-\begin{tabular}{@{}lcccccc@{}}
-\toprule
-Workers & 1 & 4 & 16 & 48 & 128 \\
-\midrule
-Synchronous & 148 & 86 & 111 & 145 & 121 \\
-Asynchronous & 16 & 112 & 295 & 595 & 540 \\
-\botrule
-\end{tabular}
-\end{table}
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=0.48\linewidth]{figures/fig_scaling_throughput.pdf}\hfill
-\includegraphics[width=0.48\linewidth]{figures/fig_scaling_attempts.pdf}
-\caption{Strong scaling on Lotka--Volterra: throughput versus workers (left) and simulation attempts at a fixed 900\,s budget (right), all methods and archive sizes.}\label{fig:scaling}
+\caption{Gaussian-mean posterior recovery: Wasserstein distance to the analytic posterior versus wall-clock time, with replicate confidence bands. The asynchronous method (archive) tracks the matched synchronous baseline (generation) throughout the budget; the inset shows both far below the rejection-ABC reference ($W\approx2.4$).}\label{fig:gaussian-recovery}
 \end{figure}
 
 \subsection{Realistic simulator: Cellular Potts (RQ3)}\label{sec:results-cpm}
@@ -312,14 +314,14 @@ The results support the three claims. Asynchronous execution helps most where it
 We are explicit about what \S\ref{sec:theory} does and does not give. (i) AMIS estimators are consistent but not finite-sample unbiased, since proposals depend on past particles; a local-decision rule in the spirit of \cite{paige2014cascade} that recovers finite-sample unbiasedness for ABC is future work. (ii) The bandwidth floor $\epsilon_\infty>0$ in Condition~\ref{cond:c3} means the theorem characterizes the smooth-ABC posterior at the limit bandwidth, not the exact posterior at $\epsilon=0$. (iii) Condition~\ref{cond:c1} is assumed for the specific archive-evolution rule, not proved. (iv) Keeping every accepted particle (unlike pyABC's discard-latecomers rule) can over-represent fast-simulator parameter regions; we measure this empirically but do not correct for it algorithmically. (v) The snapshot buffer is fixed at $S=20$; adaptive sizing is a natural extension. Separately, on a methodological note for reproducibility: the post-run retroactive estimator builds its cumulative-mixture denominator over the full evaluated history; for a near-instantaneous simulator that history reaches many millions of particles, so the denominator is evaluated in bounded memory chunks --- a fix that does not change the estimate.
 
 \section{Conclusion}\label{sec:conclusion}
-We presented a generation-free, single-arrival-driven ABC algorithm that combines smooth-kernel ABC with streaming AMIS reweighting, is stateless and crash-recoverable, integrates into Propulate's barrier-free island model, and carries consistency and CLT guarantees inherited from AMIS under explicit conditions. Against a matched-kernel pyABC baseline that isolates synchronization as the sole difference, the method is well calibrated and delivers substantial HPC benefits on heterogeneous and straggler-prone workloads, including a realistic Cellular Potts simulation. Asynchronous, generation-free ABC is a promising approach for large-scale simulator-based inference on modern HPC systems.
+We presented a generation-free, single-arrival-driven ABC algorithm that combines smooth-kernel ABC with streaming AMIS reweighting, is stateless and crash-recoverable, integrates into Propulate's barrier-free island model, and carries consistency and CLT guarantees inherited from AMIS under explicit conditions. Against a synchronous pyABC baseline matched on the ABC kernel and bandwidth schedule, the method is statistically non-inferior in posterior quality while delivering substantial HPC benefits on heterogeneous and straggler-prone workloads, including a realistic Cellular Potts simulation. Asynchronous, generation-free ABC is a promising approach for large-scale simulator-based inference on modern HPC systems.
 
 \bmhead{Acknowledgements}
-\todo{Add funding, compute allocation, and collaboration acknowledgements.}
+\emph{To be added in the final version.}
 
 \section*{Declarations}
 \textbf{Funding} \\
-\todo{Add funding statement.}
+\emph{To be added in the final version.}
 
 \textbf{Conflict of interest/Competing interests} \\
 The authors declare no competing interests.
@@ -331,16 +333,16 @@ Not applicable.
 Not applicable.
 
 \textbf{Data availability} \\
-\todo{State where raw and processed experiment outputs will be archived.}
+The raw and processed experiment outputs will be deposited in a public repository upon publication.
 
 \textbf{Materials availability} \\
 Not applicable.
 
 \textbf{Code availability} \\
-\todo{Point to the repository and experiment reproduction entry point.}
+The implementation and experiment-reproduction entry points will be made available in a public repository upon publication.
 
 \textbf{Author contribution} \\
-\todo{Add author contribution statement.}
+\emph{To be added in the final version.}
 
 \begin{appendices}
 
