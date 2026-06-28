@@ -299,12 +299,12 @@ Removing the smooth kernel or the AMIS cumulative-mixture reweighting degrades t
 \end{figure}
 
 \subsection{Sensitivity}\label{sec:results-sensitivity}
-Across the full hyperparameter grid the asynchronous method converges without any region of catastrophic failure (Fig.~\ref{fig:sensitivity}). The final tolerance reached varies smoothly and is driven primarily by the archive size $k$; the tolerance scheduler (acceptance-rate, quantile, geometric-decay) has little effect, and the perturbation scale and initial-tolerance multiplier produce only modest variation. In practice this means the method does not require delicate hyperparameter tuning to reach the quality reported above.
+Across the full hyperparameter grid the asynchronous method's posterior quality is stable, with no region of catastrophic failure (Fig.~\ref{fig:sensitivity}). The Wasserstein distance to the true parameter stays within $\approx0.08$--$0.17$; the tolerance scheduler (acceptance-rate, quantile, geometric-decay) has no discernible effect, the archive size $k$ matters only marginally, and quality degrades only mildly toward the largest perturbation scales and initial tolerances. In practice the method does not require delicate hyperparameter tuning to reach the quality reported above.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{figures/fig_sensitivity_heatmap.pdf}
-\caption{Hyperparameter sensitivity of the asynchronous method: mean final tolerance over archive size $k$ (rows within each panel) and perturbation scale (columns within each panel), faceted by initial-tolerance multiplier (panel rows) and tolerance scheduler (panel columns), averaged over replicates. Convergence is robust across the grid --- driven mainly by $k$ and largely insensitive to the scheduler choice.}\label{fig:sensitivity}
+\caption{Hyperparameter sensitivity of the asynchronous method, measured by posterior quality (Wasserstein distance to the true $\mu$, lower is better; averaged over replicates and smoothing kernel). Each panel sweeps perturbation scale ($x$) against the initial-tolerance multiplier ($y$); panels are faceted by archive size $k$ (rows) and tolerance scheduler (columns). Quality is stable across the grid (Wasserstein $\approx0.08$--$0.17$) with no failure region; the scheduler has no discernible effect, while larger perturbation scales degrade quality only mildly.}\label{fig:sensitivity}
 \end{figure}
 
 \section{Discussion}\label{sec:discussion}
