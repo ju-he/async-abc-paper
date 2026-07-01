@@ -30,7 +30,7 @@
     "trial_offset": 0
   },
   "sbc": {
-    "n_trials": 100,
+    "n_trials": 1000,
     "coverage_levels": [
       0.5,
       0.8,

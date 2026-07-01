@@ -85,6 +85,62 @@ def _make_heterogeneous_simulate(simulate_fn, mu: float, sigma: float, seed: int
     return wrapped
 
 
+def _make_param_coupled_simulate(simulate_fn, base_delay_s: float, coupling: float,
+                                 param_name: str, center: float, half_range: float,
+                                 delay_cap_s: float = 2.0, test_mode: bool = False):
+    """Wrap simulate_fn with a deterministic, *parameter-dependent* wall-clock sleep.
+
+        delay = min(base_delay_s * exp(coupling * (theta - center) / half_range), cap)
+
+    so one region of parameter space is systematically slow and the opposite region
+    fast. Unlike the random lognormal delay, this couples runtime to the parameter
+    value -- the regime that makes the every-particle "keep all accepted" rule
+    over-represent the fast-simulator region (Limitation iv). ``coupling == 0``
+    reduces to a uniform base delay and serves as the unbiased reference. The cap
+    keeps a far-tail prior draw (during the uniform bootstrap) from sleeping
+    unboundedly while preserving the fast/slow asymmetry across the posterior.
+    """
+    def wrapped(params, seed):
+        theta = float(params[param_name])
+        z = (theta - center) / half_range if half_range > 0 else 0.0
+        delay = min(float(base_delay_s) * float(np.exp(coupling * z)), float(delay_cap_s))
+        result = simulate_fn(params, seed=seed)
+        if not test_mode:
+            time.sleep(delay)
+        return result
+
+    return wrapped
+
+
+def _make_delay_simulate(simulate_fn, *, mu, sigma, seed, test_mode, het, bm):
+    """Select the wall-clock delay wrapper from ``het['delay_mode']``.
+
+    Default ``'lognormal'`` preserves the runtime-heterogeneity study; the opt-in
+    ``'param_coupled'`` mode reinterprets the swept level (``sigma``) as the coupling
+    strength of a parameter-dependent delay (the every-particle bias study, WS4).
+    """
+    mode = het.get("delay_mode", "lognormal")
+    if mode == "param_coupled":
+        param_name = het.get("coupling_param") or next(iter(bm.limits))
+        lo, hi = bm.limits[param_name]
+        center = float(het.get("coupling_center", 0.5 * (lo + hi)))
+        # Normalise the delay gradient by coupling_scale (default: prior half-width).
+        # For a well-concentrated posterior this should be set near the posterior
+        # scale so runtime varies across the region the sampler actually explores.
+        half_range = float(het.get("coupling_scale", 0.5 * (hi - lo)))
+        base_delay_s = float(het.get("base_delay_s", 0.02))
+        delay_cap_s = float(het.get("delay_cap_s", 2.0))
+        return _make_param_coupled_simulate(
+            simulate_fn, base_delay_s, float(sigma), param_name, center, half_range,
+            delay_cap_s=delay_cap_s, test_mode=test_mode,
+        )
+    if mode != "lognormal":
+        raise ValueError(f"Unknown heterogeneity delay_mode: {mode!r}")
+    return _make_heterogeneous_simulate(
+        simulate_fn, mu, sigma, seed=seed, test_mode=test_mode,
+    )
+
+
 def _compute_speedup_summary(records):
     """Return per-(sigma, base_method) median completion time and speedup vs abc_smc_baseline."""
     import numpy as np
@@ -248,9 +304,9 @@ def main(argv: list[str] | None = None) -> None:
                 sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
                 for replicate_idx in unit_indices:
                     replicate_delay_seed = stable_seed(base_seed, replicate_idx, sigma)
-                    bm.simulate = _make_heterogeneous_simulate(
-                        original_simulate, mu, sigma,
-                        seed=replicate_delay_seed, test_mode=test_mode,
+                    bm.simulate = _make_delay_simulate(
+                        original_simulate, mu=mu, sigma=sigma,
+                        seed=replicate_delay_seed, test_mode=test_mode, het=het, bm=bm,
                     )
                     all_records.extend(
                         run_experiment(
@@ -339,9 +395,9 @@ def main(argv: list[str] | None = None) -> None:
         sigma_cfg = {**cfg, "inference": {**cfg["inference"], "_checkpoint_tag": f"sigma{sigma}"}}
         for replicate_idx in range(n_replicates):
             replicate_delay_seed = stable_seed(base_seed, replicate_idx, sigma)
-            bm.simulate = _make_heterogeneous_simulate(
-                original_simulate, mu, sigma,
-                seed=replicate_delay_seed, test_mode=test_mode,
+            bm.simulate = _make_delay_simulate(
+                original_simulate, mu=mu, sigma=sigma,
+                seed=replicate_delay_seed, test_mode=test_mode, het=het, bm=bm,
             )
             records = run_experiment(
                 sigma_cfg,

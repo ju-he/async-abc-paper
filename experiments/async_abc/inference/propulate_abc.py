@@ -19,6 +19,8 @@ population. Individuals whose evaluation completes after the deadline are
 filtered out by ``run_propulate_abc`` so the produced records have a hard
 end-of-budget cap matching the pyABC and rejection-ABC paths.
 """
+import atexit
+import csv
 import hashlib
 import json
 import logging
@@ -426,6 +428,62 @@ def _propulate_with_wall_time_limit(
     propulate_comm.barrier()
 
 
+class _PhaseTimingPropagator:
+    """Opt-in (env ``ASYNC_ABC_PHASE_TIMING=1``) timing wrapper around a propagator.
+
+    Accumulates the wall-clock spent inside the propagator's ``__call__`` (the
+    per-arrival proposal reconstruction + AMIS-snapshot importance weight) per MPI
+    rank and, at process exit, writes one row ``{rank, n_calls, proposal_s, wall_s}``.
+    Combined with the per-eval simulator time already in ``raw_results``, this lets the
+    strong-scaling decomposition attribute wall-clock to simulator vs proposal vs
+    coordination/idle (``comm/idle = wall - simulator - proposal``). Transparent to
+    Propulate: it forwards ``set_worker_context``/``extract_posterior`` and delegates
+    every other attribute to the wrapped propagator; only ``__call__`` is timed.
+    """
+
+    def __init__(self, inner, *, data_dir, tag, replicate):
+        self._inner = inner
+        self.total_proposal_s = 0.0
+        self.n_calls = 0
+        self._rank = -1
+        self._t0 = time.perf_counter()
+        self._data_dir = data_dir
+        self._tag = tag or "untagged"
+        self._replicate = replicate
+        atexit.register(self._flush)
+
+    def set_worker_context(self, rank, size, *args, **kwargs):
+        self._rank = int(rank)
+        return self._inner.set_worker_context(rank, size, *args, **kwargs)
+
+    def extract_posterior(self, *args, **kwargs):
+        return self._inner.extract_posterior(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        _t = time.perf_counter()
+        out = self._inner(*args, **kwargs)
+        self.total_proposal_s += time.perf_counter() - _t
+        self.n_calls += 1
+        return out
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def _flush(self):
+        if self.n_calls == 0:
+            return
+        wall = time.perf_counter() - self._t0
+        path = os.path.join(
+            str(self._data_dir),
+            f"phase_timing_{self._tag}_rep{self._replicate}_rank{self._rank}.csv",
+        )
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["tag", "replicate", "rank", "n_calls", "proposal_s", "wall_s"])
+            w.writerow([self._tag, self._replicate, self._rank, self.n_calls,
+                        round(self.total_proposal_s, 5), round(wall, 5)])
+
+
 def run_propulate_abc(
     simulate_fn: Callable,
     limits: Dict,
@@ -556,6 +614,11 @@ def run_propulate_abc(
             # worker_sub_comm slot is left to its default and the drain loop
             # in _propulate_with_wall_time_limit no-ops when MPI is None.
             pass
+
+    if os.environ.get("ASYNC_ABC_PHASE_TIMING"):
+        propagator = _PhaseTimingPropagator(
+            propagator, data_dir=output_dir.data, tag=_tag, replicate=replicate,
+        )
 
     propulator = Propulator(
         loss_fn=loss_fn,
