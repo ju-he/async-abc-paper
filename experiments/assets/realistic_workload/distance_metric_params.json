@@ -35,8 +35,8 @@
       "explained_var": 0.90
     }
   },
-  "feature_space_model": "experiments/assets/cellular_potts/sims_feature_space_model.json",
-  "reference_data": "experiments/assets/cellular_potts/reference_data",
+  "feature_space_model": "experiments/assets/realistic_workload/sims_feature_space_model.json",
+  "reference_data": "experiments/assets/realistic_workload/reference_data",
   "lambda_dict": {},
   "standardization_factors": {},
   "sim_datahandler_kwargs": {

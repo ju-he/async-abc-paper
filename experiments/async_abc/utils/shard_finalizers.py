@@ -544,7 +544,7 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "gaussian_mean": finalize_benchmark_experiment,
     "gandk": finalize_benchmark_experiment,
     "lotka_volterra": finalize_benchmark_experiment,
-    "cellular_potts": finalize_benchmark_experiment,
+    "realistic_workload": finalize_benchmark_experiment,
     "sensitivity": finalize_sensitivity_experiment,
     "sensitivity_gandk": finalize_sensitivity_experiment,
     "ablation": finalize_ablation_experiment,

@@ -61,7 +61,7 @@ cover/
 
 # Django stuff:
 *.log
-# Allow CPM reference simulation output logs
+# Allow realistic-workload reference simulation output logs
 !experiments/data/**/cellevents.log
 local_settings.py
 db.sqlite3

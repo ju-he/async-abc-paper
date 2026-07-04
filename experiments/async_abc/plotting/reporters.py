@@ -4201,7 +4201,7 @@ def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str
 
     Emits a warning when the config contains ``true_*`` numeric keys that do not
     match any inferred parameter column.  This catches naming mismatches (e.g.
-    ``true_division_rate_normalized`` vs the inferred column ``division_rate``)
+    ``true_theta_2_normalized`` vs the inferred column ``theta_2``)
     that would otherwise cause quality-vs-time plots to be silently skipped.
     """
     inferred_names = set(_param_names(records))

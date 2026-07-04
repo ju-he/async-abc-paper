@@ -2,13 +2,13 @@
 from .gaussian_mean import GaussianMean
 from .gandk import GandK
 from .lotka_volterra import LotkaVolterra
-from .cellular_potts import CellularPotts
+from .realistic_workload import RealisticWorkload
 
 _REGISTRY = {
     "gaussian_mean": GaussianMean,
     "gandk": GandK,
     "lotka_volterra": LotkaVolterra,
-    "cellular_potts": CellularPotts,
+    "realistic_workload": RealisticWorkload,
 }
 
 

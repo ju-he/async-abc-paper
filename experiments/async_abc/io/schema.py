@@ -27,11 +27,11 @@ VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
 # rejection; "gaussian" and "epanechnikov" are smooth-kernel variants.
 VALID_KERNELS = {"hard", "gaussian", "epanechnikov"}
 
-VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
+VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "realistic_workload"}
 
-# Extra required benchmark keys when name == "cellular_potts"
-CPM_REQUIRED_BENCHMARK_KEYS = [
-    "nastja_config_template",
+# Extra required benchmark keys when name == "realistic_workload"
+REALISTIC_WORKLOAD_REQUIRED_BENCHMARK_KEYS = [
+    "sim_config_template",
     "config_builder_params",
     "distance_metric_params",
     "parameter_space",
@@ -44,12 +44,12 @@ class ValidationError(ValueError):
     """Raised when a config dict fails validation."""
 
 
-def _validate_cpm_benchmark(benchmark_cfg: dict) -> None:
-    """Raise ValidationError if a cellular_potts benchmark config is missing required keys."""
-    missing = [k for k in CPM_REQUIRED_BENCHMARK_KEYS if k not in benchmark_cfg]
+def _validate_realistic_workload_benchmark(benchmark_cfg: dict) -> None:
+    """Raise ValidationError if a realistic_workload benchmark config is missing required keys."""
+    missing = [k for k in REALISTIC_WORKLOAD_REQUIRED_BENCHMARK_KEYS if k not in benchmark_cfg]
     if missing:
         raise ValidationError(
-            f"Config['benchmark'] missing required key(s) for cellular_potts: {missing}"
+            f"Config['benchmark'] missing required key(s) for realistic_workload: {missing}"
         )
 
 

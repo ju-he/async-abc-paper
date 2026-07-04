@@ -606,7 +606,7 @@ _COMPLETED_REPLICATES_REGISTRY: Dict[str, Callable[[OutputDir, Dict[str, Any]], 
     "gaussian_mean": _completed_replicates_benchmark_cfg,
     "gandk": _completed_replicates_benchmark_cfg,
     "lotka_volterra": _completed_replicates_benchmark_cfg,
-    "cellular_potts": _completed_replicates_benchmark_cfg,
+    "realistic_workload": _completed_replicates_benchmark_cfg,
     "runtime_heterogeneity": _completed_replicates_runtime_heterogeneity,
     "sensitivity": _completed_replicates_sensitivity,
     "ablation": _completed_replicates_ablation,
@@ -650,7 +650,7 @@ def _normalized_extension_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     if default_min_particles is None:
         default_min_particles = 100
     analysis.setdefault("min_particles_for_threshold", int(default_min_particles))
-    if normalized.get("benchmark", {}).get("name") == "cellular_potts":
+    if normalized.get("benchmark", {}).get("name") == "realistic_workload":
         normalized["benchmark"].pop("output_dir", None)
     return normalized
 

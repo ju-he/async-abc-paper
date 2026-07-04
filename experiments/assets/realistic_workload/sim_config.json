@@ -1,0 +1,7 @@
+{
+  "_note": "Placeholder for the external simulator's native configuration template. The realistic simulator workload is driven through a pluggable backend (see experiments/async_abc/benchmarks/realistic_workload.py); the concrete, backend-specific template is provided by the simulation backend and is intentionally omitted from this branch. Parameters theta_1 and theta_2 are injected into the backend template at the paths declared in parameter_space.json.",
+  "Settings": {
+    "randomseed": 0,
+    "timesteps": 501
+  }
+}

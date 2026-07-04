@@ -1,18 +1,18 @@
 {
-  "experiment_name": "scaling_cpm",
+  "experiment_name": "scaling_realistic",
   "benchmark": {
-    "name": "cellular_potts",
-    "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
-    "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
-    "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
-    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_motility.json",
-    "reference_data_path": "experiments/assets/cellular_potts/reference_data",
-    "output_dir": "experiments/data/cpm_sims_scaling",
+    "name": "realistic_workload",
+    "sim_config_template": "experiments/assets/realistic_workload/sim_config.json",
+    "config_builder_params": "experiments/assets/realistic_workload/config_builder_params.json",
+    "distance_metric_params": "experiments/assets/realistic_workload/distance_metric_params.json",
+    "parameter_space": "experiments/assets/realistic_workload/parameter_space.json",
+    "reference_data_path": "experiments/assets/realistic_workload/reference_data",
+    "output_dir": "experiments/data/realistic_sims_scaling",
     "engine_backend": "cis",
     "seed_param_name": "random_seed",
     "seed_param_path": "Settings.randomseed",
-    "true_division_rate": 0.049905,
-    "true_motility": 0.2,
+    "true_theta_2": 0.049905,
+    "true_theta_1": 0.2,
     "true_params_scale": "normalized [0,1]"
   },
   "methods": [
@@ -73,7 +73,7 @@
     "efficiency": true
   },
   "paper": {
-    "experiment_role": "hpc_performance_cpm",
+    "experiment_role": "hpc_performance_realistic",
     "stop_policy": "fixed_walltime",
     "method_comparison_roles": {
       "async_propulate_abc": "proposed_async_method",

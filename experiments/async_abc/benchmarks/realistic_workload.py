@@ -1,13 +1,20 @@
-"""Cellular Potts model benchmark backed by nastjapy's simulation machinery.
+"""Realistic simulator-workload benchmark backed by an external simulation engine.
 
-Requires nastjapy to run simulations. The active environment is preferred; the
-repo-local ``nastjapy_copy/.venv`` is used only as a fallback.
+This benchmark drives a costly, heterogeneous-runtime external simulator through a
+pluggable backend that exposes a parameter space, a simulation manager, and a
+distance metric. The backend package is resolved from the active environment; a
+repo-local virtual environment is used only as a fallback. The backend module
+providing the parameter-space API is configurable via the
+``SIM_BACKEND_PARAMSPACE_MODULE`` environment variable so no specific engine is
+hard-wired here.
 """
 from __future__ import annotations
 
 import ctypes
+import importlib
 import json
 import logging
+import os
 import re
 import shutil
 import sys
@@ -18,9 +25,17 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
+_BACKEND_VENV = Path(__file__).resolve().parents[3] / os.environ.get(
+    "SIM_BACKEND_VENV", "sim_backend_venv"
+) / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
+# Backend module that provides the ``ParameterSpace`` API. Overridable so the
+# benchmark is not bound to any specific simulation engine; defaults to a
+# generic placeholder that documents the expected interface.
+_BACKEND_PARAMSPACE_MODULE = os.environ.get(
+    "SIM_BACKEND_PARAMSPACE_MODULE", "sim_backend.parameter_space_config"
+)
 # x86/x86-64 fenv.h constants. These values are architecture-specific (ARM
 # uses different bit positions, e.g. FE_ALL_EXCEPT = 0x9F800000). This code
 # is only expected to run on x86 HPC nodes; the values are intentionally
@@ -30,11 +45,11 @@ _FE_ALL_EXCEPT = 0x3D   # FE_INVALID|FE_DENORMAL|FE_DIVBYZERO|FE_OVERFLOW|FE_UND
 _FE_PYABC_MASK = 0x01 | 0x04 | 0x08  # FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW (x86)
 # Physical limits are the authoritative source in parameter_space JSON ("physical_range").
 # This module-level dict is used by the standalone normalize/denormalize helpers which
-# operate without a config instance (e.g. in generate_cpm_reference.py).  Keep it in
+# operate without a config instance (e.g. in generate_realistic_reference.py).  Keep it in
 # sync with the JSON values.
-_CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
-    "division_rate": (0.00006, 0.6),
-    "motility": (0.0, 10000.0),
+_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
+    "theta_2": (0.00006, 0.6),
+    "theta_1": (0.0, 10000.0),
 }
 
 try:
@@ -48,9 +63,9 @@ _SENTINEL = object()
 
 
 def _restore_default_fp_state() -> None:
-    """Clear pending FP exceptions and disable traps enabled by native CPM code.
+    """Clear pending FP exceptions and disable traps enabled by native backend code.
 
-    The NAStJA/nastjapy stack can leave floating-point traps enabled after a
+    The native simulation stack can leave floating-point traps enabled after a
     simulation. SciPy/OpenBLAS intentionally executes IEEE edge-case checks
     during pyABC's covariance updates, which then crash with SIGFPE unless the
     default FP mask is restored before returning to Python code.
@@ -68,61 +83,61 @@ def _restore_default_fp_state() -> None:
 
 
 def _resolve_repo_path(path_like: str | Path) -> Path:
-    """Resolve project-relative CPM asset paths independently of the cwd."""
+    """Resolve project-relative asset paths independently of the cwd."""
     path = Path(path_like)
     if path.is_absolute():
         return path
     return (_REPO_ROOT / path).resolve()
 
 
-def _nastjapy_site_packages() -> Path:
-    """Return the matching site-packages dir from the repo-local nastjapy venv."""
+def _backend_site_packages() -> Path:
+    """Return the matching site-packages dir from the repo-local backend venv."""
     return (
-        _NASTJAPY_VENV
+        _BACKEND_VENV
         / "lib"
         / f"python{sys.version_info.major}.{sys.version_info.minor}"
         / "site-packages"
     )
 
 
-def _ensure_nastjapy_on_path() -> None:
-    """Resolve nastjapy from the environment or the repo-local fallback.
+def _ensure_backend_on_path() -> None:
+    """Resolve the simulation backend from the environment or the repo-local fallback.
 
     Raises
     ------
     ImportError
-        If neither the active environment nor ``nastjapy_copy/.venv`` is usable.
+        If neither the active environment nor the repo-local backend venv is usable.
     """
     try:
-        import nastja.parameter_space_config  # noqa: F401
+        importlib.import_module(_BACKEND_PARAMSPACE_MODULE)
         return
     except Exception as env_exc:
-        site_packages = _nastjapy_site_packages()
+        site_packages = _backend_site_packages()
         if not site_packages.is_dir():
             raise ImportError(
-                "The cellular_potts benchmark requires a working nastjapy/nastja "
-                "installation in the active environment, or a repo-local "
-                f"'nastjapy_copy/.venv' fallback with site-packages at {site_packages}."
+                "The realistic_workload benchmark requires a working simulation "
+                "backend in the active environment, or a repo-local backend venv "
+                f"fallback with site-packages at {site_packages}."
             ) from env_exc
 
     site_packages_str = str(site_packages)
     if site_packages_str not in sys.path:
         sys.path.insert(0, site_packages_str)
     try:
-        import nastja.parameter_space_config  # noqa: F401
+        importlib.import_module(_BACKEND_PARAMSPACE_MODULE)
     except Exception as path_exc:
         raise ImportError(
-            "The cellular_potts benchmark requires a working nastjapy/nastja "
-            "installation. Import failed from both the active environment and "
-            f"the repo-local .venv site-packages at {site_packages}."
+            "The realistic_workload benchmark requires a working simulation "
+            "backend. Import failed from both the active environment and the "
+            f"repo-local backend venv site-packages at {site_packages}."
         ) from path_exc
 
 
 def _rewrite_generated_config_paths(config_path: str | Path) -> Path:
-    """Rewrite generated include paths to absolute paths before launching NAStJA.
+    """Rewrite generated include paths to absolute paths before launching the engine.
 
-    The nastjapy templates can emit repo-root-relative include paths such as
-    ``experiments/data/.../configs/filling.json``. NAStJA resolves those
+    The backend templates can emit repo-root-relative include paths such as
+    ``experiments/data/.../configs/filling.json``. The engine resolves those
     relative to the generated config directory, which duplicates the prefix and
     breaks the run. Converting include paths to absolute paths avoids that.
 
@@ -180,7 +195,7 @@ def _rewrite_generated_config_paths(config_path: str | Path) -> Path:
 
 
 def _is_reference_data_dir(path: Path) -> bool:
-    """Return whether ``path`` looks like a generated CPM reference directory."""
+    """Return whether ``path`` looks like a generated engine reference directory."""
     if not path.is_dir():
         return False
 
@@ -195,7 +210,7 @@ def _is_reference_data_dir(path: Path) -> bool:
 
 
 def _is_datahandler_compatible_reference_dir(path: Path) -> bool:
-    """Return whether ``path`` looks like a directory DataHandler can load directly."""
+    """Return whether ``path`` looks like a directory the backend can load directly."""
     if not path.is_dir():
         return False
 
@@ -212,12 +227,12 @@ def _is_datahandler_compatible_reference_dir(path: Path) -> bool:
 
 
 def _is_supported_reference_path(path: Path) -> bool:
-    """Return whether ``path`` can serve as CPM distance-metric reference data."""
+    """Return whether ``path`` can serve as distance-metric reference data."""
     return _is_reference_data_dir(path) or _is_datahandler_compatible_reference_dir(path)
 
 
 def _discover_reference_data_dirs(search_root: Path, target_name: str) -> list[Path]:
-    """Find valid CPM reference directories below ``search_root``."""
+    """Find valid reference directories below ``search_root``."""
     if not search_root.is_dir():
         return []
 
@@ -229,12 +244,12 @@ def _discover_reference_data_dirs(search_root: Path, target_name: str) -> list[P
 
 
 def _resolve_reference_data_path(path_like: str | Path) -> Path:
-    """Resolve the CPM reference directory, including nested generated layouts.
+    """Resolve the reference directory, including nested generated layouts.
 
-    Some NAStJA-generated reference datasets end up nested one level deeper than
+    Some engine-generated reference datasets end up nested one level deeper than
     the intended ``.../reference`` directory, e.g.
-    ``<root>/experiments/data/cpm_reference/reference``. Prefer the configured
-    path, but fall back to that nested layout when present.
+    ``<root>/experiments/data/realistic_reference/reference``. Prefer the
+    configured path, but fall back to that nested layout when present.
     """
     configured_path = _resolve_repo_path(path_like)
     if _is_supported_reference_path(configured_path):
@@ -266,13 +281,13 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
     if len(candidates) > 1:
         candidate_list = ", ".join(str(candidate) for candidate in candidates[:5])
         raise FileNotFoundError(
-            "CPM reference_data_path is ambiguous because multiple valid reference "
+            "reference_data_path is ambiguous because multiple valid reference "
             f"datasets were found while resolving {configured_path}: {candidate_list}"
         )
 
     for candidate in candidates:
         logger.warning(
-            "Resolved CPM reference data path %s to discovered generated directory %s",
+            "Resolved reference data path %s to discovered generated directory %s",
             configured_path,
             candidate,
         )
@@ -280,19 +295,19 @@ def _resolve_reference_data_path(path_like: str | Path) -> Path:
 
     searched_roots = ", ".join(str(root) for root in search_roots)
     raise FileNotFoundError(
-        "CPM reference_data_path does not point to a supported reference dataset. "
+        "reference_data_path does not point to a supported reference dataset. "
         f"Configured path: {configured_path}. "
         f"Searched under: {searched_roots}. "
-        "Expected either a generated CPM reference directory "
+        "Expected either a generated reference directory "
         "(config.json, cis.out, configs/, 000000/cellevents.log) or a "
-        "DataHandler-compatible directory containing files such as "
+        "backend-compatible directory containing files such as "
         "output_cells-00000.csv, *.h5, or data_files.zip. Update "
         "'reference_data_path' accordingly."
     )
 
 
 def _collect_reference_paths(configured_path: Path) -> list[str]:
-    """Resolve one or more CPM reference directories from a configured path.
+    """Resolve one or more reference directories from a configured path.
 
     Two layouts are supported:
 
@@ -300,7 +315,7 @@ def _collect_reference_paths(configured_path: Path) -> list[str]:
       directory → returns ``[configured_path]``.
     * **Multi-reference container**: ``configured_path`` is a directory whose
       immediate children are valid reference directories (e.g. those produced
-      by ``generate_cpm_reference.py --n-seeds N``) → returns all children
+      by ``generate_realistic_reference.py --n-seeds N``) → returns all children
       sorted alphabetically.
 
     The second layout lets you point the config at a container directory and
@@ -334,7 +349,7 @@ def _ensure_reference_alias(output_dir: Path, actual_reference_dir: Path) -> Pat
             alias_path.rmdir()
         elif alias_path.is_dir():
             raise FileExistsError(
-                f"Cannot create CPM reference alias at {alias_path}: directory is not empty."
+                f"Cannot create reference alias at {alias_path}: directory is not empty."
             )
 
     alias_path.parent.mkdir(parents=True, exist_ok=True)
@@ -346,7 +361,7 @@ def _ensure_reference_alias(output_dir: Path, actual_reference_dir: Path) -> Pat
 
 
 def _remove_eval_path(path_like: str | Path) -> None:
-    """Remove a generated CPM evaluation path without archiving it."""
+    """Remove a generated evaluation path without archiving it."""
     path = Path(path_like)
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
@@ -355,73 +370,73 @@ def _remove_eval_path(path_like: str | Path) -> None:
         shutil.rmtree(path)
 
 
-def normalize_cpm_param(
+def normalize_param(
     name: str,
     value: float,
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> float:
-    """Map a CPM parameter from physical simulator units to [0, 1].
+    """Map a parameter from physical simulator units to [0, 1].
 
     Parameters
     ----------
     limits:
         Override physical limits dict. Defaults to the module-level
-        ``_CPM_PHYSICAL_LIMITS`` constant, which must match the
-        ``"physical_range"`` values in ``parameter_space_division_motility.json``.
+        ``_PHYSICAL_LIMITS`` constant, which must match the
+        ``"physical_range"`` values in ``parameter_space.json``.
     """
-    lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
+    lo, hi = (limits or _PHYSICAL_LIMITS)[name]
     if hi <= lo:
-        raise ValueError(f"Invalid CPM physical range for {name!r}: {(lo, hi)}")
+        raise ValueError(f"Invalid physical range for {name!r}: {(lo, hi)}")
     return (float(value) - lo) / (hi - lo)
 
 
-def denormalize_cpm_param(
+def denormalize_param(
     name: str,
     value: float,
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> float:
-    """Map a CPM parameter from [0, 1] to physical simulator units.
+    """Map a parameter from [0, 1] to physical simulator units.
 
     Parameters
     ----------
     limits:
         Override physical limits dict. Defaults to the module-level
-        ``_CPM_PHYSICAL_LIMITS`` constant, which must match the
-        ``"physical_range"`` values in ``parameter_space_division_motility.json``.
+        ``_PHYSICAL_LIMITS`` constant, which must match the
+        ``"physical_range"`` values in ``parameter_space.json``.
     """
-    lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
+    lo, hi = (limits or _PHYSICAL_LIMITS)[name]
     return lo + float(value) * (hi - lo)
 
 
-def normalize_cpm_params(
+def normalize_params(
     params: Dict[str, float],
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Dict[str, float]:
-    """Return CPM params normalized into the public [0, 1] parameter space."""
-    return {name: normalize_cpm_param(name, float(value), limits) for name, value in params.items()}
+    """Return params normalized into the public [0, 1] parameter space."""
+    return {name: normalize_param(name, float(value), limits) for name, value in params.items()}
 
 
-def denormalize_cpm_params(
+def denormalize_params(
     params: Dict[str, float],
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
 ) -> Dict[str, float]:
-    """Return CPM params converted from public [0, 1] values to physical units."""
-    return {name: denormalize_cpm_param(name, float(value), limits) for name, value in params.items()}
+    """Return params converted from public [0, 1] values to physical units."""
+    return {name: denormalize_param(name, float(value), limits) for name, value in params.items()}
 
 
-class CellularPotts:
-    """Cellular Potts model benchmark using nastjapy's SimulationManager + DistanceMetric.
+class RealisticWorkload:
+    """Realistic simulator-workload benchmark using the backend's SimulationManager + DistanceMetric.
 
     Exposes the standard ``simulate(params, seed) -> float`` interface so all
     inference methods (propulate, pyabc, rejection, smc-baseline) can run on the
-    CPM simulator without any changes.
+    external simulator without any changes.
 
     Parameters
     ----------
     config:
         Benchmark sub-config dict. Required keys:
 
-        - ``nastja_config_template``: path to NAStJA sim_config.json template
+        - ``sim_config_template``: path to the engine sim_config.json template
         - ``config_builder_params``: path to config_builder_params.json
         - ``distance_metric_params``: path to distance_metric_params.json
         - ``parameter_space``: path to parameter_space JSON file
@@ -433,11 +448,11 @@ class CellularPotts:
         - ``engine_backend``: ``"cis"`` (default) or ``"srun"``
         - ``engine_ntasks``: number of MPI ranks for srun backend (default 1)
         - ``seed_param_name``: name of the seed parameter (default ``"random_seed"``)
-        - ``seed_param_path``: NAStJA config path for the seed field
+        - ``seed_param_path``: engine config path for the seed field
           (default ``"Settings.randomseed"``)
 
     _sim_manager:
-        Pre-built SimulationManager — injected in tests to bypass real NAStJA.
+        Pre-built SimulationManager — injected in tests to bypass the real engine.
     _distance_metric:
         Pre-built DistanceMetric — injected in tests to bypass real distance
         computation.
@@ -451,7 +466,7 @@ class CellularPotts:
     MULTIPROCESSING_SAFE = True
 
     REQUIRED_KEYS = [
-        "nastja_config_template",
+        "sim_config_template",
         "config_builder_params",
         "distance_metric_params",
         "parameter_space",
@@ -465,18 +480,18 @@ class CellularPotts:
         _sim_manager: Optional[Any] = None,
         _distance_metric: Optional[Any] = None,
     ) -> None:
-        _ensure_nastjapy_on_path()
+        _ensure_backend_on_path()
 
         for key in self.REQUIRED_KEYS:
             if key not in config:
-                raise KeyError(f"CellularPotts config missing required key: '{key}'")
+                raise KeyError(f"RealisticWorkload config missing required key: '{key}'")
 
         # Load parameter space and derive limits dict
         param_space_path = _resolve_repo_path(config["parameter_space"])
         with open(param_space_path) as f:
             ps_data = json.load(f)
 
-        from nastja.parameter_space_config import ParameterSpace
+        ParameterSpace = importlib.import_module(_BACKEND_PARAMSPACE_MODULE).ParameterSpace
 
         self._parameter_space_data: Dict[str, Any] = ps_data["parameters"]
         self._parameter_space = ParameterSpace.model_validate(ps_data)
@@ -511,7 +526,7 @@ class CellularPotts:
             with open(cb_params_path) as f:
                 cb_raw = json.load(f)
             # Override template path for portability (template JSON may have HPC paths)
-            cb_raw["config_template"] = str(_resolve_repo_path(config["nastja_config_template"]))
+            cb_raw["config_template"] = str(_resolve_repo_path(config["sim_config_template"]))
             cb_raw["out_dir"] = self._output_dir
             cb_params = SimulationConfigBuilderParams.model_validate(cb_raw)
 
@@ -542,7 +557,7 @@ class CellularPotts:
                 _resolve_repo_path(config["reference_data_path"])
             )
             dm_raw["reference_data"] = ref_paths if len(ref_paths) > 1 else ref_paths[0]
-            logger.info("CPM using %d reference simulation(s)", len(ref_paths))
+            logger.info("Using %d reference simulation(s)", len(ref_paths))
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 
@@ -562,9 +577,9 @@ class CellularPotts:
                 logger.warning("Removal failed for %s: %s", sim_dir, exc)
 
     def simulate(self, params: dict, seed: int) -> float:
-        """Run a CPM simulation and return the distance to reference data.
+        """Run a simulation and return the distance to reference data.
 
-        The NAStJA random seed is injected as an extra parameter alongside the
+        The engine random seed is injected as an extra parameter alongside the
         inference parameters so every call is reproducible.
 
         Returns ``float('nan')`` on simulation or scoring failure rather than
@@ -575,7 +590,7 @@ class CellularPotts:
         params:
             Dict of parameter name → value (must match keys in ``limits``).
         seed:
-            RNG seed injected into the NAStJA config.
+            RNG seed injected into the engine config.
 
         Returns
         -------
@@ -586,10 +601,10 @@ class CellularPotts:
 
         self._eval_counter += 1
         sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
-        logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
+        logger.debug("eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
         physical_params = {
-            name: denormalize_cpm_param(name, value, self._physical_limits)
+            name: denormalize_param(name, value, self._physical_limits)
             for name, value in params.items()
         }
         param_entries = [
@@ -620,7 +635,7 @@ class CellularPotts:
             self._sim_manager.run_simulation(config_path)
         except Exception as exc:
             logger.error(
-                "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
+                "simulation failed for params=%s seed=%d: %s", params, seed, exc
             )
             if sim_dir is None:
                 sim_dir = str(Path(self._output_dir) / sim_dir_name)
@@ -655,7 +670,7 @@ class CellularPotts:
         nan_rate = self._nan_counter / self._eval_counter
         if nan_rate > 0.15:
             logger.warning(
-                "CPM NaN rate is high: %d/%d evaluations failed (%.0f%%). "
+                "NaN rate is high: %d/%d evaluations failed (%.0f%%). "
                 "Check simulation stability or parameter ranges.",
                 self._nan_counter,
                 self._eval_counter,
@@ -663,26 +678,26 @@ class CellularPotts:
             )
 
     def close(self) -> None:
-        """Best-effort teardown for CPM helper objects between experiment runs."""
+        """Best-effort teardown for helper objects between experiment runs."""
         distance_metric = getattr(self, "_distance_metric", None)
         reference_data = getattr(distance_metric, "reference_data", []) if distance_metric else []
         for datahandler in reference_data:
-            # nastjapy's DataHandler keeps an internal sqlite connection in the
+            # The backend's DataHandler keeps an internal sqlite connection in the
             # private ``_SimDir__con`` attribute.  There is no public close() API;
-            # this is a known workaround.  File an upstream nastjapy issue if the
+            # this is a known workaround.  File an upstream backend issue if the
             # attribute disappears and this warning fires.
             conn = getattr(datahandler, "_SimDir__con", _SENTINEL)
             if conn is _SENTINEL:
                 logger.warning(
-                    "Cannot close CPM reference-data connection: nastjapy DataHandler "
+                    "Cannot close reference-data connection: backend DataHandler "
                     "no longer exposes '_SimDir__con'. Resource leak possible. "
-                    "Request a public close() API from nastjapy."
+                    "Request a public close() API from the backend."
                 )
             elif conn not in (None, 0):
                 try:
                     conn.close()
                 except Exception:
-                    logger.debug("Failed to close CPM reference-data connection", exc_info=True)
+                    logger.debug("Failed to close reference-data connection", exc_info=True)
 
         self._distance_metric = None
         self._sim_manager = None

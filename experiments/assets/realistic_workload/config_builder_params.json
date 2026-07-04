@@ -1,0 +1,8 @@
+{
+  "_note": "Placeholder for the external simulation backend's config-builder parameters. The concrete template is supplied by the simulator backend and is intentionally omitted from this branch; see README.md in this directory.",
+  "config_template": "experiments/assets/realistic_workload/sim_config.json",
+  "separate_filling_config": true,
+  "filling_generator_params": {
+    "random_seed": 42
+  }
+}

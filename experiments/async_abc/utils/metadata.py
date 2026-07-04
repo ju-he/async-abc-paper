@@ -14,7 +14,7 @@ _VALIDITY_EXPERIMENTS = {
     "gaussian_mean",
     "gandk",
     "lotka_volterra",
-    "cellular_potts",
+    "realistic_workload",
     "sbc",
 }
 _HPC_PERFORMANCE_EXPERIMENTS = {

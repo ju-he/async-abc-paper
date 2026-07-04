@@ -13,7 +13,7 @@ from .schema import (
     VALID_KERNELS,
     VALID_SCHEDULER_TYPES,
     ValidationError,
-    _validate_cpm_benchmark,
+    _validate_realistic_workload_benchmark,
     get_test_mode_overrides,
 )
 
@@ -92,8 +92,8 @@ def _validate(cfg: dict) -> None:
             f"is not valid. Must be one of: {sorted(VALID_BENCHMARK_NAMES)}"
         )
 
-    if cfg["benchmark"].get("name") == "cellular_potts":
-        _validate_cpm_benchmark(cfg["benchmark"])
+    if cfg["benchmark"].get("name") == "realistic_workload":
+        _validate_realistic_workload_benchmark(cfg["benchmark"])
 
 
 def _apply_test_mode(cfg: dict) -> dict:
@@ -113,9 +113,9 @@ def _apply_test_mode(cfg: dict) -> dict:
             continue
         for key, val in overrides.items():
             cfg[section][key] = val
-    # CPM runs are substantially heavier than the toy benchmarks. Shrink the
-    # test budget further so cluster smoke tests stay cheap even under MPI.
-    if cfg.get("benchmark", {}).get("name") == "cellular_potts":
+    # Realistic-workload runs are substantially heavier than the toy benchmarks.
+    # Shrink the test budget further so cluster smoke tests stay cheap even under MPI.
+    if cfg.get("benchmark", {}).get("name") == "realistic_workload":
         inference = cfg.setdefault("inference", {})
         inference["max_simulations"] = min(int(inference.get("max_simulations", 12)), 12)
         if inference.get("k") is not None:
