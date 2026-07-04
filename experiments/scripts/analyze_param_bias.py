@@ -31,8 +31,8 @@ CSV = sys.argv[1] if len(sys.argv) > 1 else (
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_param_bias.pdf"
 
 STYLE = {
-    "async_propulate_abc": dict(label="asynchronous (ours)", color="#1f77b4", marker="o", mfc="#1f77b4", ls="-"),
-    "abc_smc_baseline":    dict(label="synchronous baseline", color="#d62728", marker="s", mfc="white", ls="--"),
+    "async_propulate_abc": dict(label="Asynchronous (ours)", color="#1f77b4", marker="o", mfc="#1f77b4", ls="-"),
+    "abc_smc_baseline":    dict(label="Synchronous baseline", color="#d62728", marker="s", mfc="white", ls="--"),
 }
 ORDER = ["async_propulate_abc", "abc_smc_baseline"]
 
@@ -71,7 +71,7 @@ def main() -> None:
 
     axT.set_xlabel("runtime$\\to$parameter coupling strength")
     axT.set_ylabel("throughput (simulations / s)")
-    axT.set_title("(a) coupling bites: throughput falls")
+    axT.set_title("(a) throughput falls with coupling")
     axT.set_ylim(bottom=0)
     axT.grid(True, ls=":", lw=0.5, alpha=0.6)
     axT.legend(frameon=False, loc="lower left")

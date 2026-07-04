@@ -69,7 +69,8 @@ def main() -> None:
                         rotation=35, ha="right")
     axL.set_ylabel("final Wasserstein to truth")
     axL.set_title("(a) full method vs. component changes")
-    axL.set_ylim(0, max(hi) * 1.08)
+    # Extra top headroom so the error bars sit clear of the legend.
+    axL.set_ylim(0, max(hi) * 1.30)
     handles = [plt.Rectangle((0, 0), 1, 1, color=GROUP_COLOR[g]) for g in ["full", "removal", "variant"]]
     axL.legend(handles, ["full method", "ingredient removed", "hyperparameter variant"],
                frameon=False, loc="upper left", fontsize=10)
@@ -85,7 +86,9 @@ def main() -> None:
         t, m, sd = _curve(v)
         axR.plot(t, m, ls, color=c, lw=2.0, label=lab)
         axR.fill_between(t, m - sd, m + sd, color=c, alpha=0.15)
-    axR.set_ylim(0.055, 0.092)
+    # Extra top headroom leaves an empty band above the two converged curves
+    # for the inset, so the inset never lies on top of the data.
+    axR.set_ylim(0.055, 0.104)
     axR.set_xlim(8, 305)
     axR.set_xlabel("wall-clock time (s)")
     axR.set_ylabel("Wasserstein to truth")
@@ -93,8 +96,9 @@ def main() -> None:
     axR.grid(True, ls=":", lw=0.5, alpha=0.6)
     axR.legend(frameon=False, loc="lower left")
 
-    # inset: full transient from the prior (top-right, clear of the legend)
-    axin = axR.inset_axes([0.52, 0.50, 0.44, 0.44])
+    # inset: full transient from the prior, placed in the empty top band so it
+    # sits clear of both converged curves and the legend.
+    axin = axR.inset_axes([0.40, 0.53, 0.57, 0.35])
     for v, (c, lab, ls) in style.items():
         t, m, sd = _curve(v)
         axin.plot(t, m, ls, color=c, lw=1.3)

@@ -18,25 +18,38 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-D = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_20260626_1906/scaling_cpm/data"
-EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_cpm/data"
+SCR = "/home/juhe/remotes/scratch/herold2/async-abc"
+D = f"{SCR}/run_cpm_20260626_1906/scaling_cpm/data"
+EXT = f"{SCR}/cpm_scaling_ext_20260630/scaling_cpm/data"
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_util.pdf"
-# 48/96 from the original CPM scaling run; 192/384 from the node-scaling extension.
 WORKERS = [48, 96, 192, 384]
-DIR_FOR = {48: D, 96: D, 192: EXT, 384: EXT}
+# Asynchronous utilisation from the async scaling runs (48/96 original, 192/384 extension).
+DIR_ASYNC = {48: (D, 100), 96: (D, 100), 192: (EXT, 100), 384: (EXT, 100)}
+# Synchronous utilisation from the FAIR baseline (population = worker count) at the
+# cap-affected multi-node counts; 48/96 already used population 100 >= workers, so
+# they are fair as-is and come from the same original run.
+DIR_SYNC = {48: (D, 100), 96: (D, 100),
+            192: (f"{SCR}/cpm_fair_w192_20260701/scaling_cpm/data", 192),
+            384: (f"{SCR}/cpm_fair_w384_20260701/scaling_cpm/data", 384)}
 STYLE = {
-    "async_propulate_abc": dict(label="asynchronous (ours)", color="#1f77b4"),
-    "abc_smc_baseline":    dict(label="synchronous baseline", color="#d62728"),
+    "async_propulate_abc": dict(label="Asynchronous (ours)", color="#1f77b4"),
+    "abc_smc_baseline":    dict(label="Synchronous baseline (population = cores)", color="#d62728"),
 }
 ORDER = ["async_propulate_abc", "abc_smc_baseline"]
 
 
+def _util_one(src, w, method):
+    d, k = src
+    df = pd.read_csv(f"{d}/throughput_summary_w{w}_k{k}.csv")
+    sub = df[df["base_method"] == method]["worker_utilization"]
+    return (100 * sub.mean(), 100 * sub.std())
+
+
 def _util(w: int):
-    df = pd.read_csv(f"{DIR_FOR[w]}/throughput_summary_w{w}_k100.csv")
-    out = {}
-    for m, sub in df.groupby("base_method"):
-        out[m] = (100 * sub["worker_utilization"].mean(), 100 * sub["worker_utilization"].std())
-    return out
+    return {
+        "async_propulate_abc": _util_one(DIR_ASYNC[w], w, "async_propulate_abc"),
+        "abc_smc_baseline": _util_one(DIR_SYNC[w], w, "abc_smc_baseline"),
+    }
 
 
 def main() -> None:
@@ -61,9 +74,10 @@ def main() -> None:
     ax.set_xticks(x)
     ax.set_xticklabels([f"{w} workers" for w in WORKERS])
     ax.set_ylabel("worker utilization (%)")
-    ax.set_ylim(0, 109)
-    ax.set_title("Cellular Potts: worker utilization")
-    ax.legend(frameon=False, loc="lower left")
+    ax.set_ylim(0, 112)
+    # Legend outside, above the axes, so it never overlaps the (near-100%) bars.
+    ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.5, 1.005),
+              ncol=2, borderaxespad=0.0)
     ax.grid(True, axis="y", ls=":", lw=0.5, alpha=0.6)
 
     fig.tight_layout()
