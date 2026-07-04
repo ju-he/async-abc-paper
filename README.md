@@ -9,10 +9,10 @@ Paper experiments for asynchronous ABC with Propulate.
 - `propulate` for `async_propulate_abc`
 - `pyabc` for `pyabc_smc` and `abc_smc_baseline`
 - `mpi4py` for MPI launches and pyABC runs with `n_workers > 1`
-- `nastjapy` plus a working `nastja` build for the `cellular_potts` benchmark
+- the external simulation backend for the `realistic_workload` benchmark
 
-The `cellular_potts` benchmark first tries the active Python environment and
-then falls back to a repo-local `nastjapy_copy/.venv` if it exists.
+The `realistic_workload` benchmark first tries the active Python environment and
+then falls back to a repo-local `sim_backend_venv/.venv` if it exists.
 
 Cluster helper scripts under `experiments/jobs/` assume SLURM plus an MPI
 environment.
@@ -34,14 +34,14 @@ For a minimal install without optional methods:
 pip install -e .
 ```
 
-If you want to run `cellular_potts`, also install `nastjapy`/`nastja` in the
-active environment or provide the repo-local fallback environment.
+If you want to run `realistic_workload`, also install the external simulation
+backend in the active environment or provide the repo-local fallback environment.
 
 ## Experiment Configs
 
 Main configs live in `experiments/configs/`:
 
-- `gaussian_mean.json`, `gandk.json`, `lotka_volterra.json`, `cellular_potts.json`:
+- `gaussian_mean.json`, `gandk.json`, `lotka_volterra.json`, `realistic_workload.json`:
   benchmark comparisons across inference methods
 - `sbc.json`: simulation-based calibration
 - `straggler.json`: persistent straggler sweep
@@ -240,15 +240,15 @@ Run the SLURM sharded smoke test:
 bash experiments/jobs/test_sharded_slurm.sh /path/to/output
 ```
 
-Generate a new Cellular Potts reference dataset:
+Generate a new realistic-workload reference dataset:
 
 ```bash
-python experiments/scripts/generate_cpm_reference.py \
-  --config-template experiments/assets/cellular_potts/sim_config.json \
-  --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \
-  --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \
-  --true-params '{"division_rate": 0.049905, "motility": 0.2}' \
-  --output-dir experiments/data/cpm_reference_generated \
+python experiments/scripts/generate_realistic_reference.py \
+  --config-template experiments/assets/realistic_workload/sim_config.json \
+  --config-builder-params experiments/assets/realistic_workload/config_builder_params.json \
+  --parameter-space experiments/assets/realistic_workload/parameter_space.json \
+  --true-params '{"theta_2": 0.049905, "theta_1": 0.2}' \
+  --output-dir experiments/data/realistic_reference_generated \
   --seed 0
 ```
 
