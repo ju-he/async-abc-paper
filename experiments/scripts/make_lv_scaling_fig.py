@@ -3,7 +3,7 @@
 
 Clean k=100 async-vs-synchronous view with inter-quartile bands over the five
 replicates and the single-node->multi-node boundary marked. Unlike the cost-bearing
-Cellular Potts case, async throughput here peaks at the full-node boundary (48
+Realistic-workload case, async throughput here peaks at the full-node boundary (48
 workers) and declines once the job spans multiple nodes, because the near-instantaneous
 simulator leaves per-arrival coordination dominant -- the honest node-boundary story.
 """

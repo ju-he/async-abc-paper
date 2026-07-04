@@ -53,7 +53,7 @@
 set -u
 
 # Paths injected by experiments/jobs/submit.sh via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via experiments/jobs/submit.sh}"
 experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
 config_path="$experiments_dir/configs/scaling.json"
 runner="$experiments_dir/scripts/scaling_runner.py"
@@ -88,9 +88,9 @@ if [ -n "${SCALING_ENV_SETUP:-}" ]; then
     # shellcheck source=/dev/null
     source "$SCALING_ENV_SETUP"
 else
-    module restore nastjapy
+    module restore sim_backend
     module load ParaStationMPI
-    source "$nastjapy_path/.venv/bin/activate"
+    source "$backend_path/.venv/bin/activate"
 fi
 
 # --- Liveness logger: the per-rank faulthandler dumps (above) do the actual

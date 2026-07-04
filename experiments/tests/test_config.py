@@ -251,12 +251,12 @@ class TestNGenerationsSafetyNet:
 
 
 # ---------------------------------------------------------------------------
-# CellularPotts benchmark config validation
+# RealisticWorkload benchmark config validation
 # ---------------------------------------------------------------------------
 
-_CPM_BENCHMARK_FULL = {
-    "name": "cellular_potts",
-    "nastja_config_template": "/some/sim_config.json",
+_REALISTIC_BENCHMARK_FULL = {
+    "name": "realistic_workload",
+    "sim_config_template": "/some/sim_config.json",
     "config_builder_params": "/some/config_builder_params.json",
     "distance_metric_params": "/some/distance_metric_params.json",
     "parameter_space": "/some/parameter_space.json",
@@ -265,25 +265,25 @@ _CPM_BENCHMARK_FULL = {
 }
 
 
-class TestCPMConfigValidation:
-    def test_cpm_config_valid_passes(self, tmp_path, minimal_config):
-        minimal_config["benchmark"] = dict(_CPM_BENCHMARK_FULL)
+class TestRealisticWorkloadConfigValidation:
+    def test_realistic_workload_config_valid_passes(self, tmp_path, minimal_config):
+        minimal_config["benchmark"] = dict(_REALISTIC_BENCHMARK_FULL)
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p)
-        assert cfg["benchmark"]["name"] == "cellular_potts"
+        assert cfg["benchmark"]["name"] == "realistic_workload"
 
-    def test_cpm_missing_nastja_config_template_raises(self, tmp_path, minimal_config):
-        bm = dict(_CPM_BENCHMARK_FULL)
-        del bm["nastja_config_template"]
+    def test_realistic_workload_missing_sim_config_template_raises(self, tmp_path, minimal_config):
+        bm = dict(_REALISTIC_BENCHMARK_FULL)
+        del bm["sim_config_template"]
         minimal_config["benchmark"] = bm
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
-        with pytest.raises(ValidationError, match="nastja_config_template"):
+        with pytest.raises(ValidationError, match="sim_config_template"):
             load_config(p)
 
-    def test_cpm_missing_reference_data_path_raises(self, tmp_path, minimal_config):
-        bm = dict(_CPM_BENCHMARK_FULL)
+    def test_realistic_workload_missing_reference_data_path_raises(self, tmp_path, minimal_config):
+        bm = dict(_REALISTIC_BENCHMARK_FULL)
         del bm["reference_data_path"]
         minimal_config["benchmark"] = bm
         p = tmp_path / "cfg.json"
@@ -291,8 +291,8 @@ class TestCPMConfigValidation:
         with pytest.raises(ValidationError, match="reference_data_path"):
             load_config(p)
 
-    def test_cpm_missing_output_dir_raises(self, tmp_path, minimal_config):
-        bm = dict(_CPM_BENCHMARK_FULL)
+    def test_realistic_workload_missing_output_dir_raises(self, tmp_path, minimal_config):
+        bm = dict(_REALISTIC_BENCHMARK_FULL)
         del bm["output_dir"]
         minimal_config["benchmark"] = bm
         p = tmp_path / "cfg.json"
@@ -300,15 +300,15 @@ class TestCPMConfigValidation:
         with pytest.raises(ValidationError, match="output_dir"):
             load_config(p)
 
-    def test_non_cpm_benchmark_unaffected(self, tmp_path, minimal_config):
-        """gaussian_mean config must not be affected by CPM validation."""
+    def test_non_realistic_workload_benchmark_unaffected(self, tmp_path, minimal_config):
+        """gaussian_mean config must not be affected by realistic_workload validation."""
         p = tmp_path / "cfg.json"
         p.write_text(json.dumps(minimal_config))
         cfg = load_config(p)
         assert cfg["benchmark"]["name"] == "gaussian_mean"
 
-    def test_cpm_test_mode_uses_smaller_budget(self, tmp_path, minimal_config):
-        minimal_config["benchmark"] = dict(_CPM_BENCHMARK_FULL)
+    def test_realistic_workload_test_mode_uses_smaller_budget(self, tmp_path, minimal_config):
+        minimal_config["benchmark"] = dict(_REALISTIC_BENCHMARK_FULL)
         minimal_config["inference"]["max_simulations"] = 300
         minimal_config["inference"]["k"] = 100
         p = tmp_path / "cfg.json"
@@ -342,7 +342,7 @@ class TestWallTimeClamping:
         "gaussian_mean.json",
         "gandk.json",
         "lotka_volterra.json",
-        "cellular_potts.json",
+        "realistic_workload.json",
     ])
     def test_all_benchmark_configs_have_wall_time(self, config_name):
         cfg = load_config(f"configs/{config_name}")
@@ -594,7 +594,7 @@ class TestScalingPosteriorWeightsDisabled:
 
     _CONFIG_ROOT = _Path(__file__).resolve().parents[1] / "configs"
 
-    @pytest.mark.parametrize("name", ["scaling", "scaling_cpm"])
+    @pytest.mark.parametrize("name", ["scaling", "scaling_realistic"])
     @pytest.mark.parametrize("small_mode", [False, True])
     @pytest.mark.parametrize("test_mode", [False, True])
     def test_scaling_disables_posterior_weights(self, name, small_mode, test_mode):

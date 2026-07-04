@@ -27,7 +27,7 @@ snapshots. On cheap-simulator scaling sweeps (fixed-walltime, `_stop_policy_for_
 NumPy per combo, per rank** — overrunning the SLURM wall clock. The other ranks block at the
 post-method `allgather` (`runner.py:876`) waiting for the slowest, which presents as a post-teardown
 hang. k-dependence is the `·k` factor (k=48 combos finish in ~30 s even at 8e5 records; k=1000 do not);
-CPM survives because its expensive simulator caps the history at ≤41k records.
+realistic workload survives because its expensive simulator caps the history at ≤41k records.
 
 **Fix:** Gate the estimator behind `inference_cfg["compute_posterior_weights"]` (default **True**, so
 all posterior-quality experiments — SBC, gaussian_mean, ablation — are unchanged). The throughput
@@ -194,7 +194,7 @@ specific to the 6-node / 256-rank import.
 
 **Wrong turn (kept so it is not repeated):** first labelled a generic "import storm" from a sloppy
 `grep -rl exec_module` that matches NORMAL startup imports in *every* rank file. The user correctly pushed
-back (CPM / gaussian ran fine at lower ranks). The real wedge frame only emerged from reading **each rank's
+back (realistic workload / gaussian ran fine at lower ranks). The real wedge frame only emerged from reading **each rank's
 LAST `faulthandler` snapshot** (the text after the final `Timeout`) — NOT grepping for a frame that appears
 in *any* snapshot.
 
@@ -495,7 +495,7 @@ records.
 **Symptom:** `gaussian_mean` production job (14061000) FAILED — sacct MaxRSS 53.96 GB / 94 GB, `task 0: Killed`
 at the end of the run, after all methods (async, abc_smc_baseline, rejection) logged `status=finish`. No
 plots, no timing/budget published (only the down-sampled 73 MB raw_results.csv). Only gaussian_mean failed;
-gandk/lotka/CPM finalize fine.
+gandk/lotka/realistic workload finalize fine.
 
 **False lead:** the post-run posterior-quality/plotting stage. DISPROVED by profiling the real saved history —
 replaying the full `plot_benchmark_diagnostics` over the persisted 325k-record raw_results.csv peaks at 1.3 GB.

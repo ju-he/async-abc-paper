@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate the 5-point Cellular Potts strong-scaling figure (fig_cpm_scaling.pdf).
+"""Generate the 5-point realistic-workload strong-scaling figure (fig_realistic_scaling.pdf).
 
 Throughput (sims/s) vs worker count, asynchronous vs matched synchronous baseline,
-k=100, on the cost-bearing cellsInSilico simulator. Points 1/4/16 come from the
-fill-in run, 48/96 from the original CPM scaling run. Unlike the near-instantaneous
+k=100, on the cost-bearing external simulator. Points 1/4/16 come from the
+fill-in run, 48/96 from the original realistic-workload scaling run. Unlike the near-instantaneous
 Lotka-Volterra case, the async method scales ~linearly here (even across the
 48->96 single-node->multi-node boundary) because real per-evaluation cost amortizes
 the per-arrival coordination, while the synchronous baseline plateaus.
@@ -19,12 +19,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-FILL = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_fillin_20260628/scaling_cpm/data"
-EXIST = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_20260626_1906/scaling_cpm/data"
-EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_cpm/data"
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_scaling.pdf"
+FILL = "/home/juhe/remotes/scratch/herold2/async-abc/run_realistic_fillin_20260628/scaling_realistic/data"
+EXIST = "/home/juhe/remotes/scratch/herold2/async-abc/run_realistic_20260626_1906/scaling_realistic/data"
+EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_realistic/data"
+OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_scaling.pdf"
 
-# 1/4/16 from the fill-in run; 48/96 from the original CPM scaling run; 192/384 from
+# 1/4/16 from the fill-in run; 48/96 from the original realistic-workload scaling run; 192/384 from
 # the node-scaling extension (cpm_scaling_ext_20260630, k=100). Medians over the
 # available replicates (the single slow 384-worker replicate is robustly handled by
 # the median).
@@ -66,7 +66,7 @@ def main() -> None:
     ax.set_xticklabels([str(w) for w in workers])
     ax.set_xlabel("workers")
     ax.set_ylabel("throughput (simulations / s)")
-    ax.set_title("Cellular Potts strong scaling ($k{=}100$)")
+    ax.set_title("Realistic workload strong scaling ($k{=}100$)")
     ax.grid(True, which="both", ls=":", lw=0.5, alpha=0.5)
     ax.legend(frameon=False, loc="upper left")
 

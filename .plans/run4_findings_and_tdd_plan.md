@@ -192,17 +192,17 @@ Interpretation:
 - good mechanism demo
 - weak as a direct claim that async is globally better
 
-## 5. Cellular Potts
+## 5. Realistic Simulator Workload
 
 Relevant file:
-- [cellular_potts.json](/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/configs/cellular_potts.json)
+- [realistic_workload.json](/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/configs/realistic_workload.json)
 
 Current issue:
 - quality-vs-time style plots were skipped because the true parameter names do not match the inferred parameter names expected by analysis
 
 Config currently uses:
-- `true_division_rate_normalized`
-- `true_motility_normalized`
+- `true_theta_2_normalized`
+- `true_theta_1_normalized`
 
 But analysis expects `true_<param_name>` matching the actual parameter columns.
 
@@ -268,7 +268,7 @@ These are not equivalent operational budgets.
 Known issues:
 - invalid `worker_utilization`
 - misleading pyABC MPI progress
-- missing Cellular Potts quality comparison
+- missing realistic workload quality comparison
 
 These issues distort interpretation even when the underlying run may be fine.
 
@@ -303,7 +303,7 @@ Initial failing tests:
 - shard status says `running` while stdout ends at `pyabc_smc ... status=finish`
 - scaling summary never reports `worker_utilization > 1.0`
 - summaries always expose realized attempts and posterior sample counts
-- Cellular Potts quality analysis fails loudly when true-parameter mapping is missing
+- realistic workload quality analysis fails loudly when true-parameter mapping is missing
 
 Done when:
 - these tests fail on the current implementation for the intended reasons
@@ -397,14 +397,14 @@ Implementation:
 Done when:
 - the currently stuck `gaussian_mean` and `gandk` jobs can be reproduced and then complete cleanly
 
-## Phase 6. Fix The Cellular Potts Analysis Contract
+## Phase 6. Fix The Realistic Workload Analysis Contract
 
 Start in:
-- [cellular_potts.json](/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/configs/cellular_potts.json)
+- [realistic_workload.json](/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/configs/realistic_workload.json)
 - the analysis code that resolves true parameter values
 
 Tests:
-- true parameters are resolved for every inferred Cellular Potts parameter
+- true parameters are resolved for every inferred realistic workload parameter
 - quality-vs-time plots are generated rather than skipped
 
 Implementation:
@@ -413,7 +413,7 @@ Implementation:
 - validate this mapping before plotting
 
 Done when:
-- Cellular Potts produces the same quality artifacts as the simpler benchmarks
+- the realistic workload produces the same quality artifacts as the simpler benchmarks
 
 ## Phase 7. Add Experiment-Level Acceptance Tests
 

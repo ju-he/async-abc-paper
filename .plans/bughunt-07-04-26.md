@@ -46,8 +46,8 @@ Both jobs now show `pyabc_mpi_sampler=mapping n_workers=48 client_max_jobs=ignor
 
 ### Source files examined
 
-- `/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/lib/python3.11/site-packages/mpi4py/futures/pool.py`
-- `/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/lib/python3.11/site-packages/mpi4py/futures/_core.py`
+- `/home/juhe/bwSyncShare/Code/mirrors/sim_backend_venv/.venv/lib/python3.11/site-packages/mpi4py/futures/pool.py`
+- `/home/juhe/bwSyncShare/Code/mirrors/sim_backend_venv/.venv/lib/python3.11/site-packages/mpi4py/futures/_core.py`
 
 All pure Python (MPI ops use C extensions in `mpi4py/MPI.*.so`).
 

@@ -1,7 +1,7 @@
   ---
   Multi-Phase TDD Plan: Fixing Experiment Issues
 
-  Test runner: nastjapy_copy/.venv/bin/python -m pytest experiments/tests/ -x -q
+  Test runner: sim_backend_venv/.venv/bin/python -m pytest experiments/tests/ -x -q
   Baseline: 534 passed, 1 skipped
 
   ---
@@ -53,7 +53,7 @@
     - gaussian_mean.json: add "max_wall_time_s": 300, set "n_generations": 1000
     - gandk.json: add "max_wall_time_s": 600, set "n_generations": 1000
     - lotka_volterra.json: add "max_wall_time_s": 600, set "n_generations": 1000
-    - cellular_potts.json: add "max_wall_time_s": 3600, set "n_generations": 1000
+    - realistic_workload.json: add "max_wall_time_s": 3600, set "n_generations": 1000
     - Update small/ variants proportionally
   - Update straggler.json, sbc.json, ablation.json, sensitivity*.json similarly (add wall time, raise n_generations)
 

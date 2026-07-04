@@ -17,8 +17,8 @@ Fire when job 14061028 leaves RUNNING (TIMEOUT or otherwise) — i.e. no longer 
 submit_job(
   cluster="juwels-cluster", project="async-abc-paper", nodes=1,
   walltime="12:00:00", partition="batch",
-  command="module restore nastjapy && module load ParaStationMPI && "
-          "source /p/project1/tissuetwin/herold2/nastjapy/.venv/bin/activate && "
+  command="module restore sim_backend && module load ParaStationMPI && "
+          "source /p/project1/tissuetwin/herold2/sim_backend/.venv/bin/activate && "
           "srun python /p/project1/tissuetwin/herold2/async-abc-paper/experiments/scripts/sensitivity_runner.py "
           "--config /p/project1/tissuetwin/herold2/async-abc-paper/experiments/configs/sensitivity.json "
           "--output-dir /p/scratch/tissuetwin/herold2/async-abc/run_full_20260626_1816 "

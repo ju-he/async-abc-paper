@@ -86,8 +86,8 @@ avoid future confusion.
 
 ### Verified inventory
 13 configs (11 registered in `run_all_paper_experiments.py`, 2 unregistered). Four benchmarks
-(Gaussian, g-and-k 4D, Lotka-Volterra 4D, Cellular Potts), validity (SBC), HPC (straggler,
-runtime heterogeneity, scaling, scaling_cpm), method-analysis (sensitivity 144-grid, ablation,
+(Gaussian, g-and-k 4D, Lotka-Volterra 4D, realistic simulator workload), validity (SBC), HPC (straggler,
+runtime heterogeneity, scaling, scaling_realistic), method-analysis (sensitivity 144-grid, ablation,
 amis_snapshot_sweep). Baselines: `async_propulate_abc` vs `abc_smc_baseline` (kernel-matched
 sync) and `rejection_abc` (small problems). `pyabc_smc` exists but is no longer in active
 configs.
@@ -96,7 +96,7 @@ configs.
 - **Replicate count = 5 everywhere.** For headline speedup/quality-CI claims with high-variance
   HPC timing, 5 replicates gives wide confidence bands and weak significance. Consider ≥10 for
   the headline heterogeneity/scaling figures (cheap benchmarks at least).
-- **Two unregistered experiments.** `scaling_cpm` and `amis_snapshot_sweep` have full configs +
+- **Two unregistered experiments.** `scaling_realistic` and `amis_snapshot_sweep` have full configs +
   submit scripts but are absent from `EXPERIMENT_REGISTRY` and from `test_all.sh` (hardcoded
   list). They won't run via the main orchestrator. Either register them or document why they're
   out-of-band. `amis_snapshot_sweep` is the *direct evidence for the paper's core AMIS claim*
@@ -114,11 +114,11 @@ configs.
   the contribution language to "a kernel-matched synchronous ABC-SMC baseline" and demote pyABC to
   a single-node external-validity check. As written, the paper promises pyABC evidence the configs
   don't currently produce.
-- **Cellular Potts is gated on `nastjapy`** (stub raises ImportError). The headline HPC use case
+- **The realistic simulator workload is gated on the simulation backend** (stub raises ImportError). The headline HPC use case
   is non-reproducible without the external dependency — fine for the authors, but state it and
   ship the reference-data + a synthetic fallback so reviewers can run *something*.
-- **Test-mode CPM scaling wall-time = 1800 s** (same as production) defeats the smoke-test purpose
-  (`small/scaling_cpm.json`). Minor, but it has bitten the team before (see the runtime_heterogeneity
+- **Test-mode realistic-workload scaling wall-time = 1800 s** (same as production) defeats the smoke-test purpose
+  (`small/scaling_realistic.json`). Minor, but it has bitten the team before (see the runtime_heterogeneity
   test-mode hang in `previous-fixes.md`).
 - **MPI teardown fragility is a standing risk.** `previous-fixes.md` shows repeated ParaStation
   `Disconnect`/`Create_intercomm` deadlocks, and the recent `PROPULATE_SKIP_DISCONNECT` escape hatch
@@ -128,7 +128,7 @@ configs.
 ### Reasonable as-is (no change needed)
 SBC `n_replicates = 1` (correct — 100 trials provide the stochasticity); straggler 16 workers;
 heterogeneity per-replicate `stable_seed`; per-model tolerance scales (LV `tol_init = 5e5` is
-distance-scale-appropriate); wall-time-bound CPM. Seeding is deterministic per replicate; the one
+distance-scale-appropriate); wall-time-bound realistic workload. Seeding is deterministic per replicate; the one
 gap is no explicit per-MPI-rank seed in the generic path (the ABC tutorial seeds `seed + rank`,
 but confirm every runner does likewise, else rank RNG streams may correlate).
 
@@ -179,7 +179,7 @@ research-code standard.
    contribution language. *(experiments configs + inference wrappers)*
 
 **P1 — experiment completeness/robustness**
-5. Register `amis_snapshot_sweep` and `scaling_cpm`; sync `test_all.sh` with the registry.
+5. Register `amis_snapshot_sweep` and `scaling_realistic`; sync `test_all.sh` with the registry.
 6. Raise replicates (≥10) for headline heterogeneity/scaling figures on cheap benchmarks.
 7. Document or remove the per-benchmark scheduler confound.
 8. Annotate the stale `propulate/.plans/algorithm-review.md` to mark A3/A4 as resolved by W1.
@@ -198,7 +198,7 @@ research-code standard.
   tests (construct mixed-phase archive; deactivate running-min; multi-modal toy for top_k vs
   all_accepted). Run the existing `propulate/tests/test_abcpmc.py` cache-equivalence tests
   (the cleanest correctness anchor) after each change. Use the venv at
-  `nastjapy_copy/.venv/bin/python`.
+  `sim_backend_venv/.venv/bin/python`.
 - **SBC re-validation:** after `all_accepted`, re-run the SBC experiment; rank histograms should be
   flatter and coverage closer to nominal than under `top_k`. This is the empirical proof the
   posterior claim now holds.

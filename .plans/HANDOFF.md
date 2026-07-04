@@ -10,28 +10,28 @@ Read this first, then `.plans/sensitivity_backfill_ready.md` (older context) and
 ## TL;DR — what's the state
 The paper is a results-complete draft that has been through **two independent codex reviews**
 (`/code-review` via the `codex` CLI) and a large revision pass. All revision work is **committed** on
-`refactor/general`. One cluster job is **in flight** (CPM scaling fill-in); when it lands there's a figure
+`refactor/general`. One cluster job is **in flight** (realistic workload scaling fill-in); when it lands there's a figure
 to build + wire. A new multi-node submission script was just added.
 
 ## ⏳ IN-FLIGHT — do this when it finishes
-**Job `14067753`** (jsc-mpc MCP, cluster `juwels-cluster`, project `async-abc-paper`): single-node CPM
+**Job `14067753`** (jsc-mpc MCP, cluster `juwels-cluster`, project `async-abc-paper`): single-node realistic workload
 scaling fill-in, workers **1/4/16**, k=100, 900 s budget, 3 reps. Output:
 `/p/scratch/tissuetwin/herold2/async-abc/run_cpm_fillin_20260628/scaling_cpm/`.
 - Check: `mcp__jsc-mpc__job_status(cluster=juwels-cluster, job_id=14067753, project=async-abc-paper)`.
-- When **COMPLETED**: build a **5-point CPM scaling figure** (1,4,16 from the fill-in + 48,96 from the
-  existing run `run_cpm_20260626_1906/scaling_cpm/`) and **wire it into §7.3**, upgrading CPM from the
+- When **COMPLETED**: build a **5-point realistic workload scaling figure** (1,4,16 from the fill-in + 48,96 from the
+  existing run `run_cpm_20260626_1906/scaling_cpm/`) and **wire it into §7.3**, upgrading realistic workload from the
   current feasibility framing to a real throughput-scaling result (async throughput scales ~linearly; sync
   plateaus at k=100) **with the honest quality caveat** (async Wasserstein stays slightly *behind* sync on
-  CPM — ~0.47 vs ~0.40, near the rejection floor). Don't overclaim CPM quality.
+  realistic workload — ~0.47 vs ~0.40, near the rejection floor). Don't overclaim realistic workload quality.
   - Throughput data: `<run>/scaling_cpm/data/throughput_summary_w{N}_k100.csv` (`throughput_sims_per_s`).
   - Quality data: `<run>/scaling_cpm/data/budget_summary.csv` (`quality_wasserstein_by_budget`, filter
     `budget_s==900`).
   - A 2-point draft figure already exists at `figures/fig_cpm_scaling.pdf` (untracked) — regenerate it as a
     5-point version, then `\includegraphics` it in the §7.3 figure block (currently shows
-    `fig_cpm_corner.pdf`, label `fig:cpm-posterior`). Recompile + commit.
+    `fig_cpm_corner.pdf`, label `fig:realistic-posterior`). Recompile + commit.
 
 ## ▶ NEW TOOL (committed `12f48ad`)
-`experiments/jobs/submit_cpm_node_scaling.py` — multi-node, power-of-2 CPM scaling submitter, thin wrapper
+`experiments/jobs/submit_cpm_node_scaling.py` — multi-node, power-of-2 realistic workload scaling submitter, thin wrapper
 over `submit_scaling_cpm.py` (reuses its sbatch rendering, `ceil(N/48)` node math, bin-packing, per-combo
 MPI-isolated wrappers, site detection). Adds power-of-2 generation + a total **CPU-hour estimate**.
 - `--max-workers N` (powers of 2: 1,2,4,…,N) or `--max-nodes M` (full nodes: 48·[1,2,4,…,M]).
@@ -44,11 +44,11 @@ MPI-isolated wrappers, site detection). Adds power-of-2 generation + a total **C
 ---
 
 ## Session commits on `refactor/general` (newest first)
-- `12f48ad` jobs: power-of-2 CPM node-scaling submitter (+CPU-hour estimate)
+- `12f48ad` jobs: power-of-2 realistic workload node-scaling submitter (+CPU-hour estimate)
 - `7974584` paper: theory caveat + Fig 2/5 legibility (review 2)
 - `3193df4` paper: inferential-efficiency figure under heterogeneity (review 2 MAJOR)
 - `5833c2b` paper: review 2 — estimator ref, filled appendices, softened claims
-- `870b728` paper: CPM → feasibility framing
+- `870b728` paper: realistic workload → feasibility framing
 - `88aad33` paper: sensitivity Fig 9 → posterior quality (not internal tolerance)
 - `1bcb406` paper: review 1 — reorder results, reframe claims, Fig 3 replot, Table 4
 - `dfba903` paper: fill gaussian recovery + sensitivity panels (results-complete draft)
@@ -68,7 +68,7 @@ under heterogeneity, sync posterior error blows up ~10–30× while async stays 
 after the straggler).
 
 ## Remaining review items (NOT yet done)
-- **CPM multi-worker evidence** — in progress (job 14067753 above); bigger sweeps via the new node script.
+- **realistic workload multi-worker evidence** — in progress (job 14067753 above); bigger sweeps via the new node script.
 - **Define uncertainty bands** in the *pipeline* figure captions (straggler/scaling/SBC) — replotted figs
   already define them (IQR / CI). Confirm band type in the pipeline before asserting.
 - Minor editorial: Table 3 vs Fig 3 redundancy; abstract tightening; remaining composite-figure legibility.
@@ -89,9 +89,9 @@ quality" (it's throughput-only) → cross-ref added. 3. Fig 2 panels plotted tol
   `/p/scratch/tissuetwin/herold2/async-abc` (read run outputs locally here).
 - **Cluster code** — `/p/project1/tissuetwin/herold2/async-abc-paper`. **Deploy = plain rsync** (no alias):
   `rsync -avP --exclude=".*" --exclude="*.png" --exclude="*.pdf" --exclude="*__pycache__" ./ herold2@juwels.fz-juelich.de:/p/project1/tissuetwin/herold2/async-abc-paper`
-- **venv** — local tests: `nastjapy_copy/.venv/bin/python`; cluster: `/p/project1/tissuetwin/herold2/nastjapy/.venv`.
+- **venv** — local tests: `sim_backend_venv/.venv/bin/python`; cluster: `/p/project1/tissuetwin/herold2/sim_backend/.venv`.
 - **Job recipe** (submit_job `command`): `module purge; module load Stages/2025 GCC Python; module restore
-  nastjapy && module load ParaStationMPI && source <cluster-venv>/bin/activate && export
+  sim_backend && module load ParaStationMPI && source <cluster-venv>/bin/activate && export
   PROPULATE_SKIP_DISCONNECT=1 && srun --ntasks=N ... python <runner> ...` (set SKIP_DISCONNECT for any
   multi-rank job to dodge the pscom teardown hang).
 - **Compile paper**: `cd latex/sn-article-template && latexmk -pdf -interaction=nonstopmode -halt-on-error
@@ -103,15 +103,15 @@ quality" (it's throughput-only) → cross-ref added. 3. Fig 2 panels plotted tol
   would confirm the revisions hold.
 
 ## Data locations (on the mount)
-- Benchmarks: `run_full_20260626_1816/{gaussian_mean,gandk,lotka_volterra,cellular_potts,sbc,
+- Benchmarks: `run_full_20260626_1816/{gaussian_mean,gandk,lotka_volterra,realistic_workload,sbc,
   runtime_heterogeneity,sensitivity,ablation}/` (+ `_shards/` for sharded).
 - Gaussian re-run (validated OOM fix): `gaussian_rerun_20260628/gaussian_mean/`.
-- CPM scaling 48/96: `run_cpm_20260626_1906/scaling_cpm/`.
-- CPM scaling fill-in (in progress): `run_cpm_fillin_20260628/scaling_cpm/`.
+- realistic workload scaling 48/96: `run_cpm_20260626_1906/scaling_cpm/`.
+- realistic workload scaling fill-in (in progress): `run_cpm_fillin_20260628/scaling_cpm/`.
 - Straggler data is NOT in run_full (job was cancelled); Fig 1 uses the committed `fig_straggler_throughput.pdf`.
 
 ## Figures regenerated this session (in `latex/.../figures/`, tracked)
-`fig_gaussian_recovery` · `fig_sensitivity_heatmap` · `fig_cpm_corner` (now §7.3, label `fig:cpm-posterior`) ·
+`fig_gaussian_recovery` · `fig_sensitivity_heatmap` · `fig_cpm_corner` (now §7.3, label `fig:realistic-posterior`) ·
 `fig_posterior_recovery` (Wasserstein, replaced the 3 tolerance panels) · `fig_hetero_idle` (single panel) ·
 `fig_hetero_quality` (new). Orphaned-but-tracked (unused now, left in place): `fig_cpm_scaling_throughput/quality`,
-`fig_hetero_throughput`, `fig_{gandk,lotka,cpm}_progress`. Untracked draft: `fig_cpm_scaling.pdf` (2-point CPM).
+`fig_hetero_throughput`, `fig_{gandk,lotka,realistic}_progress`. Untracked draft: `fig_cpm_scaling.pdf` (2-point realistic workload).

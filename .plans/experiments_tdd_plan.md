@@ -25,7 +25,7 @@ experiments/
 │   │   ├── gaussian_mean.py       # analytic posterior sanity check
 │   │   ├── gandk.py               # g-and-k distribution
 │   │   ├── lotka_volterra.py      # stochastic population dynamics
-│   │   └── cellular_potts.py      # stub — requires nastjapy
+│   │   └── realistic_workload.py      # stub — requires sim_backend
 │   ├── inference/
 │   │   ├── __init__.py
 │   │   ├── method_registry.py     # METHOD_REGISTRY dict + run_method()
@@ -116,7 +116,7 @@ test_gandk_deterministic_seed         — same seed → same result
 test_lv_positive_populations          — populations never go negative
 test_lv_extinction_handled            — large loss on extinction
 test_lv_deterministic_seed            — same seed → same trajectory
-test_cellular_potts_stub              — ImportError with helpful message
+test_realistic_workload_stub              — ImportError with helpful message
 ```
 
 ### Implementation
@@ -124,7 +124,7 @@ test_cellular_potts_stub              — ImportError with helpful message
 - `gaussian_mean.py` — N(θ, σ²), summary = |sample_mean - θ_obs|
 - `gandk.py` — g-and-k quantile distribution, 8 summary stats
 - `lotka_volterra.py` — stochastic LV, Gillespie/ODE, extinction handling
-- `cellular_potts.py` — stub raising ImportError
+- `realistic_workload.py` — stub raising ImportError
 
 ---
 

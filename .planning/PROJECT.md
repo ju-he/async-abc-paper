@@ -44,7 +44,7 @@ Experiments must run reliably to completion on the cluster — all paper results
 
 - New experiments or benchmarks — focus is stability first, new features later
 - LaTeX/paper writing — separate concern from code stability
-- nastjapy / Cellular Potts changes — not related to the MPI hang issue
+- sim_backend / realistic workload changes — not related to the MPI hang issue
 
 ## Context
 
@@ -57,7 +57,7 @@ Experiments must run reliably to completion on the cluster — all paper results
 ## Constraints
 
 - **Tech stack:** Python ≥3.10, mpi4py, pyABC, Propulate 1.2.2, ParaStationMPI (JUWELS)
-- **Test env:** Local tests use `nastjapy_copy/.venv`; MPI integration tests run with `mpirun`
+- **Test env:** Local tests use `sim_backend_venv/.venv`; MPI integration tests run with `mpirun`
 - **Reproducibility:** Experiments use deterministic seeds from `seeding.py`; `--extend` mode reads existing CSVs to skip completed runs
 
 ## Key Decisions

@@ -162,7 +162,7 @@ Since this was a `--test` run (1 replicate, 100 max simulations, 2
 generations, 30s wall time cap), the following are expected limitations:
 
 - **Benchmark posteriors** (gaussian_mean, gandk, lotka_volterra,
-  cellular_potts): posteriors are broad/undersampled with only 100 simulations
+  realistic_workload): posteriors are broad/undersampled with only 100 simulations
   — this is fine for pipeline validation, not for paper-quality inference.
 
 - **SBC**: only 2 trials instead of 300 — rank histograms will be sparse and

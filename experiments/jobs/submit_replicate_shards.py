@@ -124,7 +124,7 @@ def _render_script(
     nodes: int,
     job_name: str,
     log_path: Path,
-    nastjapy_path: str,
+    backend_path: str,
 ) -> str:
     args = [
         "python",
@@ -158,11 +158,11 @@ def _render_script(
 #SBATCH --job-name={job_name}
 #SBATCH --output={log_path}
 
-nastjapy_path={nastjapy_path}
+backend_path={backend_path}
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$backend_path/.venv/bin/activate"
 
 mkdir -p "{output_dir}"
 srun {command}
@@ -212,9 +212,9 @@ def main() -> None:
         help=f"Maximum auto-derived SLURM wall time for estimated runs (default: {DEFAULT_MAX_TIME}).",
     )
     parser.add_argument(
-        "--nastjapy-path",
+        "--backend-path",
         default=None,
-        help="Path containing the cluster virtualenv (default: auto-detect from $SYSTEMNAME via _site.py, or $NASTJAPY_PATH).",
+        help="Path containing the cluster virtualenv (default: auto-detect from $SYSTEMNAME via _site.py, or $SIM_BACKEND_PATH).",
     )
     args = parser.parse_args()
 
@@ -225,8 +225,8 @@ def main() -> None:
         if args.partition is None:
             args.partition = site_partition
 
-    if args.nastjapy_path is None:
-        args.nastjapy_path = _site.detect_nastjapy_path()
+    if args.backend_path is None:
+        args.backend_path = _site.detect_backend_path()
 
     experiment_names = _resolve_experiments(args.experiments)
 
@@ -376,7 +376,7 @@ def main() -> None:
                     nodes=nodes,
                     job_name=job_name,
                     log_path=log_path,
-                    nastjapy_path=args.nastjapy_path,
+                    backend_path=args.backend_path,
                 )
             )
             submit_cmd = ["sbatch", str(script_path)]

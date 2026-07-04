@@ -11,7 +11,7 @@
 # Override SLURM log path at submission time: sbatch --output=<dir>/abc_test_all-%j.out ...
 
 # Paths are injected by experiments/jobs/submit.sh via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via experiments/jobs/submit.sh}"
 experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
 default_output_root="${SITE_SCRATCH_ROOT:?SITE_SCRATCH_ROOT not set — submit via experiments/jobs/submit.sh}/test"
 output_dir=""
@@ -48,9 +48,9 @@ done
 
 output_dir="${output_dir:-$default_output_root/test_all_${SLURM_JOB_ID:-local}}"
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$backend_path/.venv/bin/activate"
 
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
@@ -58,7 +58,7 @@ echo "Using output_dir=$output_dir"
 
 srun python "$experiments_dir/run_all_paper_experiments.py" \
     --test \
-    --experiments gaussian_mean gandk lotka_volterra cellular_potts sbc \
+    --experiments gaussian_mean gandk lotka_volterra realistic_workload sbc \
                   straggler runtime_heterogeneity scaling sensitivity ablation \
     --output-dir "$output_dir" \
     ${extend_flag:+"$extend_flag"}

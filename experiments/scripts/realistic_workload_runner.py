@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Runner for the Cellular Potts model benchmark experiment.
+"""Runner for the realistic-workload benchmark experiment.
 
 Reference Data
 --------------
-The default CPM config already points at bundled reference assets in
-``experiments/assets/cellular_potts``. Regenerate them only if you want to
+The default config already points at bundled reference assets in
+``experiments/assets/realistic_workload``. Regenerate them only if you want to
 replace the default reference data::
 
     python experiments/scripts/generate_cpm_reference.py \\
-        --config-template experiments/assets/cellular_potts/sim_config.json \\
-        --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
-        --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
-        --true-params '{"division_rate": 0.049905, "motility": 0.2}' \\
+        --config-template experiments/assets/realistic_workload/sim_config.json \\
+        --config-builder-params experiments/assets/realistic_workload/config_builder_params.json \\
+        --parameter-space experiments/assets/realistic_workload/parameter_space.json \\
+        --true-params '{"theta_2": 0.049905, "theta_1": 0.2}' \\
         --seed 0
 
-Then update ``reference_data_path`` in ``experiments/configs/cellular_potts.json``
+Then update ``reference_data_path`` in ``experiments/configs/realistic_workload.json``
 if you want this runner to use the newly generated directory instead.
 """
 import sys
@@ -38,10 +38,10 @@ from async_abc.utils.runner import (
 
 
 def _prepare_runtime_cfg(cfg: dict, output_dir: OutputDir) -> dict:
-    """Return cfg with CPM scratch output redirected into this experiment run."""
+    """Return cfg with simulation scratch output redirected into this experiment run."""
     cfg = dict(cfg)
     benchmark_cfg = dict(cfg["benchmark"])
-    benchmark_cfg["output_dir"] = str(output_dir.root / "cpm_sims")
+    benchmark_cfg["output_dir"] = str(output_dir.root / "realistic_sims")
     cfg["benchmark"] = benchmark_cfg
     return cfg
 
@@ -49,7 +49,7 @@ def _prepare_runtime_cfg(cfg: dict, output_dir: OutputDir) -> dict:
 def main(argv: list[str] | None = None) -> None:
     run_benchmark_runner(
         argv,
-        description="Cellular Potts model benchmark experiment.",
+        description="Realistic-workload benchmark experiment.",
         runner_script_path=str(Path(__file__).resolve()),
         configure_logging_fn=configure_logging,
         load_config_fn=load_config,

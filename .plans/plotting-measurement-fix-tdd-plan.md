@@ -14,7 +14,7 @@
 
 - Reproduce the known runtime heterogeneity, straggler, Lotka-Volterra, and summary-plot issues with tests first.
 - Repair recorded measurement semantics before changing paper-facing visuals.
-- Use `nastjapy_copy/.venv/bin/python -m pytest ...` for all validation.
+- Use `sim_backend_venv/.venv/bin/python -m pytest ...` for all validation.
 - Keep replicate-level figures as diagnostics, but make canonical plot names emit paper-facing summaries.
 
 ## Phase 0: Reproduction
@@ -126,14 +126,14 @@
 ### Commands
 
 ```bash
-nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_plotting.py
-nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_sharding.py
-nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_runners.py
+sim_backend_venv/.venv/bin/python -m pytest experiments/tests/test_plotting.py
+sim_backend_venv/.venv/bin/python -m pytest experiments/tests/test_sharding.py
+sim_backend_venv/.venv/bin/python -m pytest experiments/tests/test_runners.py
 ```
 
 ## Progress Log
 
-- 2026-03-25: Created implementation plan file and aligned it to the confirmed venv path `nastjapy_copy/.venv`.
+- 2026-03-25: Created implementation plan file and aligned it to the confirmed venv path `sim_backend_venv/.venv`.
 - 2026-03-25: Added benchmark audit export and skip-metadata support for invalid paper plots via `plot_audit.csv`, `plot_audit_summary.json`, and `_meta.json` skip records.
 - 2026-03-25: Fixed extension compatibility normalization so new plotting/analysis defaults do not break `--add-replicates` shard submission against older metadata.
 - 2026-03-25: Fixed runtime heterogeneity aggregation by separating `worker_idle` and `barrier_overhead` by `(sigma, base_method, measurement_method, replicate)` and faceting worker Gantt diagnostics by method.
@@ -143,7 +143,7 @@ nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_runners.py
 - 2026-03-25: Added threshold guardrail `analysis.min_particles_for_threshold` to convergence logic and made threshold plots skip with explicit metadata when the target is not reached under that guard.
 - 2026-03-25: Upgraded sensitivity heatmap layout, ablation summaries, SBC coverage summaries, and runtime/straggler paper plots to include uncertainty-aware summary outputs.
 - 2026-03-25: Added regression coverage in `test_analysis.py`, `test_plotting.py`, `test_runners.py`, `test_sbc.py`, and confirmed `test_sharding.py` remains green under the new defaults.
-- 2026-03-25: Validation completed for `experiments/tests/test_analysis.py`, `experiments/tests/test_plotting.py`, `experiments/tests/test_sharding.py`, `experiments/tests/test_runners.py`, and `experiments/tests/test_sbc.py` with `nastjapy_copy/.venv/bin/python -m pytest ...`.
+- 2026-03-25: Validation completed for `experiments/tests/test_analysis.py`, `experiments/tests/test_plotting.py`, `experiments/tests/test_sharding.py`, `experiments/tests/test_runners.py`, and `experiments/tests/test_sbc.py` with `sim_backend_venv/.venv/bin/python -m pytest ...`.
 - 2026-03-25: Added retry support for `--finalize-only` after shard batches that failed during finalization, which allowed the saved `runtime_heterogeneity` batch `run_20260324_222442` to publish a top-level output tree successfully.
 - 2026-03-25: Added `replot.py` coverage for SBC so saved `sbc_ranks.csv` and `coverage.csv` can regenerate paper/diagnostic plots without rerunning inference.
 - 2026-03-25: Added Lotka-specific `tol_init` diagnostics and tightened the audit to mark pathologically fallback-dominated runs invalid for paper-facing quality/threshold plots.

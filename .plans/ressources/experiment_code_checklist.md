@@ -34,7 +34,7 @@ project_root/
       submit_replicate_shards.py
   .plans/
     ressources/
-  nastjapy_copy/.venv/
+  sim_backend_venv/.venv/
 ```
 
 ## 2. Core Requirements
@@ -114,7 +114,7 @@ Valid constants (defined in `schema.py`):
 ```python
 VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
 VALID_KERNELS = {"hard", "gaussian", "epanechnikov"}
-VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
+VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "realistic_workload"}
 ```
 
 Inference-config knobs introduced by the smooth-kernel + AMIS track (paper
@@ -373,19 +373,19 @@ Outputs:
 - Lotka-specific fallback / `tol_init` calibration diagnostics
 - CSVs and metadata
 
-### 4.4 Cellular Potts benchmark using cellsInSilico / nastjapy
+### 4.4 realistic workload benchmark using sim_backend / sim_backend
 
 Required files:
 
-- `experiments/async_abc/benchmarks/cellular_potts.py`
+- `experiments/async_abc/benchmarks/realistic_workload.py`
 - `experiments/async_abc/benchmarks/cellular_potts_wrappers.py`
 - `experiments/scripts/cellular_potts_runner.py`
-- `experiments/configs/cellular_potts.json`
-- `experiments/configs/small/cellular_potts.json`
+- `experiments/configs/realistic_workload.json`
+- `experiments/configs/small/realistic_workload.json`
 
 Required functionality:
 
-- wrapper around `cellsInSilico` / `nastjapy`
+- wrapper around `sim_backend` / `sim_backend`
 - parameterized simulation entry point
 - summary statistics extraction
 - discrepancy function
@@ -721,7 +721,7 @@ Key files with wall-time values:
 experiments/configs/gaussian_mean.json        (max_wall_time_s: 300)
 experiments/configs/gandk.json                (max_wall_time_s: 600)
 experiments/configs/lotka_volterra.json        (max_wall_time_s: 600)
-experiments/configs/cellular_potts.json        (max_wall_time_s: 3600)
+experiments/configs/realistic_workload.json        (max_wall_time_s: 3600)
 experiments/configs/runtime_heterogeneity.json (max_wall_time_s: 60)
 experiments/configs/scaling.json              (max_wall_time_s: 900)
 experiments/configs/sensitivity.json          (max_wall_time_s: 300)
@@ -732,7 +732,7 @@ experiments/configs/sbc.json                  (max_wall_time_s: 300)
 experiments/configs/small/gaussian_mean.json   (max_wall_time_s: 120)
 experiments/configs/small/gandk.json           (max_wall_time_s: 300)
 experiments/configs/small/lotka_volterra.json   (max_wall_time_s: 300)
-experiments/configs/small/cellular_potts.json   (max_wall_time_s: 1800)
+experiments/configs/small/realistic_workload.json   (max_wall_time_s: 1800)
 ...and small/ variants for all other configs
 ```
 
@@ -775,7 +775,7 @@ Quick-validation constraints remain:
 - small simulation budgets
 - reduced scaling grid
 - reduced seeds and replicates
-- short Cellular Potts runs
+- short realistic workload runs
 
 ## 10. Minimum Testing Checklist
 
@@ -790,7 +790,7 @@ Before paper release, verify all of the following.
 - [ ] Paper-facing benchmark plots emit summary outputs and diagnostic companions when enabled.
 - [ ] Audit-blocked paper plots emit skip metadata instead of silent omission.
 - [ ] pyABC comparisons are included where configured.
-- [ ] Gaussian, g-and-k, Lotka-Volterra, Cellular Potts, SBC, and straggler experiments all run end-to-end.
+- [ ] Gaussian, g-and-k, Lotka-Volterra, realistic workload, SBC, and straggler experiments all run end-to-end.
 - [ ] Runtime heterogeneity, scaling, sensitivity, and ablation experiments all run end-to-end.
 
 ## 11. Recommended Implementation Order
@@ -805,7 +805,7 @@ To minimize integration risk, implement in this order.
 6. pyABC method wrapper
 7. Scaling and runtime heterogeneity scripts
 8. Sensitivity and ablation scripts
-9. Cellular Potts integration
+9. realistic workload integration
 10. Full `run_all_paper_experiments.py` orchestration
 11. Test-mode validation for the entire pipeline
 

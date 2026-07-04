@@ -13,7 +13,7 @@ computational performance against the primary `async_propulate_abc` method:
 All 6 original TDD phases are complete (139 tests). This plan adds ~30 new tests and 2 new source
 files while fixing the existing pyabc wrapper.
 
-**Venv for testing:** `/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv` (has pyabc 0.12.17)
+**Venv for testing:** `/home/juhe/bwSyncShare/Code/mirrors/sim_backend_venv/.venv` (has pyabc 0.12.17)
 
 ---
 
@@ -29,7 +29,7 @@ files while fixing the existing pyabc wrapper.
 
 ### Tests: `TestPyabcWrapperFixes` (7 tests in `test_inference.py`) — ✅
 
-**Note:** pyabc requires `async-timeout` which was missing from the nastjapy_copy venv.
+**Note:** pyabc requires `async-timeout` which was missing from the sim_backend_venv venv.
 Fixed by running: `pip install async-timeout` in that venv.
 
 ---
@@ -113,10 +113,10 @@ Added `n_generations: 3` clamp to `TEST_MODE_OVERRIDES["clamp"]["inference"]`.
 cd /home/juhe/bwSyncShare/Code/async-abc-paper/experiments
 
 # Full test suite
-/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/pytest tests/ -v
+/home/juhe/bwSyncShare/Code/mirrors/sim_backend_venv/.venv/bin/pytest tests/ -v
 
 # End-to-end runner smoke test
-/home/juhe/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/python \
+/home/juhe/bwSyncShare/Code/mirrors/sim_backend_venv/.venv/bin/python \
   scripts/gaussian_mean_runner.py \
   --config configs/gaussian_mean.json \
   --output-dir /tmp/test_comparison \

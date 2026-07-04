@@ -19,9 +19,9 @@
 #SBATCH --job-name=abc_scaling
 #SBATCH --output=/tmp/abc_scaling_cpm-%j.out
 
-# Paths are injected by submit_scaling_cpm.py (or submit.sh) via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via submit_scaling_cpm.py}"
-experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling_cpm.py}"
+# Paths are injected by submit_scaling.py (or submit.sh) via `sbatch --export`.
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via submit_scaling.py}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling.py}"
 config_path="$experiments_dir/configs/scaling_cpm.json"
 output_dir=""
 test_flag=""
@@ -81,22 +81,22 @@ fi
 
 n_workers="${SLURM_NTASKS}"
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$backend_path/.venv/bin/activate"
 
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
 # Skip the ParaStation MPI_Comm_free that hangs in pscom_close at high message
 # volume (see scaling_single.sh). With one combo per process, skipping Free
-# leaks one communicator per process, reclaimed at process exit — safe. CPM's
+# leaks one communicator per process, reclaimed at process exit — safe. realistic workload's
 # slow sims keep volume low so it has not hit the hang, but enabling this keeps
 # it robust. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce.
 export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
 
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
-# (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. CPM's slow
+# (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. realistic workload's slow
 # sims keep message volume low so it has not hit the pscom teardown hang, but
 # isolating combos keeps it robust as the grid grows. Aggregates rebuilt at end.
 runner="$experiments_dir/scripts/scaling_cpm_runner.py"

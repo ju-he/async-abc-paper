@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Combined strong-scaling figure: Lotka-Volterra (cheap sim) vs Cellular Potts
+"""Combined strong-scaling figure: Lotka-Volterra (cheap sim) vs realistic workload
 (costly sim), async vs a FAIR synchronous baseline (fig_scaling_combined.pdf).
 
 The synchronous pyABC ABC-SMC baseline caps its concurrency at the population
@@ -15,7 +15,7 @@ overhead. Async's streaming coordination costs it per arrival (its own island
 broadcast is O(W) per eval), so on a free simulator the extra workers are not worth
 it; the fair synchronous baseline is competitive.
 
-Right (Cellular Potts, costly simulator): real per-evaluation cost amortizes the
+Right (realistic workload, costly simulator): real per-evaluation cost amortizes the
 coordination, so async scales ~linearly to 8 nodes while even the fair synchronous
 baseline plateaus at the generation barrier (it must wait for the slowest of a
 whole population each generation).
@@ -49,7 +49,7 @@ def _lv_src(w: int, method: str) -> tuple[str, int]:
         return LV_PACK, 100                        # async multi-node, k=100 archive throughout
     return LV_FAIR, w                              # FAIR sync: population = world size
 
-# ---- Cellular Potts data sources -------------------------------------------------
+# ---- Realistic-workload data sources -------------------------------------------------
 CPM_FILL = f"{SCRATCH}/run_cpm_fillin_20260628/scaling_cpm/data"    # 1/4/16
 CPM_ORIG = f"{SCRATCH}/run_cpm_20260626_1906/scaling_cpm/data"      # 48/96
 CPM_EXT = f"{SCRATCH}/cpm_scaling_ext_20260630/scaling_cpm/data"    # 192/384 async
@@ -111,7 +111,7 @@ def _panel_categorical(ax, workers, a, s, title):
 
 
 def _panel_loglog(ax, workers, a, s, title):
-    """Cellular Potts: log-log throughput with an ideal-linear reference."""
+    """Realistic workload: log-log throughput with an ideal-linear reference."""
     ideal = [a[0][0] * (w / workers[0]) for w in workers]
     ax.plot(workers, ideal, ":", color="0.55", lw=1.4, label="ideal linear", zorder=1)
     for arr, st in [(a, A_STYLE), (s, S_STYLE)]:
@@ -139,7 +139,7 @@ def main() -> None:
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.5, 4.4))
 
     _panel_categorical(axL, LV_WORKERS, lv_a, lv_s, "Lotka--Volterra (near-instant simulator)")
-    _panel_loglog(axR, CPM_WORKERS, cpm_a, cpm_s, "Cellular Potts (costly simulator)")
+    _panel_loglog(axR, CPM_WORKERS, cpm_a, cpm_s, "Realistic workload (costly simulator)")
 
     # One shared legend beneath both panels.
     handles, labels = axR.get_legend_handles_labels()
@@ -151,9 +151,9 @@ def main() -> None:
     print("LV  workers:", LV_WORKERS)
     print("LV  async  :", [round(x, 1) for x in lv_a[0]])
     print("LV  sync   :", [round(x, 1) for x in lv_s[0]])
-    print("CPM workers:", CPM_WORKERS)
-    print("CPM async  :", [round(x, 2) for x in cpm_a[0]])
-    print("CPM sync   :", [round(x, 2) for x in cpm_s[0]])
+    print("RW workers:", CPM_WORKERS)
+    print("RW async  :", [round(x, 2) for x in cpm_a[0]])
+    print("RW sync   :", [round(x, 2) for x in cpm_s[0]])
 
 
 if __name__ == "__main__":

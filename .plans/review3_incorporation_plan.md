@@ -60,9 +60,9 @@ every-particle bias.
   scales ~linearly *within a node*; the knee is the single-node→multi-node boundary (inter-node
   coordination latency in the single-island propagator), which only bites because LV is
   near-instantaneous. Replace "coordination-bound plateau" with the explicit node-boundary explanation.
-- **C (lead with CPM):** make CPM the headline strong-scaling result (cost-bearing simulator amortizes
+- **C (lead with realistic workload):** make realistic workload the headline strong-scaling result (cost-bearing simulator amortizes
   coordination → async ~linear, sync plateaus). Present LV explicitly as the *adversarial
-  near-instantaneous stress case* → the decline becomes evidence FOR the thesis. Uses the 5-point CPM
+  near-instantaneous stress case* → the decline becomes evidence FOR the thesis. Uses the 5-point realistic workload
   scaling figure (data already in hand; see WS5).
 - **D (sync + variance):** add IQR / error bars to Table 3 (l.228) and Fig 3 (`fig:scaling`); explain the
   non-monotone sync baseline (148→86→111→146→121) as fixed-900s-budget-window quantization (few
@@ -88,36 +88,36 @@ every-particle bias.
 - **Write:** convert Limitation (iv) (l.319) from "measured but not corrected" to a *quantified* result
   with a small figure/table; keep it honest (still uncorrected, now bounded).
 
-### WS5 — CPM figure + abstract softening + Fig 6 difference plot · Moderate CPM (+ pending HANDOFF item)
-- Build the **5-point CPM scaling figure** (1,4,16 from `run_cpm_fillin_20260628`, 48,96 from
+### WS5 — realistic workload figure + abstract softening + Fig 6 difference plot · Moderate realistic workload (+ pending HANDOFF item)
+- Build the **5-point realistic workload scaling figure** (1,4,16 from `run_cpm_fillin_20260628`, 48,96 from
   `run_cpm_20260626_1906`) — data confirmed present. Regenerate `figures/fig_cpm_scaling.pdf` as the
-  5-point version; wire into §7.3 (currently shows `fig_cpm_corner.pdf`, `fig:cpm-posterior`).
+  5-point version; wire into §7.3 (currently shows `fig_cpm_corner.pdf`, `fig:realistic-posterior`).
   Throughput is **metric-invariant** → unaffected by the improved nano configs; proceed as-is.
-- **Reframe CPM quality via structural degeneracy (NEW, decided 2026-06-29).** The paper's CPM infers
-  division_rate + motility jointly (`parameter_space_division_motility.json`, true div=0.0499, mot=0.2).
-  The user's nano validation campaign (nastjapy `inference-campaign`, D1f/D1g) proves these are
-  *structurally degenerate at nano scale* — division_rate is unrecoverable with motility free (D1f failed;
-  D1g succeeded only with motility fixed). So "weakly identified by both, async ~0.47 vs sync ~0.40 near
+- **Reframe realistic workload quality via structural degeneracy (NEW, decided 2026-06-29).** The paper's realistic workload infers
+  theta_2 + theta_1 jointly (`parameter_space_division_theta_1.json`, true div=0.0499, mot=0.2).
+  The user's nano validation campaign (sim_backend `inference-campaign`, D1f/D1g) proves these are
+  *structurally degenerate at nano scale* — theta_2 is unrecoverable with theta_1 free (D1f failed;
+  D1g succeeded only with theta_1 fixed). So "weakly identified by both, async ~0.47 vs sync ~0.40 near
   the floor" is a property of the 2-parameter nano problem, shared equally by both methods — NOT an async
   weakness. Reword §7.3 to say so: both methods are correctly limited by a known identifiability
   degeneracy, which *isolates* the systems advantage as orthogonal to identifiability. This is free and
   defuses the reviewer's "figure doesn't favor you" better than a rerun.
-- **Decision: do NOT rerun CPM on the improved configs.** Systems claim is metric-invariant; a quality
-  showcase is unnecessary (reviewer: CPM's job is feasibility + throughput; quality carried by
+- **Decision: do NOT rerun realistic workload on the improved configs.** Systems claim is metric-invariant; a quality
+  showcase is unnecessary (reviewer: realistic workload's job is feasibility + throughput; quality carried by
   g-and-k/LV); a rerun would force rerunning BOTH arms on identical improved configs (expensive) with
   risk the every-particle bias bites once identifiable (studied cleanly in WS4 instead).
-- Soften abstract CPM clause (l.35): "we demonstrate … realistic Cellular Potts workload" →
+- Soften abstract realistic workload clause (l.35): "we demonstrate … realistic realistic workload workload" →
   practical, *comparable* quality + throughput advantage (don't oversell quality).
 - **Fig 6 difference plot:** add a difference panel (async − sync Wasserstein vs budget) so "comparable"
   is legible instead of the async curve sitting above sync.
 - **OPTIONAL macro-spheroid feasibility capstone (NON-gating).** If an async-only macro-spheroid run
-  (~8–17 h/sim, ~50× slower, heterogeneous runtime; nastjapy `spheroid_inf_small`) is available before
+  (~8–17 h/sim, ~50× slower, heterogeneous runtime; sim_backend `spheroid_inf_small`) is available before
   submission, fold it in as a *non-comparative* feasibility + worker-utilization demonstration: method
   scales to a frontier workload and sustains high utilization / low idle fraction. NO matched sync
   baseline (running it would be prohibitively wasteful — which IS the argument). Frame strictly as
   feasibility, never head-to-head. Sharpens RQ3 (see WS6). To be reusable, macro runs must log:
   per-worker utilization/idle time series, throughput, wall-clock-to-posterior, posterior vs reference.
-  If unavailable, paper stands on nano CPM + LV + straggler; RQ3 still sharpened in prose.
+  If unavailable, paper stands on nano realistic workload + LV + straggler; RQ3 still sharpened in prose.
 
 ### WS6 — Minors (writing-only)
 - Condition 3 typo (l. near 165 / theory block): `n ↓ ∞ > 0` → `ε_n ↓ ε_∞ > 0`; fix garbled ε
@@ -139,14 +139,14 @@ New cluster jobs only:
    isn't logged, one 1-rep instrumented run at 48/128/256.
 Budget: soft 24 / hard 96 node-h rolling 24 h (~80 nh nominal, ~12 nh phantom-reserved). All three above
 are small; keep reservations modest to avoid the soft-limit elicitation. Deploy via rsync (see HANDOFF
-infra cheat-sheet). venv: cluster `/p/project1/tissuetwin/herold2/nastjapy/.venv`; local tests
-`nastjapy_copy/.venv/bin/python`.
+infra cheat-sheet). venv: cluster `/p/project1/tissuetwin/herold2/sim_backend/.venv`; local tests
+`sim_backend_venv/.venv/bin/python`.
 
 ## Sequencing
 1. **Code + local test (venv):** parameter-dependent-delay hook (WS4); SBC config bump (WS3); check
    whether scaling logs already carry the timing breakdown (WS2-A).
 2. **Submit cluster jobs early** (SBC 1000, bias experiment, optional diagnostic run) — they have latency.
-3. **While jobs run (writing-only, no blockers):** WS1 spine reframe; WS5 CPM 5-point figure (data ready)
+3. **While jobs run (writing-only, no blockers):** WS1 spine reframe; WS5 realistic workload 5-point figure (data ready)
    + abstract softening + Fig 6 difference plot; WS2-C/D prose + Table 3 variance; all of WS6.
 4. **When jobs land:** update Table 4 + SBC figs (WS3); build bias result figure/table (WS4); finalize
    §7.2 attribution (WS2-A).
@@ -158,7 +158,7 @@ infra cheat-sheet). venv: cluster `/p/project1/tissuetwin/herold2/nastjapy/.venv
 - [ ] Major 2 async decline + sync non-monotone → WS2 (A+C+D)
 - [ ] Major 3 SBC N → WS3 (1000 trials)
 - [ ] Moderate iv every-particle bias → WS4 (experiment)
-- [ ] Moderate CPM oversold → WS5 (abstract + 5-pt fig + diff plot)
+- [ ] Moderate realistic workload oversold → WS5 (abstract + 5-pt fig + diff plot)
 - [ ] Moderate single-island bottleneck → WS2 (node-boundary attribution; islands explicitly not the fix)
 - [ ] Minor de-anonymization → N/A (single-blind, leave as-is)
 - [ ] Minor Condition 3 typo / ε subscripts → WS6

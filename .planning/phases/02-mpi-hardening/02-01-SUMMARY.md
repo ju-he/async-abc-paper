@@ -51,7 +51,7 @@ completed: 2026-04-10
 
 # Phase 02 Plan 01: MPI Hardening Test Suite Summary
 
-**Eight-test Phase 2 MPI suite: NaN-weight regression (MPI-03), CommWorldMap 4-scenario coordination via mpirun subprocess helper, barrier source-check, and double-shutdown idempotency — all passing in nastjapy_copy/.venv**
+**Eight-test Phase 2 MPI suite: NaN-weight regression (MPI-03), CommWorldMap 4-scenario coordination via mpirun subprocess helper, barrier source-check, and double-shutdown idempotency — all passing in sim_backend_venv/.venv**
 
 ## Performance
 
@@ -65,7 +65,7 @@ completed: 2026-04-10
 
 - Created `mpi_commworldmap_helper.py`: subprocess helper exercising CommWorldMap in 4 coordination scenarios (normal, root_exception, multi_call, double_shutdown), writing JSON result from rank 0
 - Created `test_mpi_hardening.py`: 8-test pytest module covering NaN-weight regression (TEST-01/MPI-03), CommWorldMap coordination (TEST-01), shutdown idempotency (TEST-03), and Barrier placement source check
-- All 8 tests pass locally in nastjapy_copy/.venv with mpirun available (Open MPI 4.1.2)
+- All 8 tests pass locally in sim_backend_venv/.venv with mpirun available (Open MPI 4.1.2)
 - No production code (pyabc_sampler.py, pyabc_wrapper.py, abc_smc_baseline.py, scaling_runner.py) was modified
 
 ## Task Commits

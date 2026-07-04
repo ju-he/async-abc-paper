@@ -60,7 +60,7 @@ The final plan metadata commit covers this SUMMARY.md and updated STATE.md / ROA
 
 Orchestrator invocation:
 ```
-./nastjapy_copy/.venv/bin/python experiments/run_all_paper_experiments.py \
+./sim_backend_venv/.venv/bin/python experiments/run_all_paper_experiments.py \
     --test --output-dir /tmp/test_paper_results_baseline
 ```
 Log: `/tmp/run_all_baseline.log`
@@ -70,7 +70,7 @@ Log: `/tmp/run_all_baseline.log`
 | gaussian_mean        | 0    | 83    | none    |
 | gandk                | 0    | 87    | none    |
 | lotka_volterra       | 0    | 80    | none    |
-| cellular_potts       | 0    | 85    | none    |
+| realistic_workload       | 0    | 85    | none    |
 | sbc                  | 0    | 29    | none    |
 | straggler            | 0    | 34    | none    |
 | runtime_heterogeneity| 0    | 27    | none    |
@@ -91,7 +91,7 @@ No entries were added to `.plans/bug-fixes/previous-fixes.md` (no bugs found).
 
 Human reviewer executed:
 ```
-./nastjapy_copy/.venv/bin/python experiments/run_all_paper_experiments.py \
+./sim_backend_venv/.venv/bin/python experiments/run_all_paper_experiments.py \
     --test --output-dir /tmp/test_paper_results_baseline 2>&1 | tee /tmp/run_all_baseline.log
 ```
 Exit code: **0**

@@ -2,7 +2,7 @@
 
 ## Overall verdict
 
-**Promising idea, but not yet submission-ready.** The paper has a strong systems motivation and some genuinely compelling HPC evidence, especially the straggler and Cellular Potts scaling results. The core message — generation barriers waste compute under heterogeneous simulator runtimes, and a streaming/asynchronous ABC variant can avoid that — is clear and publishable.
+**Promising idea, but not yet submission-ready.** The paper has a strong systems motivation and some genuinely compelling HPC evidence, especially the straggler and realistic workload scaling results. The core message — generation barriers waste compute under heterogeneous simulator runtimes, and a streaming/asynchronous ABC variant can avoid that — is clear and publishable.
 
 The main weakness is that the manuscript currently tries to be **three papers at once**: a statistical-methods paper with AMIS/CLT guarantees, a systems/HPC paper about barrier removal, and an applied simulator-inference paper. The systems story is the strongest. The statistical-theory story is currently too qualified to carry the headline claims, and the posterior-quality evidence is not yet strong enough for the method-theory framing.
 
@@ -16,7 +16,7 @@ The motivation is excellent. ABC-SMC/PMC barriers are a real bottleneck when sim
 
 The straggler experiment is the cleanest result. Figure 1 gives a simple demonstration: the synchronous baseline collapses as one worker slows, while the asynchronous method stays nearly flat. That is intuitive, convincing, and easy to explain.
 
-The Cellular Potts scaling result is the strongest systems evidence. The distinction between the near-instant Lotka–Volterra case, where communication dominates, and the costly Cellular Potts case, where asynchronous execution scales almost linearly, is valuable and honest. Figure 5 plus Figure 11 are probably the empirical centerpiece of the paper.
+The realistic workload scaling result is the strongest systems evidence. The distinction between the near-instant Lotka–Volterra case, where communication dominates, and the costly realistic workload case, where asynchronous execution scales almost linearly, is valuable and honest. Figure 5 plus Figure 11 are probably the empirical centerpiece of the paper.
 
 The paper is unusually transparent about limitations. The text explicitly acknowledges that the efficient implementation lies outside the formal guarantees, that the proposal-density ratio condition is not satisfied by the bare top-k local Gaussian proposal, and that runtime-coupled sampling can over-represent fast regions. That honesty will help, but the claims must be adjusted accordingly.
 
@@ -101,11 +101,11 @@ Add a table:
 | Gaussian mean |  |  |  |  |
 | g-and-k |  |  |  |  |
 | Lotka–Volterra |  |  |  |  |
-| Cellular Potts |  |  |  |  |
+| realistic workload |  |  |  |  |
 
-Then you can fairly say: for Cellular Potts, the posterior reconstruction is negligible; for near-instant simulators, the method is not the intended regime.
+Then you can fairly say: for realistic workload, the posterior reconstruction is negligible; for near-instant simulators, the method is not the intended regime.
 
-### 5. The Cellular Potts posterior evidence is too weak as currently shown
+### 5. The realistic workload posterior evidence is too weak as currently shown
 
 Figure 12 is a problem. The caption says the asynchronous posterior is summarized by **n = 14** samples, versus 500 for the synchronous baseline and rejection ABC. That undermines the claim of comparable posterior quality on the realistic workload.
 
@@ -116,7 +116,7 @@ Fix options:
 - Report **weighted ESS**, not just raw `n`.
 - Plot weighted particles with credible regions rather than smooth densities if `n` is tiny.
 - Run longer or loosen the posterior extraction threshold to obtain a usable posterior sample size.
-- Make the Cellular Potts posterior claim more conservative: “posterior quality is not visibly worse in this weakly identified setting,” not “comparable” unless the sample support is stronger.
+- Make the realistic workload posterior claim more conservative: “posterior quality is not visibly worse in this weakly identified setting,” not “comparable” unless the sample support is stronger.
 
 ### 6. The novelty claim is risky
 
@@ -209,7 +209,7 @@ Also reduce repetition. The abstract, introduction, implementation, results, dis
 2. **Separate `qbar_buf` and `qbar_full` notation.**
 3. **Add a same-framework synchronous baseline or a factorial execution/estimator ablation.**
 4. **Report end-to-end posterior reconstruction cost.**
-5. **Fix the Cellular Potts posterior evidence, especially the `n = 14` issue.**
+5. **Fix the realistic workload posterior evidence, especially the `n = 14` issue.**
 6. **Add ESS, posterior sample count, and weighted-sample diagnostics for all posterior-quality plots.**
 7. **Formalize asynchronous launch/completion-time history.**
 8. **Soften novelty and theory language.**
@@ -220,6 +220,6 @@ Also reduce repetition. The abstract, introduction, implementation, results, dis
 
 A fair reviewer would probably say:
 
-> The paper addresses an important bottleneck in likelihood-free inference on HPC systems and presents convincing evidence that removing generation barriers improves utilization and throughput for heterogeneous, costly simulators. However, the theoretical guarantees apply only to an idealized estimator whose assumptions are not satisfied by the efficient implementation, and the empirical posterior-quality evidence, especially on the realistic Cellular Potts workload, is currently too thin. The work is promising but requires clearer separation between the idealized theory, the implemented approximation, and the systems-performance claims.
+> The paper addresses an important bottleneck in likelihood-free inference on HPC systems and presents convincing evidence that removing generation barriers improves utilization and throughput for heterogeneous, costly simulators. However, the theoretical guarantees apply only to an idealized estimator whose assumptions are not satisfied by the efficient implementation, and the empirical posterior-quality evidence, especially on the realistic realistic workload workload, is currently too thin. The work is promising but requires clearer separation between the idealized theory, the implemented approximation, and the systems-performance claims.
 
 That is not a fatal review. It is a **major-revision review**, and the paper can be made much stronger by leaning into the systems contribution and reducing the burden placed on the theory.

@@ -35,7 +35,7 @@
 ### Future
 
 - New experiments (scaling at >256 ranks, new benchmarks)
-- Cellular Potts improvements
+- realistic workload improvements
 - Paper-ready figure polish
 
 ## Out of Scope
@@ -44,7 +44,7 @@
 |---------|--------|
 | New experiments / benchmarks | Focus is stability; new features come after cluster runs are reliable |
 | LaTeX / paper writing | Separate concern from code stability |
-| nastjapy / Cellular Potts internal changes | Not related to MPI hang issues |
+| sim_backend / realistic workload internal changes | Not related to MPI hang issues |
 
 ## Traceability
 

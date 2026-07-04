@@ -60,7 +60,7 @@ Not applicable — phase delivers test infrastructure and a migration. No new us
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| pytest collects and runs 8 tests cleanly | `./nastjapy_copy/.venv/bin/python -m pytest experiments/tests/test_mpi_hardening.py -x -v` | 8 passed in 14.17s | PASS |
+| pytest collects and runs 8 tests cleanly | `./sim_backend_venv/.venv/bin/python -m pytest experiments/tests/test_mpi_hardening.py -x -v` | 8 passed in 14.17s | PASS |
 | test_barrier_placement_source_check passes (no mpirun dep) | collected as part of TestMpiHardeningNoMpiRun | PASSED | PASS |
 | test_commworldmap_single_process_double_shutdown passes (no mpirun dep) | collected as part of TestMpiHardening | PASSED | PASS |
 | scaling_runner.py has no MPICommExecutor code uses | `grep "MPICommExecutor\|mpi_executor" scaling_runner.py` | 2 comment-only matches, 0 code uses | PASS |
@@ -95,7 +95,7 @@ Note: The Job ID and exact elapsed_s from the cluster run were not recorded by t
 ### Gaps Summary
 
 No gaps. All must-haves verified:
-- All 8 tests collected and pass in 14.17s on nastjapy_copy/.venv
+- All 8 tests collected and pass in 14.17s on sim_backend_venv/.venv
 - Both non-mpirun tests (source-check, single-process double-shutdown) pass unconditionally
 - mpirun-dependent tests pass (Open MPI 4.1.2 available locally)
 - 48-rank cluster verification PASS (recorded in commworldmap-48rank-verification.md)

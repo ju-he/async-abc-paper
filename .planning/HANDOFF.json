@@ -1,0 +1,29 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-06-28",
+  "context": "default",
+  "status": "paused",
+  "summary": "Drove JUWELS async-ABC production sweep to completion, fixed two gaussian_mean OOMs, wrote paper first draft. Sweep done except sensitivity shard-0 (dropped by user decision).",
+  "completed_tasks": [
+    {"name": "Monitored full production sweep to completion (lotka+CPM scaling, all non-scaling benchmarks)", "status": "done"},
+    {"name": "Cancelled straggler_000 (pscom teardown hang, work already complete+merged)", "status": "done"},
+    {"name": "gaussian OOM cause 1: extract_posterior O(n*k) chunking", "status": "done", "commit": "propulate d9ab64f (pushed to cluster via pushpropulate)"},
+    {"name": "gaussian OOM cause 2: plot_benchmark_diagnostics multi-method history cap", "status": "done", "commit": "async-abc 9423cc9 (refactor/general, NOT yet deployed to cluster)"},
+    {"name": "Paper first draft (15pp, compiles, 17 figs, 11 bib entries)", "status": "done", "path": "latex/sn-article-template/sn-article.tex"},
+    {"name": "Sensitivity: user decided drop shard-0 (accept 3-shard coverage); backfill 14064734 cancelled", "status": "done"}
+  ],
+  "remaining_tasks": [
+    {"name": "Deploy async-abc reporters.py fix to cluster, then re-run gaussian_mean (both OOM fixes now in place) -> fills paper gaussian validity TODO", "status": "not_started"},
+    {"name": "Run sensitivity finalize/merge over shards 1-3 -> top-level sensitivity/ plots -> wire into paper", "status": "not_started"},
+    {"name": "Wire the two paper \\todo panels (gaussian recovery, sensitivity grid) once data ready", "status": "not_started"}
+  ],
+  "blockers": [
+    {"description": "Deploy mechanism for the async-abc repo to the cluster is unknown (pushpropulate alias only covers the propulate fork). Need the async-abc push/rsync before the gaussian re-run uses the plotting fix.", "type": "human_action", "blocking": true}
+  ],
+  "decisions": [
+    {"decision": "Gaussian: subsample dense plot history (keep exact top-k posterior)", "rationale": "posterior/SBC computed on full history; only curves thinned (already <=500 pts)"},
+    {"decision": "Sensitivity: drop shard-0, accept 3-shard coverage", "rationale": "replicate-sharded -> full 192-variant grid covered by shards 1-3; only ~1 replicate of smoothing lost"}
+  ],
+  "next_action": "Find the async-abc->cluster deploy command (ask user / check for an alias like pushpropulate), deploy commit 9423cc9, then re-run gaussian_mean via the jsc-mpc MCP.",
+  "context_notes": "No cron running (monitor stopped). jsc-mpc MCP = juwels-cluster, project async-abc-paper. Mount /home/juhe/remotes/scratch/herold2/async-abc <-> cluster /p/scratch/tissuetwin/herold2/async-abc. Live status doc: .plans/sensitivity_backfill_ready.md."
+}

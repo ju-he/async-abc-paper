@@ -171,7 +171,7 @@ Updated [test_runners.py](/home/juhe/bwSyncShare/Code/async-abc-paper/experiment
 Verified with the requested venv:
 
 ```bash
-nastjapy_copy/.venv/bin/pytest \
+sim_backend_venv/.venv/bin/pytest \
   experiments/tests/test_plotting.py \
   experiments/tests/test_sbc.py \
   experiments/tests/test_runners.py::TestGaussianMeanRunner::test_creates_phase3_plots \

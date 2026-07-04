@@ -5,7 +5,7 @@ Audited results root: `/home/juhe/remotes/scratch/herold2/async-abc/run1`
 Audited code commit: `d93223b7b5361586c9674f695d751153395dfe89`
 
 Scope:
-- Included: `gaussian_mean`, `gandk`, `lotka_volterra`, `cellular_potts`, `runtime_heterogeneity`, `ablation`
+- Included: `gaussian_mean`, `gandk`, `lotka_volterra`, `realistic_workload`, `runtime_heterogeneity`, `ablation`
 - Excluded per request: `sbc`
 - Not assessed here because still ongoing per request: `sensitivity`, `straggler`
 - `scaling` was not part of `submit_replicate_shards.py --experiments all` at this commit, so it is out of scope for this submission audit
@@ -28,7 +28,7 @@ There are also real plotting/reporting problems independent of the failed runs:
 1. PNG export failed everywhere: every plot metadata file has `"png": null`.
 2. Benchmark posterior and corner plots collapse to one method only, because the reporter uses the single global minimum tolerance across all methods.
 3. `runtime_heterogeneity` has a broken Gantt plot with negative times for `sigma > 0`.
-4. `runtime_heterogeneity` and `cellular_potts` are missing configured/expected plots.
+4. `runtime_heterogeneity` and `realistic_workload` are missing configured/expected plots.
 
 ## Global Findings
 
@@ -48,7 +48,7 @@ This is not what we want for a paper run. The test artifact should not count as 
 | `gaussian_mean` | all 4 full shards hit SLURM time limit (`00:30:00`) |
 | `gandk` | all 4 full shards hit SLURM time limit (`01:05:11`) |
 | `lotka_volterra` | all 4 full shards hit SLURM time limit (`00:30:00`) |
-| `cellular_potts` | shards 0 and 3 completed; shards 1 and 2 terminated during `pyabc_smc` with nonzero exit |
+| `realistic_workload` | shards 0 and 3 completed; shards 1 and 2 terminated during `pyabc_smc` with nonzero exit |
 | `runtime_heterogeneity` | all 4 full shards hit SLURM time limit (`02:35:35`) |
 | `ablation` | all 4 full shards hit SLURM time limit (`03:10:06`) |
 
@@ -130,7 +130,7 @@ Plotting/reporting errors:
 - PNG export missing.
 - Posterior/corner plots are not method comparisons.
 
-### `cellular_potts`
+### `realistic_workload`
 
 Did the jobs run as intended?
 - No.
@@ -233,7 +233,7 @@ Impact:
 
 ### D. Missing configured plots
 
-`cellular_potts`:
+`realistic_workload`:
 - config enables `quality_vs_time`
 - no `quality_vs_time` plot exists
 

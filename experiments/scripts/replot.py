@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Experiments that use raw_results.csv as the standard record store.
 _BENCHMARK_EXPERIMENTS = {
-    "gaussian_mean", "gandk", "lotka_volterra", "cellular_potts",
+    "gaussian_mean", "gandk", "lotka_volterra", "realistic_workload",
 }
 
 
@@ -177,7 +177,7 @@ _REPLOT_DISPATCH = {
     "gaussian_mean": _replot_benchmark,
     "gandk": _replot_benchmark,
     "lotka_volterra": _replot_benchmark,
-    "cellular_potts": _replot_benchmark,
+    "realistic_workload": _replot_benchmark,
     "runtime_heterogeneity": _replot_runtime_heterogeneity,
     "straggler": _replot_straggler,
     "sensitivity": _replot_sensitivity,

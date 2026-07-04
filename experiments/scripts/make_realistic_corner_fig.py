@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
-"""Cellular Potts posterior corner (fig_cpm_corner.pdf).
+"""Realistic simulator workload posterior corner (fig_realistic_corner.pdf).
 
-Dedicated replot so the CPM posterior corner follows the same house style as the other
-figures: async = blue, sync = red, rejection = green (the reporter default drew async in
-orange, which did not match the rest of the paper), with readable legend labels instead
-of the raw method keys. Reference values are drawn as dashed lines.
+Dedicated replot so the realistic-workload posterior corner follows the same house style
+as the other figures: async = blue, sync = red, rejection = green (the reporter default
+drew async in orange, which did not match the rest of the paper), with readable legend
+labels instead of the raw method keys. Reference values are drawn as dashed lines.
 
 Note on sample counts: the async posterior in this run is represented by only n=14 points
 against n=500 for the sync/rejection baselines (shown in the legend). The async cloud is
-therefore sparse but tightly concentrated on motility near its reference; the division
-rate is weakly identified for every method. Reads corner_data.csv; no re-derivation.
+therefore sparse but tightly concentrated on θ₁ (the well-identified parameter) near its
+reference; θ₂ (the weakly-identified parameter) is weakly identified for every method.
+Reads corner_data.csv; no re-derivation.
+
+Data-on-disk note: this figure reads OLD scratch runs that are not regenerated, so both
+the input directory and the CSV column names keep their original tokens. The columns are
+still named division_rate / motility in on-disk CSVs; we read those
+on-disk names verbatim and relabel the plot axes as θ₂ (division_rate = theta_2, weakly
+identified) and θ₁ (motility = theta_1, well identified).
 """
 from __future__ import annotations
 
@@ -21,18 +28,20 @@ import pandas as pd
 from scipy.stats import gaussian_kde
 
 CSV = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "cellular_potts/plots/corner_data.csv")
+       "realistic_workload/plots/corner_data.csv")
 # Raw per-particle records, used to reconstruct the async posterior from its actual
 # reported estimator (AMIS posterior_weight) instead of the hard tolerance cut that the
 # generic final-state extractor applies (that cut leaves only n=14 async points because
 # async drove the tolerance far lower than the sync baseline).
 RAW = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "cellular_potts/data/raw_results.csv")
+       "realistic_workload/data/raw_results.csv")
 N_ASYNC_RESAMPLE = 500          # match the sync/rejection final-population size
 RESAMPLE_SEED = 20260701
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_corner.pdf"
+OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_corner.pdf"
 
-REF = {"division_rate": 0.049905, "motility": 0.2}
+# Reference-value dict keyed by the public parameter identifiers (theta_1 = well-identified,
+# theta_2 = weakly-identified). Numeric values unchanged from the original reference point.
+REF = {"theta_2": 0.049905, "theta_1": 0.2}
 STYLE = {
     "async_propulate_abc": dict(label="Asynchronous (ours)", color="#1f77b4"),
     "abc_smc_baseline":    dict(label="Synchronous baseline", color="#d62728"),
@@ -62,6 +71,9 @@ def _async_amis_posterior():
     w = w / w.sum()
     idx = np.random.default_rng(RESAMPLE_SEED).choice(len(a), size=N_ASYNC_RESAMPLE, p=w)
     s = a.iloc[idx]
+    # Read the on-disk raw columns (param_division_rate/param_motility) and keep the same
+    # column names as corner_data.csv (division_rate/motility) so the concat aligns; these
+    # are relabelled to θ₂/θ₁ only at the plotting stage.
     return pd.DataFrame({"method": "async_propulate_abc",
                          "division_rate": s["param_division_rate"].to_numpy(),
                          "motility": s["param_motility"].to_numpy()})
@@ -83,12 +95,12 @@ def main() -> None:
     for m in ORDER:
         sub = df[df["method"] == m]
         c = STYLE[m]["color"]
-        # division-rate marginal (top-left)
+        # θ₂ marginal (top-left); reads the on-disk "division_rate" column
         k = _kde(sub["division_rate"])
         if k is not None:
             ax_d.plot(GRID, k, color=c, lw=1.6)
             ax_d.fill_between(GRID, k, color=c, alpha=0.12, linewidth=0)
-        # motility marginal (bottom-right)
+        # θ₁ marginal (bottom-right); reads the on-disk "motility" column
         k = _kde(sub["motility"])
         if k is not None:
             ax_m.plot(GRID, k, color=c, lw=1.6)
@@ -100,10 +112,10 @@ def main() -> None:
                      edgecolor="white" if big else "none", linewidth=0.4, zorder=3 if big else 2)
 
     # reference lines
-    ax_d.axvline(REF["division_rate"], color="0.35", ls="--", lw=1.0)
-    ax_m.axvline(REF["motility"], color="0.35", ls="--", lw=1.0)
-    ax_j.axvline(REF["division_rate"], color="0.35", ls="--", lw=1.0)
-    ax_j.axhline(REF["motility"], color="0.35", ls="--", lw=1.0)
+    ax_d.axvline(REF["theta_2"], color="0.35", ls="--", lw=1.0)
+    ax_m.axvline(REF["theta_1"], color="0.35", ls="--", lw=1.0)
+    ax_j.axvline(REF["theta_2"], color="0.35", ls="--", lw=1.0)
+    ax_j.axhline(REF["theta_1"], color="0.35", ls="--", lw=1.0)
 
     for ax in (ax_d, ax_j, ax_m):
         ax.set_xlim(0, 1)
@@ -111,9 +123,9 @@ def main() -> None:
     ax_d.set_xticklabels([])
     ax_d.set_yticks([])
     ax_m.set_yticks([])
-    ax_j.set_xlabel("division rate")
-    ax_j.set_ylabel("motility")
-    ax_m.set_xlabel("motility")
+    ax_j.set_xlabel(r"$\theta_2$")
+    ax_j.set_ylabel(r"$\theta_1$")
+    ax_m.set_xlabel(r"$\theta_1$")
 
     # legend (top-right cell), with honest per-method sample counts
     ax_leg.axis("off")

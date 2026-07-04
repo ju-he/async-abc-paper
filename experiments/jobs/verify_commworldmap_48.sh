@@ -20,16 +20,16 @@
 set -u
 
 # Paths are injected by experiments/jobs/submit.sh via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via experiments/jobs/submit.sh}"
 experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
 
 output_dir="${1:?Usage: $(basename "$0") <output_dir>}"
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$backend_path/.venv/bin/activate"
 
 srun python "$experiments_dir/scripts/verify_commworldmap_48.py" \
     "$output_dir/verify_commworldmap_48.json"

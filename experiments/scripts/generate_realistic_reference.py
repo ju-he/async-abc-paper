@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
-"""Generate a CPM reference simulation for use as observed data in the benchmark.
+"""Generate a reference simulation for use as observed data in the realistic-workload benchmark.
 
-This is an optional utility for replacing the bundled CPM reference asset.
+This is an optional utility for replacing the bundled reference asset.
 Run it to produce a new reference simulation directory and then point
-``cellular_potts.json`` at it via ``reference_data_path``.
+``realistic_workload.json`` at it via ``reference_data_path``.
 
 Example
 -------
-    python experiments/scripts/generate_cpm_reference.py \\
-        --config-template experiments/assets/cellular_potts/sim_config.json \\
-        --config-builder-params experiments/assets/cellular_potts/config_builder_params.json \\
-        --parameter-space experiments/assets/cellular_potts/parameter_space_division_motility.json \\
-        --true-params '{"division_rate": 0.049905, "motility": 0.2}' \\
+    python experiments/scripts/generate_realistic_reference.py \\
+        --config-template experiments/assets/realistic_workload/sim_config.json \\
+        --config-builder-params experiments/assets/realistic_workload/config_builder_params.json \\
+        --parameter-space experiments/assets/realistic_workload/parameter_space.json \\
+        --true-params '{"theta_2": 0.049905, "theta_1": 0.2}' \\
         --true-params-scale normalized \\
         --seed 0
 
 Note: --true-params values are in the normalized [0, 1] parameter space by default
 (--true-params-scale normalized).  Physical units for the same reference point are
-division_rate ≈ 0.03, motility = 2000.  Pass --true-params-scale physical to supply
+theta_2 ≈ 0.03, theta_1 = 2000.  Pass --true-params-scale physical to supply
 raw simulator values instead.
 """
 import argparse
@@ -29,22 +29,22 @@ EXPERIMENTS_DIR = Path(__file__).resolve().parents[1]
 if str(EXPERIMENTS_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENTS_DIR))
 
-from async_abc.benchmarks.cellular_potts import (
-    denormalize_cpm_params,
-    _ensure_nastjapy_on_path,
+from async_abc.benchmarks.realistic_workload import (
+    denormalize_params,
+    _ensure_backend_on_path,
     _ensure_reference_alias,
     _rewrite_generated_config_paths,
     _resolve_repo_path,
 )
 
 
-DEFAULT_OUTPUT_DIR = "experiments/data/cpm_reference_generated"
-BUNDLED_ASSET_ROOT = Path("experiments/assets/cellular_potts")
+DEFAULT_OUTPUT_DIR = "experiments/data/realistic_reference_generated"
+BUNDLED_ASSET_ROOT = Path("experiments/assets/realistic_workload")
 
 
 def main(args=None):
     parser = argparse.ArgumentParser(
-        description="Generate CPM reference simulation (prerequisite for benchmark)."
+        description="Generate realistic-workload reference simulation (prerequisite for benchmark)."
     )
     parser.add_argument(
         "--config-template",
@@ -66,7 +66,7 @@ def main(args=None):
         required=True,
         help=(
             'Ground-truth parameter values as a JSON object, e.g. '
-            '\'{"division_rate": 0.049905, "motility": 0.2}\'.  '
+            '\'{"theta_2": 0.049905, "theta_1": 0.2}\'.  '
             "Keys must match entries in --parameter-space."
         ),
     )
@@ -88,7 +88,7 @@ def main(args=None):
         "--seed",
         type=int,
         default=0,
-        help="NAStJA random seed for the reference simulation (default: 0).",
+        help="Random seed for the reference simulation (default: 0).",
     )
     parser.add_argument(
         "--engine-backend",
@@ -105,7 +105,7 @@ def main(args=None):
     parser.add_argument(
         "--seed-param-path",
         default="Settings.randomseed",
-        help="NAStJA config path for the RNG seed field (default: Settings.randomseed).",
+        help="Engine config path for the RNG seed field (default: Settings.randomseed).",
     )
     parser.add_argument(
         "--n-seeds",
@@ -117,7 +117,7 @@ def main(args=None):
             "(seeds 0 … N-1, starting from --seed). When N > 1 each simulation is "
             "written to reference_seed_0/, reference_seed_1/, … inside --output-dir "
             "instead of a single 'reference/' directory. Point 'reference_data_path' "
-            "at --output-dir and CellularPotts will auto-expand all sub-directories. "
+            "at --output-dir and RealisticWorkload will auto-expand all sub-directories. "
             "(default: 1)"
         ),
     )
@@ -127,14 +127,14 @@ def main(args=None):
     bundled_asset_root = _resolve_repo_path(BUNDLED_ASSET_ROOT)
     if output_dir_path == bundled_asset_root or bundled_asset_root in output_dir_path.parents:
         parser.error(
-            "--output-dir must not point into experiments/assets/cellular_potts. "
+            "--output-dir must not point into experiments/assets/realistic_workload. "
             "That directory contains bundled reference assets tracked by git. "
             f"Use the default generated-data location ({DEFAULT_OUTPUT_DIR}) or another "
             "path under experiments/data/."
         )
 
     try:
-        _ensure_nastjapy_on_path()
+        _ensure_backend_on_path()
     except ImportError as exc:
         sys.exit(f"ERROR: {exc}")
 
@@ -175,7 +175,7 @@ def main(args=None):
         parser.error(f"--true-params contains unknown parameter(s): {sorted(unknown)}")
 
     physical_true_params = (
-        denormalize_cpm_params(true_params)
+        denormalize_params(true_params)
         if args.true_params_scale == "normalized"
         else {name: float(value) for name, value in true_params.items()}
     )
@@ -228,14 +228,14 @@ def main(args=None):
     if multi:
         print(
             f"\n{n_seeds} reference simulations written under: {output_dir_path}\n"
-            "Set 'reference_data_path' in cellular_potts.json to the container directory:\n"
+            "Set 'reference_data_path' in realistic_workload.json to the container directory:\n"
             f"  {output_dir_path}\n"
-            "CellularPotts will auto-expand all reference_seed_*/ sub-directories."
+            "RealisticWorkload will auto-expand all reference_seed_*/ sub-directories."
         )
         return str(output_dir_path)
     else:
         print(
-            f"Set 'reference_data_path' in cellular_potts.json to: {generated_paths[0]}"
+            f"Set 'reference_data_path' in realistic_workload.json to: {generated_paths[0]}"
         )
         return generated_paths[0]
 

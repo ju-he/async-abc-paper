@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Cellular Potts posterior-recovery DIFFERENCE panel (fig_cpm_recovery_diff.pdf).
+"""Realistic-workload posterior-recovery DIFFERENCE panel (fig_realistic_recovery_diff.pdf).
 
-Reviewer asked for a difference plot so that "comparable" is legible on the CPM
+Reviewer asked for a difference plot so that "comparable" is legible on the realistic-workload
 posterior-recovery panel. This plots W_async(t) - W_sync(t) (Wasserstein to the
 reference) versus wall-clock, with a zero reference line and an uncertainty envelope
 from the per-method inter-quartile ranges over the five replicates. Each method's
@@ -19,8 +19,8 @@ import numpy as np
 import pandas as pd
 
 CSV = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "cellular_potts/plots/quality_vs_attempt_budget_diagnostic_data.csv")
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_recovery_diff.pdf"
+       "realistic_workload/plots/quality_vs_attempt_budget_diagnostic_data.csv")
+OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_recovery_diff.pdf"
 ASYNC, SYNC = "async_propulate_abc", "abc_smc_baseline"
 
 
@@ -61,7 +61,7 @@ def main() -> None:
     ax.plot(grid, diff, "-", color="#6a3d9a", lw=2.2, label="async $-$ sync (median)")
     ax.set_xlabel("wall-clock time (s)")
     ax.set_ylabel(r"$W_{\mathrm{async}}-W_{\mathrm{sync}}$")
-    ax.set_title("Cellular Potts: posterior-quality difference")
+    ax.set_title("Realistic workload: posterior-quality difference")
     # annotate which direction is good
     ax.text(0.98, 0.04, "below 0: async better", transform=ax.transAxes,
             ha="right", va="bottom", fontsize=9, color="0.4")

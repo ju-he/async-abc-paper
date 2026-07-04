@@ -45,7 +45,7 @@ Findings:
 - both wrappers run inside:
   - `with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:`
 
-Using the cluster venv `nastjapy_copy/.venv`, the installed stack is:
+Using the cluster venv `sim_backend_venv/.venv`, the installed stack is:
 - `mpi4py 4.1.1`
 - `pyabc 0.12.17`
 - `propulate 1.2.2`

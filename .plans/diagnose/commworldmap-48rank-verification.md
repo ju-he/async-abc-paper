@@ -16,7 +16,7 @@
 
 ## Local Smoke Test (prerequisite)
 
-- Command: `mpirun -n 2 ./nastjapy_copy/.venv/bin/python experiments/scripts/verify_commworldmap_48.py /tmp/verify_commworldmap_48_smoke.json`
+- Command: `mpirun -n 2 ./sim_backend_venv/.venv/bin/python experiments/scripts/verify_commworldmap_48.py /tmp/verify_commworldmap_48_smoke.json`
 - Outcome: PASS
 - Records returned: 193
 - Elapsed: 2.6s

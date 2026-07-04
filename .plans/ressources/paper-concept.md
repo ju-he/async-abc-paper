@@ -449,7 +449,7 @@ The suite should be presented in two groups.
 
 Validity evidence:
 
-* Benchmark posterior recovery (Gaussian mean, g-and-k, Lotka-Volterra, Cellular Potts)
+* Benchmark posterior recovery (Gaussian mean, g-and-k, Lotka-Volterra, realistic workload)
 * Gaussian sanity check against the analytic posterior target
 * Simulation-based calibration (SBC)
 
@@ -535,7 +535,7 @@ Evaluation:
 
 ---
 
-## 6.4 Cellular Potts Model
+## 6.4 realistic workload Model
 
 We will use:
 
@@ -1006,7 +1006,7 @@ The paper contributes:
    matched bandwidth schedule, sole methodological difference is the
    synchronisation regime).
 4. **Demonstration on realistic simulator-based models** including the
-   `cellsInSilico` Cellular Potts model — the headline HPC use case.
+   `sim_backend` realistic workload model — the headline HPC use case.
 5. **Empirical posterior calibration validation via SBC** on a benchmark
    with analytic posterior.
 6. **Characterisation of async advantages** under both stochastic and

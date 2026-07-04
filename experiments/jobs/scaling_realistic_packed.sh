@@ -13,15 +13,15 @@
 #SBATCH --threads-per-core=2
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
-#SBATCH --job-name=abc_scaling_cpm_bundle
-#SBATCH --output=/tmp/abc_scaling_cpm_bundle-%j.out
+#SBATCH --job-name=abc_scaling_realistic_bundle
+#SBATCH --output=/tmp/abc_scaling_realistic_bundle-%j.out
 
 set -u
 
-# Paths are injected by submit_scaling_cpm.py (or submit.sh) via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via submit_scaling_cpm.py}"
-experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling_cpm.py}"
-config_path="$experiments_dir/configs/scaling_cpm.json"
+# Paths are injected by submit_scaling.py (or submit.sh) via `sbatch --export`.
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via submit_scaling.py}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling.py}"
+config_path="$experiments_dir/configs/scaling_realistic.json"
 output_dir=""
 workers_csv=""
 test_flag=""
@@ -93,9 +93,9 @@ if [ "${#workers[@]}" -eq 0 ]; then
     exit 2
 fi
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$backend_path/.venv/bin/activate"
 
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
@@ -104,7 +104,7 @@ pids=()
 failed=0
 had_any_run=0
 for n_workers in "${workers[@]}"; do
-    srun --exclusive -N 1 -n "$n_workers" python "$experiments_dir/scripts/scaling_cpm_runner.py" \
+    srun --exclusive -N 1 -n "$n_workers" python "$experiments_dir/scripts/scaling_realistic_runner.py" \
         --config "$config_path" \
         --output-dir "$output_dir" \
         --n-workers "$n_workers" \
@@ -123,7 +123,7 @@ for pid in "${pids[@]}"; do
 done
 
 if [ "$had_any_run" -ne 0 ]; then
-    python "$experiments_dir/scripts/scaling_cpm_runner.py" \
+    python "$experiments_dir/scripts/scaling_realistic_runner.py" \
         --config "$config_path" \
         --output-dir "$output_dir" \
         --finalize-only \

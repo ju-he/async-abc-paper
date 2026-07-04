@@ -14,7 +14,7 @@ The sensitivity experiment has seven concrete problems identified in review:
 
 All phases follow strict TDD: write the failing test first, then implement, then refactor.
 
-**Test runner**: `nastjapy_copy/.venv/bin/pytest experiments/tests/ -x -q`
+**Test runner**: `sim_backend_venv/.venv/bin/pytest experiments/tests/ -x -q`
 
 ---
 
@@ -88,9 +88,9 @@ Steps:
 ### Verification
 
 ```bash
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py -x -q
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_runners.py::TestSensitivityRunner -x -q
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_plotting.py -k sensitivity -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_runners.py::TestSensitivityRunner -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_plotting.py -k sensitivity -x -q
 ```
 
 ---
@@ -135,7 +135,7 @@ class TestSensitivityHeatmapPerScheduler:
 ### Verification
 
 ```bash
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_plotting.py::TestSensitivityHeatmapPerScheduler -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_plotting.py::TestSensitivityHeatmapPerScheduler -x -q
 ```
 
 ---
@@ -179,8 +179,8 @@ class TestSensitivityHeatmapUncertainty:
 ### Verification
 
 ```bash
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_plotting.py -k uncertainty -x -q
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_plotting.py -k uncertainty -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py -x -q
 ```
 
 ---
@@ -231,11 +231,11 @@ class TestSensitivityConfig:
 ### Verification
 
 ```bash
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_config.py::TestSensitivityConfig -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_config.py::TestSensitivityConfig -x -q
 # Then run end-to-end test mode:
-nastjapy_copy/.venv/bin/python experiments/scripts/sensitivity_runner.py \
+sim_backend_venv/.venv/bin/python experiments/scripts/sensitivity_runner.py \
     --config experiments/configs/sensitivity.json --test --output-dir /tmp/sens_test
-nastjapy_copy/.venv/bin/python experiments/scripts/sensitivity_runner.py \
+sim_backend_venv/.venv/bin/python experiments/scripts/sensitivity_runner.py \
     --config experiments/configs/sensitivity_gandk.json --test --output-dir /tmp/sens_gandk_test
 ```
 
@@ -275,7 +275,7 @@ class TestBudgetKeyedTailWindow:
 ### Verification
 
 ```bash
-nastjapy_copy/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py::TestBudgetKeyedTailWindow -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/test_sensitivity_metric.py::TestBudgetKeyedTailWindow -x -q
 ```
 
 ---
@@ -286,14 +286,14 @@ After all phases are complete, run the full test suite and an end-to-end small-m
 
 ```bash
 # Full test suite
-nastjapy_copy/.venv/bin/pytest experiments/tests/ -x -q
+sim_backend_venv/.venv/bin/pytest experiments/tests/ -x -q
 
 # End-to-end sensitivity with gaussian_mean (small mode)
-nastjapy_copy/.venv/bin/python experiments/scripts/sensitivity_runner.py \
+sim_backend_venv/.venv/bin/python experiments/scripts/sensitivity_runner.py \
     --config experiments/configs/sensitivity.json --small --output-dir /tmp/sens_small
 
 # End-to-end sensitivity with gandk (small mode)
-nastjapy_copy/.venv/bin/python experiments/scripts/sensitivity_runner.py \
+sim_backend_venv/.venv/bin/python experiments/scripts/sensitivity_runner.py \
     --config experiments/configs/sensitivity_gandk.json --small --output-dir /tmp/sens_gandk_small
 
 # Verify outputs

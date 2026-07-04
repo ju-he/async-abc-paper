@@ -4,8 +4,8 @@
 
 This plan extends the existing experiment codebase with the analyses, visualizations, and experiments proposed after the initial config review. Every phase is TDD: tests are written (and must fail) before implementation begins.
 
-**Venv:** `~/bwSyncShare/Code/mirrors/nastjapy_copy/.venv`
-**Test runner:** `source ~/bwSyncShare/Code/mirrors/nastjapy_copy/.venv/bin/activate && cd experiments && python -m pytest tests/ -x -q`
+**Venv:** `~/bwSyncShare/Code/mirrors/sim_backend_venv/.venv`
+**Test runner:** `source ~/bwSyncShare/Code/mirrors/sim_backend_venv/.venv/bin/activate && cd experiments && python -m pytest tests/ -x -q`
 **Existing tests:** `experiments/tests/` (9 files, ~700 lines)
 
 ### Core Invariants (carry over from existing plan)
@@ -338,7 +338,7 @@ Implemented note:
 - Added `plot_benchmark_diagnostics(...)` so the benchmark runner scripts can
   honor the expanded `plots` config without duplicating dispatch logic.
 - Updated `gaussian_mean.json`, `gandk.json`, `lotka_volterra.json`,
-  `cellular_potts.json`, and `runtime_heterogeneity.json` with the new plot
+  `realistic_workload.json`, and `runtime_heterogeneity.json` with the new plot
   switches.
 - Fixed a runtime integration bug during implementation by sizing the Gantt
   figure by worker count instead of record count.
