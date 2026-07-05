@@ -9,16 +9,28 @@ The loss function passed to Propulate receives a ``propulate.Individual`` which
 behaves like a dict (``ind["mu"]`` etc.).  Internally, the benchmark's
 ``simulate(params, seed)`` is called with a per-evaluation seed derived from
 the run seed and the individual's generation counter.
+
+Wall-time semantics
+-------------------
+When ``max_wall_time_s`` is configured each MPI rank polls its own local
+clock between evaluations and exits independently — *first-rank-hit*, not
+collective. After the loop the post-loop barriers synchronise the
+population. Individuals whose evaluation completes after the deadline are
+filtered out by ``run_propulate_abc`` so the produced records have a hard
+end-of-budget cap matching the pyABC and rejection-ABC paths.
 """
+import atexit
+import csv
 import hashlib
 import json
 import logging
 import math
+import os
 import random
 import shutil
 import time
 from contextlib import contextmanager
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -48,8 +60,22 @@ def _make_propulate_comm():
 
 
 def _free_propulate_comm(comm) -> None:
-    """Best-effort communicator cleanup after a completed Propulate run."""
+    """Best-effort communicator cleanup after a completed Propulate run.
+
+    On ParaStation MPI at ≥48 ranks, ``MPI_Comm_free`` can take 30+ seconds
+    or hang outright in ``pscom_close`` (W3.4). Operators can opt out of
+    the Free() call by setting ``PROPULATE_SKIP_DISCONNECT=1`` in the job
+    environment; the communicator is then leaked and reclaimed when the
+    Python interpreter exits, which is acceptable for batch runs and
+    avoids the teardown hang.
+    """
     if comm is None:
+        return
+    if os.environ.get("PROPULATE_SKIP_DISCONNECT", "").strip() in ("1", "true", "yes"):
+        logger.debug(
+            "PROPULATE_SKIP_DISCONNECT set; skipping MPI_Comm_free on the "
+            "Propulate run communicator."
+        )
         return
     try:
         comm.Free()
@@ -57,29 +83,62 @@ def _free_propulate_comm(comm) -> None:
         pass
 
 
-def _cleanup_propulate_intra_requests(propulator) -> int:
-    """Prune completed intra-island nonblocking sends.
+# Max bounded (recv + Testsome) rounds when applying send backpressure, so the
+# loop can never spin forever even if traffic momentarily stalls. Each round is
+# non-blocking and makes progress (drains incoming so peers can retire our sends),
+# so the cap is reached well within this bound in practice.
+_BACKPRESSURE_MAX_ROUNDS = 1000
 
-    Without periodic pruning, ``intra_requests`` grows unboundedly during a
-    wall-time-limited run.  High-throughput configurations (e.g. ablation with
-    k=10) can accumulate tens of thousands of outstanding ``isend`` requests,
-    exhausting ParaStationMPI/pscom internal resources and causing ``isend`` to
-    block.  Calling ``Testsome`` each iteration retires completed sends so the
-    outstanding count stays bounded.
+
+def _cleanup_propulate_intra_requests(
+    propulator, *, max_inflight=None, drain_recv=None, _testsome=None
+) -> int:
+    """Prune completed intra-island nonblocking sends, with optional backpressure.
+
+    Without pruning, ``intra_requests`` grows unboundedly during a wall-time-
+    limited run.  ``Testsome`` retires *already-completed* sends each iteration —
+    but it never blocks, so when peers' receives lag (high rank counts: 96 ranks
+    post 95 ``isend``s per evaluation) the outstanding set still grows without
+    bound and exhausts ParaStation pscom's per-connection resources, crashing a
+    rank mid-run (segfault on UCX, socket drop on TCP — transport-independent).
+
+    With ``max_inflight`` set, this additionally applies **backpressure**: while
+    the outstanding count exceeds the cap, it runs bounded rounds of (drain
+    incoming via ``drain_recv`` → ``Testsome``-retire our completed sends).
+    Draining incoming FIRST lets peers progress and receive our sends, so the
+    retire makes progress — all non-blocking, so it cannot deadlock even if every
+    rank backpressures at once.  Results are unchanged; only the send pacing is.
     """
     requests = getattr(propulator, "intra_requests", None)
     if not requests:
         return 0
     try:
-        from mpi4py import MPI as _MPI
-        indices = _MPI.Request.Testsome(requests)
-        if indices is not None:
-            # Remove completed entries in reverse order to preserve indices.
-            buffers = getattr(propulator, "intra_buffers", None)
+        if _testsome is None:
+            from mpi4py import MPI as _MPI
+
+            _testsome = _MPI.Request.Testsome
+
+        buffers = getattr(propulator, "intra_buffers", None)
+
+        def _retire(indices) -> int:
+            if not indices:
+                return 0
             for idx in sorted(indices, reverse=True):
                 del requests[idx]
                 if buffers is not None and idx < len(buffers):
                     del buffers[idx]
+            return len(indices)
+
+        _retire(_testsome(requests))
+
+        if max_inflight and len(requests) > int(max_inflight):
+            cap = int(max_inflight)
+            for _ in range(_BACKPRESSURE_MAX_ROUNDS):
+                if drain_recv is not None:
+                    drain_recv()  # receive incoming so peers can retire our sends
+                _retire(_testsome(requests))
+                if len(requests) <= cap:
+                    break
         return len(requests)
     except Exception:
         logger.debug("Propulate intra-request cleanup failed", exc_info=True)
@@ -97,6 +156,16 @@ def _propulate_world_size() -> int:
         return max(1, int(MPI.COMM_WORLD.Get_size()))
     except Exception:
         return 1
+
+
+def _comm_world_is_root() -> bool:
+    """Return whether this process is COMM_WORLD rank 0 (or single-process)."""
+    try:
+        from mpi4py import MPI
+
+        return int(MPI.COMM_WORLD.Get_rank()) == 0
+    except Exception:  # noqa: BLE001 - single process / no mpi4py
+        return True
 
 
 def _effective_generation_budget(max_sims: int, inference_cfg: Dict) -> int:
@@ -256,6 +325,11 @@ def _propulate_with_wall_time_limit(
     dump = bool(getattr(getattr(propulator, "island_comm", None), "rank", None) == 0)
     propulate_comm.barrier()
 
+    # Cap on outstanding intra-island isends (0 disables). Bounds ParaStation pscom
+    # per-connection resource use so a worker cannot crash mid-run under the 95-way
+    # fan-out at >=2-node scale (see .plans/bug-fixes). 4096 ~= 43/peer at 96 ranks.
+    max_inflight_sends = int(os.environ.get("PROPULATE_MAX_INFLIGHT_SENDS", "4096"))
+
     while propulator.generations <= -1 or propulator.generation < propulator.generations:
         if _wall_time_exceeded(run_start, max_wall_time_s):
             break
@@ -265,7 +339,11 @@ def _propulate_with_wall_time_limit(
 
         propulator._evaluate_individual()
         propulator._receive_intra_island_individuals()
-        _cleanup_propulate_intra_requests(propulator)
+        _cleanup_propulate_intra_requests(
+            propulator,
+            max_inflight=max_inflight_sends,
+            drain_recv=propulator._receive_intra_island_individuals,
+        )
 
         if dump:
             propulator._dump_checkpoint()
@@ -279,21 +357,61 @@ def _propulate_with_wall_time_limit(
     # were already pruned escape to a barrier while senders still need them to
     # post matching recvs — deadlocking under MPI rendezvous mode.
     intra_reqs = getattr(propulator, "intra_requests", None)
-    from mpi4py import MPI as _MPI
+    # Reuse the guarded MPI import from the top of this function rather than
+    # re-importing at function scope. Without mpi4py installed (e.g. unit-test
+    # CI without an MPI stack), MPI is None and the rendezvous-safe collective
+    # drain is unnecessary — fake comms and single-process runs both fall
+    # through to the buffer clear below.
+    _MPI = MPI
 
-    while True:
+    # Bound the collective drain. At very high message volume (large k, many
+    # ranks) the outstanding intra-island isends may never fully drain over
+    # ParaStation pscom, so the unbounded loop spins forever and SLURM force-kills
+    # the step (observed: k>=192 at 48/96 ranks hang here ~6s after the wall-time
+    # loop ends — BEFORE _free_propulate_comm, which is why PROPULATE_SKIP_DISCONNECT
+    # did not help). Every rank shares the same deadline (run_start + max_wall_time_s
+    # + grace), so once it passes all ranks report "done" and the Allreduce(MIN)
+    # breaks the loop collectively. Leftover messages are reclaimed at process exit —
+    # immediate for the one-combo-per-process scaling jobs. Override via
+    # PROPULATE_DRAIN_TIMEOUT_S (seconds; default 120).
+    drain_grace_s = float(os.environ.get("PROPULATE_DRAIN_TIMEOUT_S", "120"))
+    drain_deadline = float(run_start) + float(max_wall_time_s) + drain_grace_s
+    drain_timed_out = False
+
+    while _MPI is not None:
         propulator._receive_intra_island_individuals()
         try:
             sends_done = not intra_reqs or _MPI.Request.Testall(intra_reqs)
         except TypeError:
             sends_done = True
+        if not sends_done and time.time() >= drain_deadline:
+            sends_done = True
+            drain_timed_out = True
         local_done = 1 if sends_done else 0
         global_done = np.zeros(1, dtype=np.int32)
         propulate_comm.Allreduce(
             np.array([local_done], dtype=np.int32), global_done, op=_MPI.MIN,
         )
         if global_done[0]:
+            # Final drain: consume any messages that arrived during the Allreduce.
+            # At this point all sends are globally complete, so no new messages
+            # will be generated.  Any remaining buffered receives must already
+            # have been handed to MPI by their senders, and this pass collects
+            # them before the communicator is freed.  Without this extra pass,
+            # messages arriving in the send-complete→Allreduce window are left
+            # in propulate_comm's buffer when MPI_Comm_free is called, which
+            # corrupts pscom state and causes MPI_Mrecv failures in the next
+            # method's CommWorldMap workers.
+            propulator._receive_intra_island_individuals()
             break
+
+    if drain_timed_out:
+        logger.warning(
+            "Propulate post-loop intra-island drain exceeded its %.0fs deadline with "
+            "pending sends; proceeding to teardown (leftover messages reclaimed at "
+            "process exit). Override via PROPULATE_DRAIN_TIMEOUT_S.",
+            drain_grace_s,
+        )
 
     if intra_reqs:
         propulator.intra_requests.clear()
@@ -308,6 +426,62 @@ def _propulate_with_wall_time_limit(
     propulate_comm.barrier()
     propulator._determine_worker_dumping_next()
     propulate_comm.barrier()
+
+
+class _PhaseTimingPropagator:
+    """Opt-in (env ``ASYNC_ABC_PHASE_TIMING=1``) timing wrapper around a propagator.
+
+    Accumulates the wall-clock spent inside the propagator's ``__call__`` (the
+    per-arrival proposal reconstruction + AMIS-snapshot importance weight) per MPI
+    rank and, at process exit, writes one row ``{rank, n_calls, proposal_s, wall_s}``.
+    Combined with the per-eval simulator time already in ``raw_results``, this lets the
+    strong-scaling decomposition attribute wall-clock to simulator vs proposal vs
+    coordination/idle (``comm/idle = wall - simulator - proposal``). Transparent to
+    Propulate: it forwards ``set_worker_context``/``extract_posterior`` and delegates
+    every other attribute to the wrapped propagator; only ``__call__`` is timed.
+    """
+
+    def __init__(self, inner, *, data_dir, tag, replicate):
+        self._inner = inner
+        self.total_proposal_s = 0.0
+        self.n_calls = 0
+        self._rank = -1
+        self._t0 = time.perf_counter()
+        self._data_dir = data_dir
+        self._tag = tag or "untagged"
+        self._replicate = replicate
+        atexit.register(self._flush)
+
+    def set_worker_context(self, rank, size, *args, **kwargs):
+        self._rank = int(rank)
+        return self._inner.set_worker_context(rank, size, *args, **kwargs)
+
+    def extract_posterior(self, *args, **kwargs):
+        return self._inner.extract_posterior(*args, **kwargs)
+
+    def __call__(self, *args, **kwargs):
+        _t = time.perf_counter()
+        out = self._inner(*args, **kwargs)
+        self.total_proposal_s += time.perf_counter() - _t
+        self.n_calls += 1
+        return out
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def _flush(self):
+        if self.n_calls == 0:
+            return
+        wall = time.perf_counter() - self._t0
+        path = os.path.join(
+            str(self._data_dir),
+            f"phase_timing_{self._tag}_rep{self._replicate}_rank{self._rank}.csv",
+        )
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["tag", "replicate", "rank", "n_calls", "proposal_s", "wall_s"])
+            w.writerow([self._tag, self._replicate, self._rank, self.n_calls,
+                        round(self.total_proposal_s, 5), round(wall, 5)])
 
 
 def run_propulate_abc(
@@ -330,7 +504,9 @@ def run_propulate_abc(
     inference_cfg:
         ``config["inference"]`` sub-dict.  Used keys:
         ``max_simulations``, ``k``, ``tol_init``,
-        ``scheduler_type``, ``perturbation_scale``.
+        ``scheduler_type``, ``perturbation_scale``, ``kernel``
+        (``"hard"`` | ``"gaussian"`` | ``"epanechnikov"``, default ``"hard"``),
+        ``amis_snapshots`` (default 0), ``amis_interval``.
     output_dir:
         :class:`~async_abc.io.paths.OutputDir` — used for Propulate checkpoint path.
     replicate:
@@ -359,6 +535,21 @@ def run_propulate_abc(
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
     perturbation_scale = inference_cfg.get("perturbation_scale", 0.8)
+    # Smooth-kernel / AMIS configuration (paper A+D track). Defaults preserve
+    # the legacy hard-threshold behaviour for backwards compatibility.
+    kernel = inference_cfg.get("kernel", "hard")
+    amis_snapshots = int(inference_cfg.get("amis_snapshots", 0))
+    amis_interval_cfg = inference_cfg.get("amis_interval")
+    # Retroactive AMIS posterior reweighting (extract_posterior) is the reported
+    # estimator for posterior-quality experiments (SBC etc.), but it costs
+    # O(n_history * amis_snapshots * k) on the post-run analysis path and is NOT
+    # bounded by the inference wall-time. On cheap-simulator scaling sweeps the
+    # history reaches ~1e6 individuals, where at k=1000 this is 10-16 min of
+    # single-threaded NumPy per combo — it overruns the SLURM wall clock and
+    # looks like a post-teardown MPI hang. Experiments that do not consume
+    # ``posterior_weight`` (the throughput/scaling sweeps) set this False; the
+    # weights remain recomputable offline from the saved history if ever needed.
+    compute_posterior_weights = bool(inference_cfg.get("compute_posterior_weights", True))
     # Pass extra scheduler kwargs if present
     scheduler_kwargs = {}
     for key in ("percentile", "decay_factor", "low_rate", "high_rate",
@@ -368,15 +559,20 @@ def run_propulate_abc(
 
     mpi_rank = get_rank()
 
-    propagator = ABCPMC(
+    abcpmc_kwargs = dict(
         limits=limits,
         perturbation_scale=perturbation_scale,
         k=k,
         tol=tol_init,
         scheduler_type=scheduler_type,
+        kernel=kernel,
+        amis_snapshots=amis_snapshots,
         rng=random.Random(_stable_seed(seed, "propagator", mpi_rank)),
         **scheduler_kwargs,
     )
+    if amis_interval_cfg is not None:
+        abcpmc_kwargs["amis_interval"] = int(amis_interval_cfg)
+    propagator = ABCPMC(**abcpmc_kwargs)
 
     run_start = time.time()
     eval_count = 0
@@ -404,15 +600,25 @@ def run_propulate_abc(
     propulate_comm = _make_propulate_comm()
     propulator_kwargs = {}
     if propulate_comm is not None:
+        propulator_kwargs = {
+            "island_comm": propulate_comm,
+            "propulate_comm": propulate_comm,
+        }
         try:
-            from mpi4py import MPI
-            propulator_kwargs = {
-                "island_comm": propulate_comm,
-                "propulate_comm": propulate_comm,
-                "worker_sub_comm": MPI.COMM_SELF,
-            }
+            from mpi4py import MPI as _MPI_for_worker
+
+            propulator_kwargs["worker_sub_comm"] = _MPI_for_worker.COMM_SELF
         except Exception:
-            propulator_kwargs = {}
+            # No mpi4py available (unit-test path with a fake comm). The
+            # propulator gets the fake comm in island/propulate slots; the
+            # worker_sub_comm slot is left to its default and the drain loop
+            # in _propulate_with_wall_time_limit no-ops when MPI is None.
+            pass
+
+    if os.environ.get("ASYNC_ABC_PHASE_TIMING"):
+        propagator = _PhaseTimingPropagator(
+            propagator, data_dir=output_dir.data, tag=_tag, replicate=replicate,
+        )
 
     propulator = Propulator(
         loss_fn=loss_fn,
@@ -459,6 +665,20 @@ def run_propulate_abc(
         except Exception:
             pass
 
+    # In all-ranks execution mode, run_method_distributed keeps only ROOT's
+    # records (runner.py: `return records if root_rank else []`); the post-run
+    # sort + per-particle record build on every other rank is computed and then
+    # discarded. At scaling volumes (~1e6 individuals/rank) that redundant build
+    # is both 95x wasteful AND the dominant source of post-run rank desync: at 96
+    # ranks across 2 nodes the slow ranks miss the teardown window and srun Force
+    # Terminates the step (observed: only ~26/96 reach status=finish). Skip it on
+    # non-root — the output is identical (root's records are the ones returned).
+    # The barrier above already resynchronised all ranks, so non-root returning
+    # here cannot desync the next replicate's Dup(). Flag set by
+    # run_method_distributed only for all_ranks mode.
+    if inference_cfg.get("_records_root_only") and not _comm_world_is_root():
+        return []
+
     # Sort by completion time so the record order reflects the observable
     # event stream rather than generation assignment alone.
     population = sorted(
@@ -469,11 +689,38 @@ def run_propulate_abc(
             int(getattr(ind, "rank", 0) or 0),
         ),
     )
+    # Retroactive AMIS posterior weights. This is the estimator the paper's
+    # consistency + CLT are stated for: every particle reweighted against the
+    # cumulative proposal mixture, reconstructed from history (off the timed
+    # inference path; see ABCPMC.extract_posterior). The streaming proposal-time
+    # `ind.weight` is kept separately (records' `weight`) for the ESS-over-time
+    # diagnostic. Computed on `population` in record order so the weights align
+    # index-for-index; falls back to None on any error, in which case downstream
+    # consumers (SBC) revert to the streaming weight.
+    posterior_weights: List[Optional[float]] = [None] * len(population)
+    if population and compute_posterior_weights:
+        try:
+            _, _retro = propagator.extract_posterior(population)
+            if len(_retro) == len(population):
+                posterior_weights = [float(w) for w in _retro]
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "extract_posterior failed (%s); SBC will fall back to streaming weights.",
+                exc,
+            )
+    elif population and not compute_posterior_weights:
+        logger.info(
+            "compute_posterior_weights=False: skipping retroactive AMIS reweighting "
+            "for %d individuals (posterior_weight left empty; recompute offline if needed).",
+            len(population),
+        )
+
     records: List[ParticleRecord] = []
     current_tolerance = float(tol_init)
     for step, ind in enumerate(population, start=1):
         params = _individual_params(ind, limits)
         weight = float(ind.weight) if ind.weight is not None else None
+        posterior_weight = posterior_weights[step - 1]
         if ind.tolerance is not None:
             current_tolerance = min(current_tolerance, float(ind.tolerance))
             tolerance = current_tolerance
@@ -498,6 +745,7 @@ def run_propulate_abc(
             params=params,
             loss=float(ind.loss),
             weight=weight,
+            posterior_weight=posterior_weight,
             tolerance=tolerance,
             wall_time=sim_end_time if sim_end_time is not None else 0.0,
             worker_id=str(ind.rank) if getattr(ind, "rank", None) is not None else None,

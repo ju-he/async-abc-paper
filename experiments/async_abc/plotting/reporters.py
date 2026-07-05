@@ -1113,7 +1113,10 @@ def plot_quality_by_sigma(
             stripped,
             true_params=true_params,
             axis_kind="wall_time",
-            checkpoint_strategy="quantile",
+            # W2.5: paper-facing comparison plot. Use time_uniform so async and
+            # sync methods share a wall-clock checkpoint grid; LOCF resampling
+            # makes the curves directly comparable.
+            checkpoint_strategy="time_uniform",
             checkpoint_count=8,
             archive_size=archive_size,
         )
@@ -1302,7 +1305,10 @@ def plot_quality_vs_wall_time(
         records,
         true_params=true_params,
         axis_kind="wall_time",
-        checkpoint_strategy="quantile",
+        # W2.5: paper-facing comparison plot. Use time_uniform so async and
+        # sync methods share a wall-clock checkpoint grid; LOCF resampling
+        # makes the curves directly comparable.
+        checkpoint_strategy="time_uniform",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
     )
@@ -1335,12 +1341,14 @@ def plot_quality_vs_wall_time(
             output_dir=output_dir,
             extra={
                 "axis_kind": "wall_time",
+                "checkpoint_strategy": "time_uniform",
                 "ci_level": float(ci_level),
                 "source_raw_files": [str(output_dir.data / "raw_results.csv")],
             },
         ) if cfg is not None else {
             "plot_name": "quality_vs_wall_time",
             "axis_kind": "wall_time",
+            "checkpoint_strategy": "time_uniform",
             "summary_plot": True,
             "ci_level": float(ci_level),
             "source_raw_files": [str(output_dir.data / "raw_results.csv")],
@@ -3516,6 +3524,282 @@ def plot_ablation_summary(
     )
 
 
+def plot_ablation_amis_isolation(
+    data_dir: Path,
+    variants: List[Dict[str, Any]],
+    output_dir: OutputDir,
+    benchmark_cfg: Optional[Dict[str, Any]] = None,
+    *,
+    full_variant_name: str = "full_model",
+    no_amis_variant_name: str = "no_amis",
+) -> None:
+    """AMIS-on vs AMIS-off quality curves on a shared wall-clock axis.
+
+    Paper §19 contribution (7): isolate the contribution of streaming AMIS
+    reweighting holding everything else equal. Both variants use the same
+    kernel, perturbation, scheduler, and archive size — only the
+    ``amis_snapshots`` value differs. The plot uses
+    ``posterior_quality_curve(checkpoint_strategy="time_uniform")`` so the
+    two curves share a checkpoint grid.
+
+    Emits ``ablation_amis_isolation.{pdf,png,csv,json}``. Skips with a
+    documented reason if either variant's CSV is missing.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from ..analysis import posterior_quality_curve
+
+    benchmark_cfg = benchmark_cfg or {}
+    variant_cfg_by_name = {v.get("name", f"v{i}"): v for i, v in enumerate(variants)}
+    stem = output_dir.plots / "ablation_amis_isolation"
+
+    def _skip(reason: str) -> None:
+        write_plot_metadata(
+            stem,
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="ablation_amis_isolation",
+                title="AMIS isolation",
+                summary_plot=True,
+                extra={"skipped": True, "skip_reason": reason},
+            ),
+        )
+
+    full_csv = data_dir / f"ablation_{full_variant_name}.csv"
+    no_amis_csv = data_dir / f"ablation_{no_amis_variant_name}.csv"
+    if not full_csv.exists() or not no_amis_csv.exists():
+        _skip(f"missing variant csv ({full_variant_name=}, {no_amis_variant_name=})")
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    combined_rows: list[pd.DataFrame] = []
+    for variant_label, csv_path, color in (
+        (full_variant_name, full_csv, "C0"),
+        (no_amis_variant_name, no_amis_csv, "C1"),
+    ):
+        records = load_records(csv_path)
+        true_params = _true_params_from_cfg(records, benchmark_cfg)
+        archive_size = variant_cfg_by_name.get(variant_label, {}).get("k")
+        if not records or not true_params:
+            continue
+        quality_df = posterior_quality_curve(
+            records,
+            true_params=true_params,
+            axis_kind="wall_time",
+            checkpoint_strategy="time_uniform",
+            checkpoint_count=24,
+            archive_size=archive_size,
+        )
+        if quality_df.empty:
+            continue
+        # Aggregate over replicates at each checkpoint. The quality metric
+        # column is "wasserstein" (see QUALITY_CURVE_COLUMNS); there is no
+        # "quality" column — referencing it raised KeyError at finalize.
+        agg = (
+            quality_df.groupby("wall_time", sort=True)["wasserstein"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        agg["variant"] = variant_label
+        combined_rows.append(agg)
+        ax.plot(agg["wall_time"], agg["mean"], label=variant_label, color=color)
+        finite = agg[np.isfinite(agg["std"]) & (agg["count"] > 1)]
+        if not finite.empty:
+            se = finite["std"] / np.sqrt(finite["count"])
+            ax.fill_between(
+                finite["wall_time"],
+                (finite["mean"] - 1.96 * se).to_numpy(),
+                (finite["mean"] + 1.96 * se).to_numpy(),
+                color=color,
+                alpha=0.18,
+            )
+
+    if not combined_rows:
+        _skip("no usable quality rows in either variant")
+        return
+
+    ax.set_xlabel("wall-clock time (s)")
+    ax.set_ylabel("Wasserstein distance to truth")
+    ax.set_title(f"AMIS isolation: {full_variant_name} vs {no_amis_variant_name}")
+    ax.legend()
+    fig.tight_layout()
+
+    combined = pd.concat(combined_rows, ignore_index=True)
+    save_figure(
+        fig,
+        stem,
+        data=combined,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="ablation_amis_isolation",
+            title="AMIS isolation",
+            summary_plot=True,
+            extra={
+                "checkpoint_strategy": "time_uniform",
+                "compared_variants": [full_variant_name, no_amis_variant_name],
+            },
+        ),
+    )
+
+
+def plot_amis_snapshot_ess_stability(
+    data_dir: Path,
+    variants: List[Dict[str, Any]],
+    output_dir: OutputDir,
+    *,
+    window: int = 100,
+) -> None:
+    """Sliding-window relative ESS vs n for each AMIS snapshot-buffer size (W3.2).
+
+    Paper §17 acknowledges that the snapshot buffer is fixed in
+    implementation and that Condition (C4) of paper §4 requires the
+    buffer to grow with n. This figure shows the empirical answer: for
+    each variant (which differs only in ``amis_snapshots``) we plot the
+    sliding-window relative ESS as a function of evaluations. A flat,
+    high curve indicates the buffer is large enough for (C4) to be
+    empirically tight; a downward drift indicates that ``S`` is too
+    small for the run length.
+
+    Emits ``amis_snapshot_ess_stability.{pdf,png,csv,json}``.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from ..analysis import ess_vs_n_at_fixed_S
+    from ..io.records import load_records
+
+    stem = output_dir.plots / "amis_snapshot_ess_stability"
+
+    def _skip(reason: str) -> None:
+        write_plot_metadata(
+            stem,
+            metadata=_nonbenchmark_plot_metadata(
+                output_dir,
+                plot_name="amis_snapshot_ess_stability",
+                title="AMIS snapshot ESS stability",
+                summary_plot=True,
+                extra={"skipped": True, "skip_reason": reason},
+            ),
+        )
+
+    if not variants:
+        _skip("no variants in config")
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    combined_rows: list[pd.DataFrame] = []
+    for variant in variants:
+        name = variant.get("name", "variant")
+        csv_path = data_dir / f"ablation_{name}.csv"
+        if not csv_path.exists():
+            continue
+        records = load_records(csv_path)
+        if not records:
+            continue
+        ess_df = ess_vs_n_at_fixed_S(records, window=window)
+        if ess_df.empty:
+            continue
+        # Aggregate over replicates at each n (mean ± 1 std).
+        agg = (
+            ess_df.groupby("n", sort=True)["relative_ess"]
+            .agg(["mean", "std", "count"])
+            .reset_index()
+        )
+        agg["variant"] = name
+        agg["amis_snapshots"] = variant.get("amis_snapshots", "?")
+        combined_rows.append(agg)
+        ax.plot(agg["n"], agg["mean"], label=f"S={variant.get('amis_snapshots', '?')}")
+        finite = agg[np.isfinite(agg["std"]) & (agg["count"] > 1)]
+        if not finite.empty:
+            se = finite["std"] / np.sqrt(finite["count"])
+            ax.fill_between(
+                finite["n"],
+                (finite["mean"] - 1.96 * se).to_numpy(),
+                (finite["mean"] + 1.96 * se).to_numpy(),
+                alpha=0.15,
+            )
+
+    if not combined_rows:
+        _skip("no usable records across variants")
+        plt.close(fig)
+        return
+
+    ax.set_xlabel("evaluations n")
+    ax.set_ylabel(f"relative ESS (sliding window={window})")
+    ax.set_title("AMIS snapshot-buffer ESS stability")
+    ax.set_ylim(0.0, 1.05)
+    ax.legend()
+    fig.tight_layout()
+
+    combined = pd.concat(combined_rows, ignore_index=True)
+    save_figure(
+        fig,
+        stem,
+        data=combined,
+        metadata=_nonbenchmark_plot_metadata(
+            output_dir,
+            plot_name="amis_snapshot_ess_stability",
+            title="AMIS snapshot ESS stability",
+            summary_plot=True,
+            extra={
+                "window": window,
+                "compared_variants": [v.get("name") for v in variants],
+            },
+        ),
+    )
+
+
+def _subsample_history_for_plots(records, cfg, archive_size):
+    """Bound the per-(method,replicate) evaluated history fed to the benchmark
+    plots so a fast simulator's multi-million-record history cannot OOM the
+    finalize. The ``archive_size`` lowest-loss records per group are ALWAYS kept
+    (final-state / posterior reconstruction stays exact); the remaining dense
+    attempt stream is uniformly down-sampled in time order to a cap. Convergence
+    curves already collapse to <=500 checkpoints, so figures are unchanged in
+    shape and the reported posterior/quality (computed on the full history) are
+    unaffected. Disable by setting plots.max_history_records_for_plots to null.
+    """
+    import logging
+    cap = cfg.get("plots", {}).get("max_history_records_for_plots", 200_000)
+    if cap is None or len(records) <= cap:
+        return records
+    by_group: Dict[tuple, list] = defaultdict(list)
+    for r in records:
+        by_group[(r.method, int(r.replicate))].append(r)
+    per_group_cap = max(1, int(cap) // max(1, len(by_group)))
+    keep_floor = int(archive_size or 0)
+    out: list = []
+    dropped = 0
+    for group in by_group.values():
+        if len(group) <= per_group_cap:
+            out.extend(group)
+            continue
+        order = sorted(range(len(group)),
+                       key=lambda i: (group[i].loss if group[i].loss is not None else float("inf")))
+        keep = set(order[:keep_floor])                       # exact top-k by loss
+        remaining = [i for i in range(len(group)) if i not in keep]  # original (time) order
+        budget = max(0, per_group_cap - len(keep))
+        if budget and remaining:
+            step = max(1, len(remaining) // budget)
+            keep.update(remaining[::step][:budget])
+        kept = [group[i] for i in sorted(keep)]              # time-ordered
+        dropped += len(group) - len(kept)
+        out.extend(kept)
+    if dropped:
+        logging.getLogger(__name__).warning(
+            "plot_benchmark_diagnostics: down-sampled evaluated history for plotting "
+            "(%d -> %d records, dropped %d; cap=%d). Posterior/quality use the full "
+            "history; only dense convergence curves are thinned.",
+            len(records), len(out), dropped, int(cap),
+        )
+    return out
+
+
 def plot_benchmark_diagnostics(
     records: List[ParticleRecord],
     cfg: Dict[str, Any],
@@ -3528,6 +3812,7 @@ def plot_benchmark_diagnostics(
     analysis_cfg = cfg.get("analysis", {})
     true_params = _true_params_from_cfg(records, benchmark_cfg)
     archive_size = inference_cfg.get("k")
+    records = _subsample_history_for_plots(records, cfg, archive_size)
     emit_paper = bool(plots_cfg.get("emit_paper_summaries", True))
     emit_diagnostics = bool(plots_cfg.get("emit_diagnostics", True))
     ci_level = float(analysis_cfg.get("ci_level", 0.95))
@@ -3920,11 +4205,13 @@ def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str
     that would otherwise cause quality-vs-time plots to be silently skipped.
     """
     inferred_names = set(_param_names(records))
+    clean_names = {p.removeprefix("param_") for p in inferred_names}
     true_params: Dict[str, float] = {}
     for param in inferred_names:
-        key = f"true_{param}"
+        clean = param.removeprefix("param_")
+        key = f"true_{clean}"
         if key in benchmark_cfg:
-            true_params[param] = float(benchmark_cfg[key])
+            true_params[clean] = float(benchmark_cfg[key])
 
     # Warn about config true_* keys that have no matching inferred column.
     if inferred_names:
@@ -3933,7 +4220,7 @@ def _true_params_from_cfg(records: List[ParticleRecord], benchmark_cfg: Dict[str
             for key, val in benchmark_cfg.items()
             if key.startswith("true_")
             and isinstance(val, (int, float))
-            and key[len("true_"):] not in inferred_names
+            and key[len("true_"):] not in clean_names
         ]
         if unmapped:
             logger.warning(

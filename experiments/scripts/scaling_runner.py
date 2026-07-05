@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import logging
 import math
+import os
 import re
 import shutil
 import sys
@@ -70,6 +71,7 @@ _THROUGHPUT_FIELDNAMES = [
     "posterior_samples",
     "throughput_sims_per_s",
     "final_quality_wasserstein",
+    "final_quality_posterior_mean_l2",
     "final_n_particles",
     "final_tolerance",
     "state_kind",
@@ -91,6 +93,7 @@ _BUDGET_FIELDNAMES = [
     "attempts_by_budget",
     "posterior_samples_by_budget",
     "quality_wasserstein_by_budget",
+    "quality_posterior_mean_l2_by_budget",
     "best_tolerance_by_budget",
     "test_mode",
 ]
@@ -376,9 +379,10 @@ def _true_params_from_cfg(example_records: Iterable[ParticleRecord], benchmark_c
             break
     true_params: Dict[str, float] = {}
     for name in param_names:
-        key = f"true_{name}"
+        clean = name.removeprefix("param_")
+        key = f"true_{clean}"
         if key in benchmark_cfg:
-            true_params[name] = float(benchmark_cfg[key])
+            true_params[clean] = float(benchmark_cfg[key])
     return true_params
 
 
@@ -435,8 +439,10 @@ def _final_summary_row(
             archive_size=int(k),
         )
     final_quality = float("nan")
+    final_quality_mean_l2 = float("nan")
     if quality_df is not None and not quality_df.empty:
         final_quality = float(quality_df.iloc[-1]["wasserstein"])
+        final_quality_mean_l2 = float(quality_df.iloc[-1].get("posterior_mean_l2", float("nan")))
         if not state_kind:
             state_kind = str(quality_df.iloc[-1]["state_kind"])
         if final_n_particles == 0:
@@ -472,6 +478,7 @@ def _final_summary_row(
         "posterior_samples": int(final_n_particles),
         "throughput_sims_per_s": float(throughput),
         "final_quality_wasserstein": float(final_quality),
+        "final_quality_posterior_mean_l2": float(final_quality_mean_l2),
         "final_n_particles": int(final_n_particles),
         "final_tolerance": float(final_tolerance) if math.isfinite(float(final_tolerance)) else "",
         "state_kind": str(state_kind),
@@ -509,12 +516,14 @@ def _budget_summary_rows(
         best_tolerance = _best_tolerance_upto(records, budget_s)
         posterior_samples = 0
         quality = float("nan")
+        quality_mean_l2 = float("nan")
         if quality_df is not None and not quality_df.empty:
             eligible = quality_df.loc[quality_df["axis_value"] <= budget_s]
             if not eligible.empty:
                 last = eligible.iloc[-1]
                 posterior_samples = int(last["posterior_samples"])
                 quality = float(last["wasserstein"])
+                quality_mean_l2 = float(last.get("posterior_mean_l2", float("nan")))
         rows.append(
             {
                 "base_method": base_method,
@@ -530,6 +539,7 @@ def _budget_summary_rows(
                 "attempts_by_budget": int(attempts),
                 "posterior_samples_by_budget": int(posterior_samples),
                 "quality_wasserstein_by_budget": float(quality),
+                "quality_posterior_mean_l2_by_budget": float(quality_mean_l2),
                 "best_tolerance_by_budget": float(best_tolerance) if math.isfinite(float(best_tolerance)) else "",
                 "test_mode": bool(test_mode),
             }
@@ -714,6 +724,7 @@ def _backfill_quality_metrics(
         )
         if qdf is not None and not qdf.empty:
             row["final_quality_wasserstein"] = float(qdf.iloc[-1]["wasserstein"])
+            row["final_quality_posterior_mean_l2"] = float(qdf.iloc[-1].get("posterior_mean_l2", float("nan")))
             if not row.get("state_kind"):
                 row["state_kind"] = str(qdf.iloc[-1]["state_kind"])
             if int(row.get("final_n_particles", 0)) == 0:
@@ -735,6 +746,7 @@ def _backfill_quality_metrics(
             eligible = qdf.loc[qdf["axis_value"] <= budget_s]
             if not eligible.empty:
                 row["quality_wasserstein_by_budget"] = float(eligible.iloc[-1]["wasserstein"])
+                row["quality_posterior_mean_l2_by_budget"] = float(eligible.iloc[-1].get("posterior_mean_l2", float("nan")))
                 row["posterior_samples_by_budget"] = int(eligible.iloc[-1]["posterior_samples"])
 
 
@@ -828,8 +840,45 @@ def rebuild_scaling_outputs(
     return aggregate_rows
 
 
-def main(argv: list[str] | None = None) -> None:
+def _install_faulthandler_dumper() -> None:
+    """Env-gated diagnostic: each rank periodically dumps its OWN Python
+    traceback (all threads) to a per-rank file via ``faulthandler``.
+
+    Works from inside the process, so it needs no ptrace — unlike py-spy/gdb,
+    which compute nodes block (``ptrace_scope``). Used to localize the k>=192
+    post-wall-time teardown wedge: a rank stuck across snapshots at the same
+    frame is the wedge. Off unless ``SCALING_FAULTHANDLER_S`` is set.
+    See experiments/jobs/scaling_single_combo.sh.
+    """
+    interval = os.environ.get("SCALING_FAULTHANDLER_S")
+    if not interval:
+        return
+    import faulthandler
+
+    try:
+        from mpi4py import MPI as _MPI
+
+        rank = _MPI.COMM_WORLD.Get_rank()
+    except Exception:  # noqa: BLE001 - single-process / no mpi4py
+        rank = 0
+    trace_dir = Path(os.environ.get("SCALING_FAULTHANDLER_DIR", "."))
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    # Keep the file handle alive for the process lifetime (module global) so the
+    # repeating timer thread can keep writing to it.
+    global _FAULTHANDLER_FILE
+    _FAULTHANDLER_FILE = open(trace_dir / f"rank_{rank:03d}.txt", "w", buffering=1)
+    faulthandler.enable(file=_FAULTHANDLER_FILE)
+    faulthandler.dump_traceback_later(
+        float(interval), repeat=True, file=_FAULTHANDLER_FILE
+    )
+
+
+_FAULTHANDLER_FILE = None
+
+
+def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     configure_logging()
+    _install_faulthandler_dumper()
     parser = make_arg_parser("Scaling experiment.")
     parser.add_argument(
         "--n-workers",
@@ -843,14 +892,45 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Write per-combination shards only; skip aggregate CSV/plot rebuild.",
     )
+    parser.add_argument(
+        "--estimate",
+        action="store_true",
+        help="After the run, print an estimated full-run wall time extrapolated from measured elapsed times.",
+    )
+    parser.add_argument(
+        "--k",
+        type=int,
+        default=None,
+        help="Run only this single archive size k (one-combo-per-process mode).",
+    )
+    parser.add_argument(
+        "--replicate",
+        type=int,
+        default=None,
+        help="Run only this single replicate index (one-combo-per-process mode).",
+    )
+    parser.add_argument(
+        "--print-combos",
+        action="store_true",
+        dest="print_combos",
+        help=(
+            "Print the 'k replicate' grid (one pair per line) for this config and "
+            "exit, without running anything. The scaling wrappers use this to launch "
+            "one srun per combo so each Propulate run gets its own process and MPI "
+            "teardown — avoiding the ParaStation pscom MPI_Comm_free hang that "
+            "repeated per-combo teardowns trigger at >=48 ranks."
+        ),
+    )
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config, test_mode=args.test, small_mode=args.small)
     test_mode = is_test_mode(cfg)
     small_mode = is_small_mode(cfg)
     run_mode = get_run_mode(cfg)
-    estimate_mode = run_mode != "full"
+    estimate_mode = args.estimate
     output_dir = OutputDir(args.output_dir, cfg["experiment_name"]).ensure()
+    if prepare_runtime_cfg is not None:
+        cfg = prepare_runtime_cfg(cfg, output_dir)
 
     if args.finalize_only:
         if is_root_rank():
@@ -868,6 +948,9 @@ def main(argv: list[str] | None = None) -> None:
     k_values = list(scaling_cfg.get("k_values", [cfg["inference"].get("k", 100)]))
     if test_mode:
         k_values = list(scaling_cfg.get("test_k_values", k_values))
+    if args.k is not None:
+        # One-combo-per-process mode: restrict to the single requested k.
+        k_values = [int(args.k)]
 
     wall_time_budgets_s = [
         float(value) for value in scaling_cfg.get("wall_time_budgets_s", [])
@@ -890,6 +973,16 @@ def main(argv: list[str] | None = None) -> None:
     n_replicates = cfg["execution"]["n_replicates"]
     base_seed = cfg["execution"]["base_seed"]
     seeds = make_seeds(n_replicates, base_seed)
+
+    if args.print_combos:
+        # Emit the (k, replicate) grid for the wrappers to launch one srun per
+        # combo. The grid is independent of n_workers, so it is the same whether
+        # or not --n-workers is passed.
+        if is_root_rank():
+            for k in k_values:
+                for replicate in range(n_replicates):
+                    print(f"{int(k)} {int(replicate)}")
+        return
 
     done = (
         _find_completed_scaling(output_dir, ["n_workers", "k", "base_method", "replicate"])
@@ -931,12 +1024,14 @@ def main(argv: list[str] | None = None) -> None:
                 k_combo_throughput[k] = []
                 k_combo_budget[k] = []
 
-            def _run_workloads(methods, *, mpi_executor=None):
+            def _run_workloads(methods):
                 """Run a set of methods across all k-values and replicates.
 
-                When *mpi_executor* is provided, it is forwarded to
-                ``run_method_distributed`` so pyABC methods reuse the
-                caller's ``MPICommExecutor`` instead of creating their own.
+                All MPI coordination flows through CommWorldMap: pyABC methods and
+                non-pyABC methods share the same ``run_method_distributed`` dispatch
+                path. Root and worker ranks both call this function; the inner
+                CommWorldMap (constructed inside run_pyabc_smc / run_abc_smc_baseline)
+                splits them.
                 """
                 for k in k_values:
                     inference_cfg = k_inference_cfgs[k]
@@ -950,6 +1045,10 @@ def main(argv: list[str] | None = None) -> None:
                         elif "max_wall_time_s" in method_inference_cfg:
                             method_inference_cfg.pop("max_wall_time_s", None)
                         for replicate, seed in enumerate(seeds):
+                            if args.replicate is not None and int(replicate) != int(args.replicate):
+                                # One-combo-per-process mode: this process runs a
+                                # single replicate; seed stays seeds[replicate].
+                                continue
                             if (str(n_workers), str(k), base_method, str(replicate)) in done:
                                 logger.info(
                                     "[scaling] --extend: skipping n_workers=%s k=%s %s replicate=%s",
@@ -961,44 +1060,15 @@ def main(argv: list[str] | None = None) -> None:
                                 continue
 
                             run_start = time.time()
-                            if mpi_executor is not None:
-                                # Shared executor path: workers are in the
-                                # MPICommExecutor server loop and cannot
-                                # participate in allgather, so call run_method
-                                # directly on root instead of
-                                # run_method_distributed.
-                                progress = MethodProgressReporter(
-                                    method_name=base_method,
-                                    replicate=replicate,
-                                    interval_s=float(method_inference_cfg.get(
-                                        "progress_log_interval_s", 10.0)),
-                                )
-                                progress.start(
-                                    total_hint=method_inference_cfg.get("max_simulations"),
-                                    detail="mode=all_ranks",
-                                )
-                                records = run_method(
-                                    base_method,
-                                    benchmark.simulate,
-                                    benchmark.limits,
-                                    method_inference_cfg,
-                                    output_dir,
-                                    replicate,
-                                    seed,
-                                    progress=progress,
-                                    mpi_executor=mpi_executor,
-                                )
-                                progress.finish(records=len(records))
-                            else:
-                                records = run_method_distributed(
-                                    base_method,
-                                    benchmark.simulate,
-                                    benchmark.limits,
-                                    method_inference_cfg,
-                                    output_dir,
-                                    replicate,
-                                    seed,
-                                )
+                            records = run_method_distributed(
+                                base_method,
+                                benchmark.simulate,
+                                benchmark.limits,
+                                method_inference_cfg,
+                                output_dir,
+                                replicate,
+                                seed,
+                            )
                             run_elapsed = time.time() - run_start
                             if not is_root_rank():
                                 continue
@@ -1045,30 +1115,30 @@ def main(argv: list[str] | None = None) -> None:
             all_methods = list(cfg["methods"])
             mpi_methods = [m for m in all_methods if m in _PYABC_METHODS]
             non_mpi_methods = [m for m in all_methods if m not in _PYABC_METHODS]
-            use_shared_executor = bool(mpi_methods) and int(n_workers) > 1
 
             # Pass 1: non-MPI methods (e.g. async_propulate_abc) — all ranks
             # participate normally.
             if non_mpi_methods:
                 _run_workloads(non_mpi_methods)
 
-            # Pass 2: MPI-executor methods (pyABC baselines) — one shared
-            # MPICommExecutor avoids repeated Create_intercomm/Disconnect
-            # cycles that deadlock ParaStation MPI at high rank counts.
-            if use_shared_executor:
-                from mpi4py import MPI
-                from mpi4py.futures import MPICommExecutor
-
-                with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-                    if executor is not None:
-                        _run_workloads(mpi_methods, mpi_executor=executor)
-                    # Workers block in server loop until root finishes all
-                    # MPI-executor workloads and exits the context.
-                if MPI.COMM_WORLD.Get_size() > 1:
-                    MPI.COMM_WORLD.Barrier()
-            elif mpi_methods:
-                # Single worker or n_workers==1: no MPI executor needed.
+            # Pass 2: pyABC MPI methods via CommWorldMap.
+            # Per-call CommWorldMap inside run_pyabc_smc / run_abc_smc_baseline
+            # handles coordination. All ranks participate in _run_workloads;
+            # each pyABC call internally creates and tears down its own
+            # CommWorldMap. No inter-communicator cycles.
+            if mpi_methods:
                 _run_workloads(mpi_methods)
+
+            # Post-pass Barrier: ensure all ranks finish pass 2 before proceeding
+            # to finalization / shard writes. Without mpi4py installed (unit
+            # tests) there is no collective context to synchronise, so skip.
+            if int(n_workers) > 1:
+                try:
+                    from mpi4py import MPI
+                except ImportError:
+                    MPI = None
+                if MPI is not None and MPI.COMM_WORLD.Get_size() > 1:
+                    MPI.COMM_WORLD.Barrier()
 
             # Flush per-k combo data.
             for k in k_values:
@@ -1111,13 +1181,37 @@ def main(argv: list[str] | None = None) -> None:
         logger.info("[%s] Done in %s", name, format_duration(experiment_elapsed))
     if estimate_mode and is_root_rank():
         cfg_full = load_config(args.config, test_mode=False, small_mode=False)
-        full_sims = cfg_full["inference"]["max_simulations"]
+        full_scaling = cfg_full.get("scaling", {})
+        cur_scaling = cfg.get("scaling", {})
         full_reps = cfg_full["execution"]["n_replicates"]
-        test_sims = cfg["inference"]["max_simulations"]
-        test_reps = cfg["execution"]["n_replicates"]
-        sim_ratio = (full_sims * full_reps) / max(1, test_sims * test_reps)
-        full_worker_counts = cfg_full.get("scaling", {}).get("worker_counts", worker_counts)
-        full_k_values = cfg_full.get("scaling", {}).get("k_values", k_values)
+        cur_reps = cfg["execution"]["n_replicates"]
+        full_worker_counts = full_scaling.get("worker_counts", worker_counts)
+        full_k_values = full_scaling.get("k_values", k_values)
+
+        # Choose scale ratio based on whether runs are wall-time dominated.
+        # Wall-time dominated: elapsed ≈ wall_time_limit regardless of max_sims,
+        # so the correct scale factor is (full_reps * full_wall) / (cur_reps * cur_wall).
+        # Sim-count dominated: scale by (full_sims * full_reps) / (cur_sims * cur_reps).
+        full_wall = full_scaling.get("wall_time_limit_s") or cfg_full["inference"].get("max_wall_time_s")
+        cur_wall = cur_scaling.get("wall_time_limit_s") or cfg["inference"].get("max_wall_time_s")
+        wall_time_dominated = (
+            full_wall is not None and cur_wall is not None and float(cur_wall) > 0
+            and aggregate_throughput_rows
+            and float(sum(r.get("elapsed_wall_time_s", 0) for r in aggregate_throughput_rows))
+               / max(1, len(aggregate_throughput_rows)) > 0.85 * float(cur_wall)
+        )
+        if wall_time_dominated:
+            scale_ratio = (full_reps * float(full_wall)) / max(1e-9, cur_reps * float(cur_wall))
+            note = f"wall-time scaling: {cur_reps}rep×{cur_wall}s → {full_reps}rep×{full_wall}s"
+        else:
+            full_sims = cfg_full["inference"]["max_simulations"]
+            cur_sims = cfg["inference"]["max_simulations"]
+            scale_ratio = (full_sims * full_reps) / max(1, cur_sims * cur_reps)
+            _, _, note = compute_scaling_factor(
+                args.config,
+                small_mode=small_mode,
+                test_mode=test_mode,
+            )
 
         times_by_w: dict[int, list[float]] = {}
         for row in aggregate_throughput_rows:
@@ -1125,16 +1219,11 @@ def main(argv: list[str] | None = None) -> None:
         measured_avg = {w: sum(ts) / len(ts) for w, ts in times_by_w.items()}
         if measured_avg:
             estimated = sum(
-                _interp_time(int(w), measured_avg) * sim_ratio
+                _interp_time(int(w), measured_avg) * scale_ratio
                 for w in full_worker_counts
                 for _k in full_k_values
             )
 
-        _, _, note = compute_scaling_factor(
-            args.config,
-            small_mode=small_mode,
-            test_mode=test_mode,
-        )
         if estimated is not None:
             logger.info(
                 "[%s] Estimated full run: ~%s  (%s)",

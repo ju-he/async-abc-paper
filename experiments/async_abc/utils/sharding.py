@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import time
 import traceback
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -43,11 +44,11 @@ def split_items(items: Sequence[int], num_shards: int) -> List[List[int]]:
     return assignments
 
 
-def split_indices(total_units: int, num_shards: int) -> List[List[int]]:
-    """Return balanced contiguous slices of ``range(total_units)``."""
+def split_indices(total_units: int, num_shards: int, offset: int = 0) -> List[List[int]]:
+    """Return balanced contiguous slices of ``range(offset, offset + total_units)``."""
     if total_units < 0:
         raise ValueError("total_units must be >= 0")
-    return split_items(list(range(total_units)), num_shards)
+    return split_items(list(range(offset, offset + total_units)), num_shards)
 
 
 def shard_indices(total_units: int, num_shards: int, shard_index: int) -> List[int]:
@@ -157,7 +158,11 @@ class ShardLayout:
 
 def _json_dump_atomic(path: Path, payload: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    # Per-process-unique tmp so concurrent writers (all ranks of a shard, or several
+    # shards creating the deterministic plan at once) never share a tmp file and then
+    # race on os.replace -- the failure mode that killed a shard at startup. The final
+    # rename is atomic and, since the plan content is deterministic, idempotent.
+    tmp = path.with_suffix(path.suffix + f".tmp.{os.getpid()}.{uuid.uuid4().hex}")
     with open(tmp, "w") as f:
         json.dump(payload, f, indent=2, default=str)
     os.replace(tmp, path)

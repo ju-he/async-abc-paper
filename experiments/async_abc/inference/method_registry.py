@@ -67,8 +67,7 @@ def run_method(
     seed:
         RNG seed for this replicate.
     **kwargs:
-        Extra keyword arguments forwarded to the runner if it accepts them
-        (e.g. ``mpi_executor``).
+        Extra keyword arguments forwarded to the runner if it accepts them.
 
     Returns
     -------

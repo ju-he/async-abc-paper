@@ -10,10 +10,11 @@
 #SBATCH --output=/tmp/abc_production-%j.out
 # Override SLURM log path at submission time: sbatch --output=<dir>/abc_production-%j.out ...
 
-nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
+# Paths are injected by experiments/jobs/submit.sh via `sbatch --export`.
+nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via experiments/jobs/submit.sh}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via experiments/jobs/submit.sh}"
 output_dir="${1:?Usage: $(basename "$0") <output_dir> [--extend]}"
 extend_flag="${2:-}"
-experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
 
 
 module restore nastjapy

@@ -58,8 +58,8 @@ sys.path.insert(0, str(EXPERIMENTS_DIR))
 from async_abc.io.config import compose_run_mode, load_config  # noqa: E402
 from async_abc.utils.sharding import make_run_id  # noqa: E402
 
-DEFAULT_ACCOUNT = "tissuetwin"
-DEFAULT_PARTITION = "batch"
+sys.path.insert(0, str(SCRIPT_DIR))
+import _site  # noqa: E402
 
 
 def _format_time(hours: float) -> str:
@@ -188,6 +188,8 @@ def _render_packed_script(
     packed_script: Path,
     config_path: Path,
     output_dir: Path,
+    experiments_dir: Path,
+    nastjapy_path: str,
     workers_csv: str,
     test_mode: bool,
     small_mode: bool,
@@ -220,6 +222,9 @@ def _render_packed_script(
         f"#SBATCH --job-name={job_name}\n"
         f"#SBATCH --output={log_path}\n"
         f"\n"
+        f"export EXPERIMENTS_DIR={experiments_dir}\n"
+        f"export NASTJAPY_PATH={nastjapy_path}\n"
+        f"\n"
         f"exec {packed_script} {output_dir} --workers {workers_csv}"
         f" --config {config_path}"
         f"{' ' + flag_str if flag_str else ''}\n"
@@ -231,6 +236,8 @@ def _render_standalone_script(
     scaling_script: Path,
     config_path: Path,
     output_dir: Path,
+    experiments_dir: Path,
+    nastjapy_path: str,
     test_mode: bool,
     small_mode: bool,
     extend: bool,
@@ -262,6 +269,9 @@ def _render_standalone_script(
         f"#SBATCH --partition={partition}\n"
         f"#SBATCH --job-name={job_name}\n"
         f"#SBATCH --output={log_path}\n"
+        f"\n"
+        f"export EXPERIMENTS_DIR={experiments_dir}\n"
+        f"export NASTJAPY_PATH={nastjapy_path}\n"
         f"\n"
         f"exec {scaling_script} {output_dir}"
         f" --config {config_path}"
@@ -348,15 +358,24 @@ def main() -> None:
     )
     parser.add_argument(
         "--account",
-        default=DEFAULT_ACCOUNT,
-        help=f"SLURM account (default: {DEFAULT_ACCOUNT}).",
+        default=None,
+        help="SLURM account (default: auto-detect from $SYSTEMNAME via _site.py).",
     )
     parser.add_argument(
         "--partition",
-        default=DEFAULT_PARTITION,
-        help=f"SLURM partition (default: {DEFAULT_PARTITION}).",
+        default=None,
+        help="SLURM partition (default: auto-detect from $SYSTEMNAME via _site.py).",
     )
     args = parser.parse_args()
+
+    if args.account is None or args.partition is None:
+        site_account, site_partition = _site.detect_defaults()
+        if args.account is None:
+            args.account = site_account
+        if args.partition is None:
+            args.partition = site_partition
+
+    nastjapy_path = _site.detect_nastjapy_path()
 
     run_mode = compose_run_mode("small" if args.small else "full", args.test)
     config_path = Path(args.config).resolve()
@@ -492,6 +511,8 @@ def main() -> None:
                 packed_script=packed_script,
                 config_path=config_path,
                 output_dir=output_dir,
+                experiments_dir=EXPERIMENTS_DIR,
+                nastjapy_path=nastjapy_path,
                 workers_csv=workers_csv,
                 test_mode=args.test,
                 small_mode=args.small,
@@ -536,6 +557,8 @@ def main() -> None:
                 scaling_script=scaling_script,
                 config_path=config_path,
                 output_dir=output_dir,
+                experiments_dir=EXPERIMENTS_DIR,
+                nastjapy_path=nastjapy_path,
                 test_mode=args.test,
                 small_mode=args.small,
                 extend=args.extend,

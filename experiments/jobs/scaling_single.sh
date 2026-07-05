@@ -19,8 +19,9 @@
 #SBATCH --job-name=abc_scaling
 #SBATCH --output=/tmp/abc_scaling-%j.out
 
-nastjapy_path=/p/project1/tissuetwin/herold2/nastjapy
-experiments_dir=/p/project1/tissuetwin/herold2/async-abc-paper/experiments
+# Paths are injected by submit_scaling.py (or submit.sh) via `sbatch --export`.
+nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via submit_scaling.py}"
+experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling.py}"
 config_path="$experiments_dir/configs/scaling.json"
 output_dir=""
 test_flag=""
@@ -80,17 +81,75 @@ fi
 
 n_workers="${SLURM_NTASKS}"
 
-module restore nastjapy
-module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+# Environment setup. Override SCALING_ENV_SETUP to point at a script that loads a
+# different MPI stack + activates a matching venv — e.g. an OpenMPI-linked mpi4py
+# venv to sidestep the ParaStation pscom teardown hang at high message volume.
+# Default keeps ParaStation+nastja unchanged. The setup script owns both the
+# module loads AND `source <venv>/bin/activate`.
+if [ -n "${SCALING_ENV_SETUP:-}" ]; then
+    # shellcheck source=/dev/null
+    source "$SCALING_ENV_SETUP"
+else
+    module restore nastjapy
+    module load ParaStationMPI
+    source "$nastjapy_path/.venv/bin/activate"
+fi
 
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
-srun -n "$n_workers" python "$experiments_dir/scripts/scaling_runner.py" \
+# Skip the ParaStation MPI_Comm_free that hangs in pscom_close at high message
+# volume. Confirmed on JUWELS (run_20260623_133045): with one combo per process
+# (below), the low-k combos teardown fine but each k>=192 combo runs its full
+# wall budget then hangs its SINGLE teardown -> Force Terminated (not a time
+# limit; --time was 2h29m). Skipping Free leaks one communicator per process,
+# reclaimed at process exit — safe precisely because of the per-combo isolation,
+# not an accumulating leak. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce the hang.
+export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
+
+# One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
+# (k, replicate) combo. At >=48 ranks, sweeping many combos inside one
+# long-lived process makes the per-combo MPI_Comm_free hang in ParaStation
+# pscom_close (see .plans/bug-fixes); isolating each combo in its own process
+# sidesteps the repeated teardown entirely. Aggregates are rebuilt at the end.
+runner="$experiments_dir/scripts/scaling_runner.py"
+
+# Read the (k, replicate) grid into an array FIRST, then loop. Do NOT feed the
+# grid into a `while read ... done < <(...)` loop: srun reads stdin and swallows
+# the rest of the list, so only the first combo would run. `< /dev/null` on srun
+# is belt-and-suspenders against the same footgun.
+mapfile -t combos < <(python "$runner" \
     --config "$config_path" \
     --output-dir "$output_dir" \
     --n-workers "$n_workers" \
+    --print-combos \
     ${test_flag:+"$test_flag"} \
-    ${small_flag:+"$small_flag"} \
-    ${extend_flag:+"$extend_flag"}
+    ${small_flag:+"$small_flag"})
+
+status=0
+for combo in "${combos[@]}"; do
+    [ -z "$combo" ] && continue
+    read -r k rep <<< "$combo"
+    srun -n "$n_workers" python "$runner" \
+        --config "$config_path" \
+        --output-dir "$output_dir" \
+        --n-workers "$n_workers" \
+        --k "$k" \
+        --replicate "$rep" \
+        --skip-finalize \
+        ${test_flag:+"$test_flag"} \
+        ${small_flag:+"$small_flag"} \
+        ${extend_flag:+"$extend_flag"} < /dev/null || status=1
+done
+
+# Rebuild aggregate CSVs/plots/metadata from the per-combo shards (single rank,
+# no MPI teardown).
+python "$runner" \
+    --config "$config_path" \
+    --output-dir "$output_dir" \
+    --n-workers "$n_workers" \
+    --finalize-only \
+    ${test_flag:+"$test_flag"} \
+    ${small_flag:+"$small_flag"}
+
+exit "$status"

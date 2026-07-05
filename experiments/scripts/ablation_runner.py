@@ -231,6 +231,29 @@ def main(argv: list[str] | None = None) -> None:
 
         plot_ablation_summary(output_dir.data, variants, output_dir, benchmark_cfg=cfg.get("benchmark", {}))
 
+    # AMIS isolation pair plot (W2.3 / paper §19 contribution 7). Enabled by
+    # default whenever the ablation grid contains both "full_model" and
+    # "no_amis" variants; can be turned off via plots.ablation_amis_isolation.
+    variant_names_set = {v.get("name") for v in variants}
+    amis_iso_default = ("full_model" in variant_names_set) and ("no_amis" in variant_names_set)
+    if plots_cfg.get("ablation_amis_isolation", amis_iso_default):
+        from async_abc.plotting.reporters import plot_ablation_amis_isolation
+
+        plot_ablation_amis_isolation(
+            output_dir.data, variants, output_dir, benchmark_cfg=cfg.get("benchmark", {})
+        )
+
+    # AMIS snapshot-buffer ESS-stability sweep (W3.2 / paper §17). Fires when
+    # the variant list contains amis_snapshots overrides (the canonical use
+    # case is configs/amis_snapshot_sweep.json); can be forced via the
+    # plots.amis_snapshot_ess_stability flag.
+    distinct_S = {v.get("amis_snapshots") for v in variants if "amis_snapshots" in v}
+    snapshot_sweep_default = len(distinct_S) >= 2
+    if plots_cfg.get("amis_snapshot_ess_stability", snapshot_sweep_default):
+        from async_abc.plotting.reporters import plot_amis_snapshot_ess_stability
+
+        plot_amis_snapshot_ess_stability(output_dir.data, variants, output_dir)
+
     write_metadata(output_dir, cfg)
 
 

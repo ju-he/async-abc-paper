@@ -18,7 +18,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.analysis import final_state_results
-from async_abc.analysis.sbc import empirical_coverage, sbc_ranks
+from async_abc.analysis.sbc import empirical_coverage, gaussian_credible_coverage, sbc_ranks
 from async_abc.benchmarks import make_benchmark
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
@@ -79,17 +79,33 @@ def _posterior_samples(
     *,
     archive_size: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (samples, weights) arrays for the final archive of a single trial."""
+    """Return (samples, weights) arrays for the final archive of a single trial.
+
+    Weights are the **retroactive AMIS** posterior weights (``posterior_weight``)
+    when present — the estimator the consistency + CLT are stated for — falling
+    back to the streaming ``weight`` and then to 1.0 for methods (e.g. pyABC) or
+    legacy records that do not carry it.
+    """
     final = []
     for result in final_state_results(records, archive_size=archive_size):
         final.extend(result.records)
     param_records = [r for r in final if param_name in r.params]
     samples = np.asarray([r.params[param_name] for r in param_records], dtype=float)
     weights = np.asarray(
-        [float(r.weight) if r.weight is not None else 1.0 for r in param_records],
+        [_posterior_weight_of(r) for r in param_records],
         dtype=float,
     )
     return samples, weights
+
+
+def _posterior_weight_of(record) -> float:
+    """Retroactive posterior weight if available, else the streaming weight, else 1.0."""
+    pw = getattr(record, "posterior_weight", None)
+    if pw is not None:
+        return float(pw)
+    if record.weight is not None:
+        return float(record.weight)
+    return 1.0
 
 
 def _resolve_benchmark_configs(cfg: dict) -> list[dict]:
@@ -99,10 +115,14 @@ def _resolve_benchmark_configs(cfg: dict) -> list[dict]:
     Otherwise falls back to the single ``cfg["benchmark"]`` entry for backward
     compatibility. Each returned dict is a complete benchmark config; entries
     may carry an optional ``"inference_overrides"`` key.
+
+    Benchmarks with ``"enabled": false`` are skipped, allowing a run to target
+    only a subset of benchmarks (e.g. to add gandk to an existing gaussian_mean
+    run via ``--extend``).
     """
     sbc_benchmarks = cfg.get("sbc", {}).get("benchmarks")
     if sbc_benchmarks:
-        return list(sbc_benchmarks)
+        return [b for b in sbc_benchmarks if b.get("enabled", True)]
     return [dict(cfg["benchmark"])]
 
 
@@ -211,6 +231,12 @@ def main(argv: list[str] | None = None) -> None:
     n_trials = int(sbc_cfg["n_trials"])
     coverage_levels = [float(x) for x in sbc_cfg["coverage_levels"]]
 
+    # trial_offset shifts the trial index range: this run covers trials
+    # [trial_offset, trial_offset + n_trials).  Use this to extend a previous
+    # run with additional trials without re-running already-completed ones.
+    trial_offset = int(cfg["execution"].get("trial_offset", 0))
+    n_total = trial_offset + n_trials
+
     # Resolve benchmark list (supports single or multi-benchmark configs).
     benchmark_configs = _resolve_benchmark_configs(cfg)
 
@@ -220,9 +246,9 @@ def main(argv: list[str] | None = None) -> None:
     if not _first_benchmark.limits:
         raise ValueError("SBC requires at least one inferable parameter.")
 
-    seeds = make_seeds(n_trials, int(cfg["execution"]["base_seed"]))
+    seeds = make_seeds(n_total, int(cfg["execution"]["base_seed"]))
     trial_records = []
-    selected_trials = list(range(n_trials))
+    selected_trials = list(range(trial_offset, n_total))
 
     if is_shard_mode(args):
         output_root = Path(args.output_dir)
@@ -232,13 +258,15 @@ def main(argv: list[str] | None = None) -> None:
         plan = read_json(layout.plan_path)
         if not plan:
             actual_num_shards = args.num_shards or 1
+            full_trial_offset = int(full_cfg["execution"].get("trial_offset", 0))
+            full_n_total = full_trial_offset + full_cfg["sbc"]["n_trials"]
             plan = ensure_plan(
                 layout,
                 build_plan_payload(
                     experiment_name=experiment_name,
                     config_path=str(Path(args.config).resolve()),
                     unit_kind="trial",
-                    full_total_units=full_cfg["sbc"]["n_trials"],
+                    full_total_units=full_n_total,
                     actual_total_units=n_trials,
                     target_total_units=n_trials,
                     requested_num_shards=actual_num_shards,
@@ -249,8 +277,8 @@ def main(argv: list[str] | None = None) -> None:
                     extend=args.extend,
                     run_id=args.shard_run_id,
                     completed_unit_indices=[],
-                    pending_unit_indices=list(range(n_trials)),
-                    shard_assignments=split_indices(n_trials, actual_num_shards),
+                    pending_unit_indices=list(range(trial_offset, n_total)),
+                    shard_assignments=split_indices(n_trials, actual_num_shards, offset=trial_offset),
                     runner_script=str(Path(__file__).resolve()),
                 ),
             )
@@ -490,8 +518,13 @@ def main(argv: list[str] | None = None) -> None:
     write_timing_comparison_csv(Path(args.output_dir))
     ranks_df = sbc_ranks(trial_records)
     coverage_df = empirical_coverage(trial_records, coverage_levels)
+    gaussian_coverage_df = gaussian_credible_coverage(trial_records, coverage_levels)
     _write_dataframe_csv(ranks_df, output_dir.data / "sbc_ranks.csv")
     _write_dataframe_csv(coverage_df, output_dir.data / "coverage.csv")
+    # Paper §4 Theorem 2 (CLT) artefact: empirical coverage of
+    # mean ± z·sd intervals at nominal levels. Methods-venue reviewers
+    # expect this alongside equal-tailed coverage.
+    _write_dataframe_csv(gaussian_coverage_df, output_dir.data / "gaussian_ci_coverage.csv")
 
     plots_cfg = cfg.get("plots", {})
     if plots_cfg.get("rank_histogram"):

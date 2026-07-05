@@ -20,7 +20,6 @@ from ._attempt_trace import attempt_records_from_events, instrument_simulate, lo
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
     CommWorldMap,
-    TrackedFutureExecutor,
     build_pyabc_sampler,
     resolve_pyabc_client_max_jobs,
     resolve_pyabc_mpi_sampler,
@@ -28,7 +27,11 @@ from .pyabc_sampler import (
     resolve_pyabc_worker_count,
 )
 
-from ._pyabc_common import db_suffix as _db_suffix, prepare_db_path as _prepare_db_path
+from ._pyabc_common import (
+    db_suffix as _db_suffix,
+    make_acceptor as _make_acceptor,
+    prepare_db_path as _prepare_db_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,7 @@ def _run_abc_smc_baseline_with_sampler(
     seed: int,
     checkpoint_tag: str = "",
     max_wall_time_s: float | None = None,
+    kernel: str = "hard",
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -89,6 +93,10 @@ def _run_abc_smc_baseline_with_sampler(
         checkpoint_tag=checkpoint_tag,
     )
 
+    # Apples-to-apples kernel matched to the propulate-side ABCPMC kernel.
+    # ``"hard"`` keeps pyABC's UniformAcceptor and reproduces the legacy
+    # behaviour.
+    acceptor = _make_acceptor(kernel, rng_seed=seed)
     abc = pyabc.ABCSMC(
         models=pyabc_model,
         parameter_priors=prior,
@@ -97,6 +105,7 @@ def _run_abc_smc_baseline_with_sampler(
         transitions=pyabc.MultivariateNormalTransition(),
         eps=pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5),
         sampler=sampler,
+        acceptor=acceptor,
     )
     abc.new(db_path, {"distance": 0.0})
 
@@ -231,7 +240,6 @@ def run_abc_smc_baseline(
     replicate: int,
     seed: int,
     progress=None,
-    mpi_executor=None,
 ) -> List[ParticleRecord]:
     """Run synchronous ABC-SMC with a fixed number of generations via pyABC.
 
@@ -271,6 +279,9 @@ def run_abc_smc_baseline(
     max_sims     = inference_cfg["max_simulations"]
     k            = inference_cfg.get("k", 100)
     tol_init = inference_cfg.get("tol_init", 10.0)
+    # Apples-to-apples kernel matched to the propulate-side ABCPMC kernel.
+    # ``"hard"`` keeps pyABC's UniformAcceptor behaviour unchanged.
+    kernel = inference_cfg.get("kernel", "hard")
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
@@ -287,20 +298,16 @@ def run_abc_smc_baseline(
         parallel_backend,
         method_name="abc_smc_baseline",
     )
-    client_max_jobs = resolve_pyabc_client_max_jobs(
-        inference_cfg,
-        parallel_backend=parallel_backend,
-        n_procs=int(n_procs),
-        mpi_sampler=resolve_pyabc_mpi_sampler(
-            inference_cfg,
-            parallel_backend=parallel_backend,
-            method_name="abc_smc_baseline",
-        ),
-    )
     mpi_sampler = resolve_pyabc_mpi_sampler(
         inference_cfg,
         parallel_backend=parallel_backend,
         method_name="abc_smc_baseline",
+    )
+    client_max_jobs = resolve_pyabc_client_max_jobs(
+        inference_cfg,
+        parallel_backend=parallel_backend,
+        n_procs=int(n_procs),
+        mpi_sampler=mpi_sampler,
     )
 
     if parallel_backend == "mpi":
@@ -343,49 +350,12 @@ def run_abc_smc_baseline(
                 seed=seed,
                 checkpoint_tag=checkpoint_tag,
                 max_wall_time_s=max_wall_time_s,
+                kernel=kernel,
                 progress=progress,
             )
 
-        # Shared MPICommExecutor path: caller manages lifecycle (scaling runner).
-        # Only root calls this — workers are in the server recv loop.
-        if mpi_executor is not None:
-            return _run_with_map_callable(mpi_executor.map)
-
-        if mpi_sampler == "concurrent_futures":
-            # Legacy futures path: still uses MPICommExecutor (opt-in only).
-            from mpi4py.futures import MPICommExecutor
-
-            result: List[ParticleRecord] = []
-            with MPICommExecutor(MPI.COMM_WORLD, root=0) as executor:
-                if executor is not None:
-                    tracker = TrackedFutureExecutor(executor)
-                    sampler = build_pyabc_sampler(
-                        n_procs,
-                        parallel_backend,
-                        mpi_sampler=mpi_sampler,
-                        cfuture_executor=tracker,
-                        client_max_jobs=client_max_jobs,
-                    )
-                    result = _run_abc_smc_baseline_with_sampler(
-                        sampler=sampler,
-                        simulate_fn=simulate_fn,
-                        limits=limits,
-                        max_sims=max_sims,
-                        k=k,
-                        tol_init=tol_init,
-                        n_generations=n_generations,
-                        output_dir=output_dir,
-                        replicate=replicate,
-                        seed=seed,
-                        checkpoint_tag=checkpoint_tag,
-                        max_wall_time_s=max_wall_time_s,
-                        progress=progress,
-                    )
-            if MPI.COMM_WORLD.Get_size() > 1:
-                MPI.COMM_WORLD.Barrier()
-            return result
-
-        # Default mapping path: CommWorldMap avoids MPICommExecutor entirely.
+        # MPI mapping path: CommWorldMap coordinates root and workers
+        # over COMM_WORLD (bcast + send/recv + Barrier + allgather).
         cmap = CommWorldMap(MPI.COMM_WORLD)
         result: List[ParticleRecord] = []
         if cmap.is_root:
@@ -417,5 +387,6 @@ def run_abc_smc_baseline(
         seed=seed,
         checkpoint_tag=checkpoint_tag,
         max_wall_time_s=max_wall_time_s,
+        kernel=kernel,
         progress=progress,
     )

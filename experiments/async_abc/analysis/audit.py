@@ -11,6 +11,139 @@ from ._helpers import records_to_frame
 from .final_state import final_state_results
 from .final_state import base_method_name
 
+
+def _safe_pearson(x: np.ndarray, y: np.ndarray) -> float:
+    """Pearson correlation that returns NaN on degenerate inputs."""
+    if x.size < 2:
+        return float("nan")
+    sx = float(np.std(x))
+    sy = float(np.std(y))
+    if sx == 0.0 or sy == 0.0 or not np.isfinite(sx) or not np.isfinite(sy):
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
+
+
+def simulation_time_bias_report(records: Iterable) -> dict[str, object]:
+    """Diagnose simulation-time bias in an asynchronous-ABC run (W3.3).
+
+    Steady-state asynchronous ABC keeps every accepted particle, so faster-
+    simulating parameter regions can be over-represented in the archive
+    relative to slow-simulating regions of the posterior. Paper §17
+    acknowledges this; this report quantifies it per run.
+
+    Inputs are :class:`ParticleRecord`-shaped rows. Returns a dictionary
+    summarising:
+
+    - ``mean_sim_time_accepted`` / ``mean_sim_time_rejected``: average
+      per-evaluation wall-time, segmented by acceptance (loss < tolerance).
+      Equal means imply no bias; a large gap means simulator runtime
+      correlates with acceptance.
+    - ``pearson_corr_simtime_loss``: Pearson r between per-evaluation
+      simulation time and loss across all records. A positive r indicates
+      slow simulations tend to have high loss (poor regions); a negative
+      r indicates the asymmetry that creates the bias.
+    - ``chi2_p_value``: χ² test of independence between (sim_time-low,
+      sim_time-high) and (accepted, rejected) using median splits. Small
+      p-values reject independence and confirm bias.
+
+    Records without ``sim_start_time`` / ``sim_end_time`` (e.g. sync methods
+    that record only generation-level spans) are skipped from the per-
+    evaluation analysis; the report still returns the run-level totals.
+    """
+    frame = records_to_frame(records)
+    if frame.empty:
+        return {
+            "n_records": 0,
+            "mean_sim_time_accepted": float("nan"),
+            "mean_sim_time_rejected": float("nan"),
+            "pearson_corr_simtime_loss": float("nan"),
+            "chi2_p_value": float("nan"),
+            "skip_reason": "empty_records",
+        }
+
+    # Derive per-evaluation sim_time as (sim_end - sim_start). Records that
+    # lack both timestamps are skipped (sim_time = NaN); sync methods that
+    # only emit generation-level spans will fall into this bucket.
+    def _row_sim_time(row) -> float:
+        s_start = row.get("sim_start_time", None)
+        s_end = row.get("sim_end_time", None)
+        if pd.notna(s_start) and pd.notna(s_end):
+            try:
+                dt = float(s_end) - float(s_start)
+                if np.isfinite(dt) and dt > 0:
+                    return dt
+            except (TypeError, ValueError):
+                pass
+        return float("nan")
+
+    sim_times = frame.apply(_row_sim_time, axis=1).to_numpy()
+    losses = pd.to_numeric(frame["loss"], errors="coerce").to_numpy()
+    tolerances = pd.to_numeric(frame.get("tolerance", pd.Series([])), errors="coerce")
+    # An evaluation is "accepted" if its loss is below its stamped tolerance.
+    # Records with no stamped tolerance (prior-phase or sync rejection-ABC)
+    # use the run's initial tolerance via a fallback below.
+    if tolerances.empty:
+        tol_arr = np.full_like(losses, np.nan, dtype=float)
+    else:
+        tol_arr = tolerances.to_numpy()
+    fallback_tol = float(np.nanmax(tol_arr)) if np.any(np.isfinite(tol_arr)) else float("inf")
+    eff_tol = np.where(np.isfinite(tol_arr), tol_arr, fallback_tol)
+    accepted_mask = (losses < eff_tol) & np.isfinite(losses)
+
+    finite_mask = np.isfinite(sim_times) & np.isfinite(losses)
+    n_finite = int(np.sum(finite_mask))
+    if n_finite == 0:
+        return {
+            "n_records": int(len(frame)),
+            "mean_sim_time_accepted": float("nan"),
+            "mean_sim_time_rejected": float("nan"),
+            "pearson_corr_simtime_loss": float("nan"),
+            "chi2_p_value": float("nan"),
+            "skip_reason": "no_finite_sim_time_or_loss",
+        }
+
+    sim_finite = sim_times[finite_mask]
+    loss_finite = losses[finite_mask]
+    accepted_finite = accepted_mask[finite_mask]
+
+    mean_acc = float(np.mean(sim_finite[accepted_finite])) if accepted_finite.any() else float("nan")
+    mean_rej = float(np.mean(sim_finite[~accepted_finite])) if (~accepted_finite).any() else float("nan")
+    pearson = _safe_pearson(sim_finite, loss_finite)
+
+    # χ² independence test on median-split sim_time vs accepted.
+    chi2_p: float
+    try:
+        from scipy.stats import chi2_contingency
+    except Exception:
+        chi2_p = float("nan")
+    else:
+        median = float(np.median(sim_finite))
+        slow = sim_finite >= median
+        # Build a 2x2 contingency table.
+        table = np.array(
+            [
+                [int(np.sum(slow & accepted_finite)), int(np.sum(slow & ~accepted_finite))],
+                [int(np.sum(~slow & accepted_finite)), int(np.sum(~slow & ~accepted_finite))],
+            ],
+            dtype=int,
+        )
+        if table.sum(axis=0).min() == 0 or table.sum(axis=1).min() == 0:
+            chi2_p = float("nan")
+        else:
+            _, chi2_p, _, _ = chi2_contingency(table)
+            chi2_p = float(chi2_p)
+
+    return {
+        "n_records": int(len(frame)),
+        "n_accepted": int(np.sum(accepted_finite)),
+        "n_rejected": int(np.sum(~accepted_finite)),
+        "mean_sim_time_accepted": mean_acc,
+        "mean_sim_time_rejected": mean_rej,
+        "pearson_corr_simtime_loss": pearson,
+        "chi2_p_value": chi2_p,
+        "skip_reason": None,
+    }
+
 FALLBACK_LOSS_THRESHOLD = 1e6
 PATHOLOGICAL_FALLBACK_FRACTION = 0.95
 

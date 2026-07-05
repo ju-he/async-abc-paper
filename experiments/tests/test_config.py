@@ -578,3 +578,33 @@ class TestScalingFactor:
         estimated = compute_corrected_estimate(15.0, raw_results, path)
 
         assert estimated == pytest.approx(142.0)
+
+
+class TestScalingPosteriorWeightsDisabled:
+    """The scaling/throughput sweeps must NOT compute the retroactive AMIS
+    posterior (extract_posterior is O(n_history * amis_snapshots * k) and
+    unbounded by the inference wall-time — at k>=192 it overruns the SLURM wall
+    clock and presents as a teardown hang; see .plans/bug-fixes). The flag must
+    hold through EVERY real load path: full AND small tiers (the runs use
+    `--small`, which loads configs/small/<name>.json standalone — a divergence
+    here is exactly the bug that let the hang slip through once).
+    """
+
+    from pathlib import Path as _Path
+
+    _CONFIG_ROOT = _Path(__file__).resolve().parents[1] / "configs"
+
+    @pytest.mark.parametrize("name", ["scaling", "scaling_cpm"])
+    @pytest.mark.parametrize("small_mode", [False, True])
+    @pytest.mark.parametrize("test_mode", [False, True])
+    def test_scaling_disables_posterior_weights(self, name, small_mode, test_mode):
+        cfg = load_config(
+            self._CONFIG_ROOT / f"{name}.json",
+            test_mode=test_mode,
+            small_mode=small_mode,
+        )
+        assert cfg["inference"].get("compute_posterior_weights") is False, (
+            f"{name} (small={small_mode}, test={test_mode}) must set "
+            "compute_posterior_weights=false; extract_posterior is unbounded at "
+            "scaling record volumes."
+        )

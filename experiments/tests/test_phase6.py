@@ -233,6 +233,7 @@ class TestRunAll:
             ),
         )
         monkeypatch.setattr(run_all, "_read_runner_estimate", lambda _: 1.0)
+        monkeypatch.setattr(run_all, "_verify_outputs_exist", lambda name, output_dir: (True, None))
 
         run_all.main(
             [

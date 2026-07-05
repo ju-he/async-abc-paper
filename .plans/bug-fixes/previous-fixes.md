@@ -1,5 +1,265 @@
 # Previous Bug Fixes
 
+## 2026-06-25 — CPU scaling "MPI teardown hang" was extract_posterior O(n·S·k) on the analysis path
+
+**Symptom:** The CPU `scaling` (lotka_volterra) sweep wedges on JUWELS at high worker counts ×
+high archive size — specifically the **w48/w96 × k192/k1000** combos never finalize (no
+`throughput_summary` shard), while every `scaling_cpm` combo and every w1/w16 and `*_k48` combo
+completes. The job dies with no Python traceback, not OOM, ~minutes into the allocation, at a combo
+boundary "after teardown". A standalone reproducer (`repro_pscom_teardown.{sh,py}`) showed all 48
+ranks reach `_free_propulate_comm` end (`FREE end 0.00s`) and then wedge before the next combo —
+**identically under ParaStation MPI and Open MPI v5.0.5** (confirmed via the `mpi4py.Get_library_version()`
+marker), so it is **MPI-independent**.
+
+**Wrong turns (kept here so they are not repeated):** diagnosed in sequence as OOM (disproved by
+sacct: 1.7 GB/188 GB), the ParaStation `MPI_Comm_free`/pscom teardown (disproved: `PROPULATE_SKIP_DISCONNECT=1`
+did not help and `FREE` is 0.00 s), and the post-loop intra-island drain (disproved: markers show it
+finishes in ~10 s, far under the 120 s bound). Each was a guess from heuristics; the fix only came
+from (a) reading the markers/`job.log` off the shared mount, and (b) a local micro-benchmark.
+
+**Root cause:** After the timed inference loop and communicator free, `run_propulate_abc` calls
+`ABCPMC.extract_posterior(population)` (the retroactive AMIS reweighting — the reported posterior) on
+**every** rank. Its cost is **O(n_history · amis_snapshots · k)** and it is **not bounded by the
+inference wall-time** — `log_mixture_density` builds `(n, k)` arrays for each of `amis_snapshots`
+snapshots. On cheap-simulator scaling sweeps (fixed-walltime, `_stop_policy_for_method` =
+`wall_time_exact`) the history reaches ~2e5–1e6 individuals. A local benchmark at k=1000 measured
+~0.8 ms/particle (2k→2.7 s, 200k→160 s, ~8 GB), so the hung combos are **10–16 min of single-threaded
+NumPy per combo, per rank** — overrunning the SLURM wall clock. The other ranks block at the
+post-method `allgather` (`runner.py:876`) waiting for the slowest, which presents as a post-teardown
+hang. k-dependence is the `·k` factor (k=48 combos finish in ~30 s even at 8e5 records; k=1000 do not);
+CPM survives because its expensive simulator caps the history at ≤41k records.
+
+**Fix:** Gate the estimator behind `inference_cfg["compute_posterior_weights"]` (default **True**, so
+all posterior-quality experiments — SBC, gaussian_mean, ablation — are unchanged). The throughput
+`scaling`/`scaling_cpm` configs set it **False**: they never consume `posterior_weight` (only
+`analysis/sbc.py` does), and `extract_posterior` is a pure function of the saved history, so the
+weights are recomputable offline from the raw CSV if ever needed. With the flag off the post-run path
+is just the O(n log n) population sort + record build (~tens of seconds even at 1e6 records). No silent
+fallback — when skipped, an INFO line records it (CLAUDE.md "crash loudly" compliance).
+
+**Files:** `experiments/async_abc/inference/propulate_abc.py` (flag read + gated `extract_posterior`
+block), `experiments/configs/scaling.json`, `experiments/configs/scaling_cpm.json`,
+`experiments/tests/test_inference.py` (`test_compute_posterior_weights_false_skips_extract_posterior`
+asserts the estimator is not invoked and `posterior_weight` stays empty).
+
+**Note:** The layered ParaStation robustness changes from the wrong turns (per-combo process isolation
+in the scaling wrappers, bounded drain via `PROPULATE_DRAIN_TIMEOUT_S`, `PROPULATE_SKIP_DISCONNECT`
+default, `SCALING_ENV_SETUP` MPI-swap hook) are correct hardening and were kept, but they do **not**
+address this headline hang — this fix does.
+
+### 2026-06-25 (addendum) — the fix initially missed the `--small` config tier
+
+**Symptom after the first fix:** the A/B repro (which sets `compute_posterior_weights` directly)
+completed, but the real `--small` scaling sweep STILL wedged at exactly k>=192 (k48 finalized at ~1.5M
+records; w48/w96 × {k192,k1000} were Force Terminated ~5s after the wall-time break, same 2 ranks
+SIGKILLed). It looked like a *separate* teardown bug.
+
+**Diagnosis:** captured per-rank Python tracebacks via an env-gated `faulthandler.dump_traceback_later`
+in `scaling_runner` (`SCALING_FAULTHANDLER_S`) — ptrace-free, because py-spy/gdb are blocked by
+`ptrace_scope` on the compute nodes (the watchdog is a sibling, not parent, of the ranks). All 48 ranks'
+last frame was `extract_posterior -> run_propulate_abc:574`. So it was never a second bug — it was the
+SAME extract_posterior, still running.
+
+**Root cause of the miss:** `load_config(small_mode=True)` does not merge — it loads
+`configs/small/<name>.json` **standalone** (`_resolve_small_config_path`). Every real scaling run uses
+`--small`, so it reads `configs/small/scaling.json`, which did **not** have the flag. The full-tier
+`configs/scaling.json` I patched is only used by non-`--small` runs. (The k48 shard's empty
+`posterior_weight` that suggested the fix was active was a red herring: extract_posterior ran but raised
+and was caught -> None; at k=1000 the same call is ~20x slower per the `*k` factor, so it wedges instead
+of returning.)
+
+**Fix:** add `"compute_posterior_weights": false` to `configs/small/scaling.json` and
+`configs/small/scaling_cpm.json` too. Regression test `TestScalingPosteriorWeightsDisabled` asserts the
+flag holds through ALL real load paths (full+small x test+no-test) so the tiers cannot silently diverge
+again.
+
+**Files:** `experiments/configs/small/scaling.json`, `experiments/configs/small/scaling_cpm.json`,
+`experiments/scripts/scaling_runner.py` (faulthandler dumper), `experiments/tests/test_config.py`,
+`experiments/jobs/scaling_single_combo.sh` (diagnostic harness).
+
+**Lesson:** when gating behaviour via config, patch (and test) EVERY tier the loader can resolve —
+full and `small/`. A flag present in one tier and absent in the sibling is invisible until the exact
+tier that's missing it runs in production.
+
+### 2026-06-25 (part 2) — residual 2-node teardown kill: redundant post-run build on non-root ranks
+
+**Symptom (after extract_posterior was fixed):** with the gate working, the w48 combos finalized
+cleanly at ~1.5M records, but `w96_k192` (96 ranks across 2 nodes) was **reproducibly** Force
+Terminated at teardown — both replicates, two runs in a row — while w48 (1 node) had **zero** Force
+Terminated. Per-step data: async_propulate ran to ~329s (past the 300s budget) but only **~26 of 96
+ranks** reached `status=finish`; the other ~70 were still in the post-run, and `abc_smc_baseline` never
+started.
+
+**Root cause:** `run_method_distributed` keeps only ROOT's records in `all_ranks` mode
+(`return records if root_rank else []`), but `run_propulate_abc` ran the post-run **sort + per-particle
+record build on every rank**. At ~6e5–1e6 individuals/rank that O(n log n) + O(n) Python build is slow
+and highly variable under 96-way CPU contention across 2 nodes, so ranks desynced: the fast ones hit
+the post-method `allgather`/teardown while the slow ones were still building, and the step missed the
+(~wall+40s) teardown window and was killed. 1 node stayed inside the window; 2 nodes did not.
+
+**Fix:** gate the discarded post-run build to **root only**. `run_method_distributed` sets
+`inference_cfg["_records_root_only"]=True` for `all_ranks` mode; `run_propulate_abc` returns `[]` on
+non-root immediately after the existing post-`Free` `COMM_WORLD.Barrier` (so no desync into the next
+Dup). Output is **identical** — root's records are exactly what was already returned — but the 95
+non-root ranks now skip straight to the collective, removing both the 95x redundant work and the
+desync. Testable via the `_comm_world_is_root()` seam; tests assert non-root returns `[]` and root still
+builds.
+
+**Files:** `experiments/async_abc/utils/runner.py` (set the flag for all_ranks),
+`experiments/async_abc/inference/propulate_abc.py` (`_comm_world_is_root` + non-root early return),
+`experiments/tests/test_inference.py` (root-only build tests).
+
+### 2026-06-25 (part 3) — residual w96/2-node failure is a pscom SEGFAULT (not a hang)
+
+**Symptom:** after all the above, `w96_k192` (96 ranks / 2 nodes) still reproducibly fails; w48 (1
+node) never does. Every w96 "Force Terminated" is the downstream of **one rank crashing**.
+
+**Diagnosis (direct, via the jsc-mpc MCP):** reproduced the exact combo standalone with a ptrace-free
+per-rank `faulthandler` dumper (`SCALING_FAULTHANDLER_S`). Findings, all from the cluster:
+- The job dies at **~180s** (not the 300s wall-time) when **`srun: error: ... task 8: Segmentation
+  fault (core dumped)`** → srun Force-Terminates the step. So it is **not** a timeout, **not** the
+  teardown window, **not** a deadlock (0 ranks reached `status=finish`; all 96 were still in the eval
+  loop).
+- **Not OOM**: sacct MaxRSS 871 MB / MaxVMSize 3.4 GB per task against a 188 GB node.
+- No Python `Fatal Python error` dump despite `faulthandler.enable()` → the fault is a **C-level crash
+  in the ParaStation pscom / mpi4py transport**, under the high-volume intra-island all-to-all
+  messaging (each eval isends to all 95 peers) that only exists at >=2 nodes. MPI confirmed ParaStation
+  MPI 5.10.0-1.
+- The crashing rank's periodic dumps sat in `population.__repr__` <- `propulator.py:343` (the debug
+  log f-string) inside the high-frequency receive loop.
+
+**Status: root-caused, not yet resolved.** It is the original "pscom" concern — vindicated — but a
+crash *during* the run, not at teardown. The skip-disconnect / drain-bound / per-combo-isolation /
+root-only changes do not address it (they target teardown, not an in-run pscom crash).
+
+**Mitigation shipped (propulate fork `ju-he/propulate@eb70297`, branch feature/async-abc):** gate the
+per-generation debug log-string (incl. `Individual.__repr__` on every received individual) and the O(N)
+`_get_active_individuals` in `_receive_intra_island_individuals` behind `log.isEnabledFor(DEBUG)`.
+Removes a large per-message cost in the exact crash-site receive loop → faster drain, less pscom
+backlog pressure. Likely-helpful but NOT a guaranteed fix for a C-level pscom segfault.
+
+**Candidate real fixes (open):** (a) run w96 under OpenMPI instead of ParaStation (different transport;
+the most promising sidestep — testable via the MCP); (b) pscom tuning (`PSP_*`); (c) reduce
+intra-island message volume in the propulate fork (batch/throttle the all-to-all isend); (d) accept
+11/12 small-grid combos. Deploy of the fork mitigation needs `cd /p/project1/tissuetwin/herold2/propulate
+&& git pull` (editable install).
+
+**Further MCP investigation (2026-06-25, continued):**
+- OpenMPI venv (`/p/.../scaling_openmpi_venv`) is **half-built** — no `scaling_openmpi_env.sh`, its python
+  fails with `libpython3.12.so.1.0: cannot open` (Python module not loaded), `module avail OpenMPI`
+  empty under Stages/2025. Not turnkey; the swap would need the module stack reverse-engineered.
+- **Transport is NOT the cause.** Forced verbs/TCP via `PSP_UCP=0` (job 14053021): the crash *changed
+  mode* — no segfault, instead `mpid_irecv_done: read from socket failed ... Failure during collective`
+  (a peer connection dropped mid-Bcast). UCX → segfault, TCP → socket drop ⇒ **a rank dies regardless of
+  transport**. The trigger is the unbounded high-volume async messaging, not a transport bug.
+- **The real culprit: no send backpressure.** `_cleanup_propulate_intra_requests` only `Testsome`s
+  (retires *completed* sends). At 96 ranks each eval posts 95 `isend`s; if peers' recvs lag, outstanding
+  requests grow without bound → pscom per-connection resource exhaustion → a rank crashes (~180s in).
+  w48 stays under the limit; w96 (2× the fan-out) does not.
+
+**Fix implemented (wrapper-side, no propulate-fork change):** added **send backpressure** to the eval
+loop in `_cleanup_propulate_intra_requests` (propulate_abc.py). When outstanding `intra_requests` exceed
+`PROPULATE_MAX_INFLIGHT_SENDS` (env, default 4096 ≈ 43/peer at 96 ranks), it runs bounded rounds of
+(drain incoming via `_receive_intra_island_individuals` → `Testsome`-retire our completed sends).
+Draining incoming FIRST lets peers progress and receive our sends, so the retire makes progress — all
+non-blocking ⇒ cannot deadlock even if every rank backpressures at once; bounded round count ⇒ never
+spins. Results unchanged; only send pacing. The ABCPMC propagator is untouched (this is the propulator's
+intra-island worker sync, not the proposal). Unit-tested via an injected `_testsome` seam
+(`test_intra_send_backpressure_*`).
+
+**VALIDATED on the cluster (MCP job 14053142, 2 nodes / 96 ranks, ParaStation MPI 5.10.0-1,
+`PROPULATE_MAX_INFLIGHT_SENDS=4096`):** w96_k192 — which segfaulted at ~180s on **every** prior attempt
+(6/6 reps across 3 production runs + 2 MCP runs) — **completed cleanly**: `srun rc=0`, both methods
+finished (`async_propulate_abc` then `abc_smc_baseline`), and all shards written
+(`raw_results_w96_k192.csv` 121 MB, `throughput_summary`, `budget_summary`, the abc_smc `.db`). The
+backpressure fix resolves the >=2-node pscom crash; the full 12/12 small scaling grid is now reachable.
+The fix is already pulled onto the cluster. **Small scaling grid is now 12/12 complete** (MCP jobs
+14057684 fresh 2-rep recompute + 14058045 finalize): w96_k192 finalized with both replicates (978,034
+records); async_propulate_abc at w96/k192 = 871-941 sims/s vs abc_smc_baseline 303-563. Default cap 4096
+worked first try.
+
+**Operational gotcha for recompute:** a *previously-crashed* combo leaves a propulate checkpoint that is
+RESUMED on the next run (independent of `--extend`; `--small` doesn't reset checkpoints), and resuming a
+crashed-state checkpoint re-triggers the crash even with the fix. So a normal `submit_scaling --extend`
+will NOT fix a crashed combo — clear `scaling/logs/propulate_*__<combo>` (and `abc_smc_baseline_*__<combo>*`)
+first, then recompute fresh. Only combos that crashed under the OLD (pre-backpressure) code are affected.
+
+### 2026-06-26 — 256-rank (6-node) import-time SEGFAULT: eager `import GPy` in the propulate fork
+
+**Symptom:** the FULL-tier `scaling` combo `w256_k1000` (256 ranks / 6 nodes) crashes **at import time** —
+all ranks log `elapsed=0.0s status=start` and then one rank takes a `Segmentation fault (core dumped)`
+**before the eval loop starts** (MCP job 14058701: `task 21: Segmentation fault`, srun rc=143, no shards).
+Lower rank counts (w1…w96, including the 2-node w96 backpressure validation) all run fine — the crash is
+specific to the 6-node / 256-rank import.
+
+**Wrong turn (kept so it is not repeated):** first labelled a generic "import storm" from a sloppy
+`grep -rl exec_module` that matches NORMAL startup imports in *every* rank file. The user correctly pushed
+back (CPM / gaussian ran fine at lower ranks). The real wedge frame only emerged from reading **each rank's
+LAST `faulthandler` snapshot** (the text after the final `Timeout`) — NOT grepping for a frame that appears
+in *any* snapshot.
+
+**Root cause:** the propulate fork's `surrogate.py` did an **eager top-level `import GPy`**, so plain
+`import propulate` dragged in the heavy GPy → IPython → astroid dependency tree. At 256 ranks across 6 nodes
+the simultaneous heavy-import storm (import-machinery + shared-FS metadata contention over that large tree)
+crashes a rank during import. The async-ABC eval loop itself was never reached, so none of the prior
+teardown/backpressure fixes could have addressed it.
+
+**Fix (propulate fork `feature/async-abc@1d8dfdc`):** make the GPy import **lazy** in `propulate/surrogate.py`
+— `import propulate` no longer pulls in GPy/IPython/astroid (verified locally: GPy absent from `sys.modules`
+after `import propulate`). Deployed to the cluster by `git pull` on a login node (compute nodes have no
+git/internet; editable install).
+
+**VALIDATED on the cluster (MCP job 14060522, 256 ranks / 6 nodes, ParaStation MPI 5.10.0-1,
+`PROPULATE_MAX_INFLIGHT_SENDS=4096`, async-only 300s):** `w256_k1000` — which segfaulted at import on the
+prior attempt — **completed cleanly**: `srun rc=0`, all 256 ranks reached `status=finish` (rank 0
+`evaluations=21 records=212919`), `[scaling] Done in 5m 20s`, **no segfault / no GPy import chain** in any
+trace. Shards written: `raw_results_w256_k1000.csv` (59 MB), `throughput_summary`, `budget_summary`,
+`timing.csv`. Throughput **709.7 sims/s** over the full 300s budget. This confirms BOTH that the import
+crash is gone AND that the 256-rank eval-loop teardown is stable at cap=4096 (the secondary concern). The
+full-tier 128/256-worker scaling points are now viable.
+
+**Note (not a bug):** `worker_utilization=0.0215` (2.1%) at w256 — expected for the cheap lotka simulator at
+256 workers (workers idle between fast sims); it is part of the scaling story the paper measures, not a
+stability defect. Raising the backpressure cap above 4096 for throughput fidelity at 256 ranks remains an
+optional tuning knob, not a correctness fix.
+
+## 2026-06-18 — ablation finalize crash: KeyError 'quality' in plot_ablation_amis_isolation
+
+**Symptom:** During the JUWELS small run, `ablation` inference completed (`[ablation] Done in 11m 31s`, all 48 ranks `status=finish`) but the finalize shard exited code 1 with:
+```
+finalize_ablation_experiment → plot_ablation_amis_isolation (reporters.py:3600)
+  quality_df.groupby("wall_time", sort=True)["quality"]
+KeyError: 'Column not found: quality'
+```
+No ablation plots/metadata were produced; shard data in `_shards/ablation/` was intact.
+
+**Root cause:** `plot_ablation_amis_isolation` referenced a non-existent `"quality"` column. `posterior_quality_curve` returns the metric in the `"wasserstein"` column (see `QUALITY_CURVE_COLUMNS` in `analysis/convergence.py`); the plot's own y-label is already "Wasserstein distance to truth". The bug never surfaced in tests because the only ablation test config uses variants `full_model`/`small_archive` — without a `no_amis` variant the plotter early-returns via `_skip` (line 3573) before reaching the aggregation. The real `ablation.json` has both `full_model` and `no_amis`, so the full run hits the groupby. It would have crashed the full ablation run identically.
+
+**Fix:** `reporters.py:3600` `["quality"]` → `["wasserstein"]`. Added regression test `test_plot_ablation_amis_isolation_exports_files_when_both_variants_present` (writes both `ablation_full_model.csv` + `ablation_no_amis.csv`, asserts the plot is produced and `not skipped`) so the aggregation path is covered. Verified by reproducing the exact finalizer call against the real merged variant CSVs from the failed run — produces `ablation_amis_isolation.{pdf,png}` with no error.
+
+**Recovery for the failed run:** re-run finalize-only on the existing shard data (no recompute needed).
+
+**Files:** `experiments/async_abc/plotting/reporters.py`, `experiments/tests/test_plotting.py`
+
+## 2026-04-14 — Phase 3 Plan 03: runtime_heterogeneity plot generation hang in test mode
+
+**Symptom:** `run_all_paper_experiments.py --test` hangs for 60+ minutes after `runtime_heterogeneity` inference completes. Process at 100% CPU on main thread, producing no output, with matplotlib font files open.
+
+**Root cause:** `runtime_heterogeneity_runner.main()` generates matplotlib gantt charts after inference. The gantt plot calls `ax.barh(...)` once per simulation record — with 32755 records produced in a 30s test run, this renders 32755 matplotlib patches, which is O(N^2) or worse in matplotlib's backend and takes hours.
+
+**Fix:** Added `if not test_mode:` guard around all plot generation calls in `runtime_heterogeneity_runner.py`. Data outputs (raw_results.csv, timing.csv, metadata.json, runtime_performance_summary.csv, runtime_debug_summary.csv, speedup_summary.csv) are unaffected and still generated in test mode. Plots are only generated in full (non-test) runs.
+
+**Files:** `experiments/scripts/runtime_heterogeneity_runner.py`
+
+## 2026-04-14 — Phase 3 Plan 01: Dead code removal
+
+- Removed `TrackedFutureExecutor` class and `MPICommExecutor` / `concurrent_futures` branches from `pyabc_sampler.py`, `pyabc_wrapper.py`, `abc_smc_baseline.py`
+- `mpi_executor` kwarg dropped from `run_pyabc_smc` and `run_abc_smc_baseline` (no callers post-Phase-2 scaling_runner migration)
+- `resolve_pyabc_mpi_sampler` now rejects `'concurrent_futures'` and `'concurrent_futures_legacy'` with `ValueError`
+- Tests updated to match (`TestBuildPyabcSampler.test_mpi_concurrent_futures_now_raises_value_error`, `test_resolve_pyabc_mpi_sampler_rejects_*`)
+- Rationale: Phase 2 D-03 migrated scaling_runner to CommWorldMap. No config or caller references these paths. Keeping dead code makes future MPI debugging harder.
+- Files: `experiments/async_abc/inference/pyabc_sampler.py`, `experiments/async_abc/inference/pyabc_wrapper.py`, `experiments/async_abc/inference/abc_smc_baseline.py`, `experiments/tests/test_inference.py`
+
 ## 2026-04-08: CommWorldMap hang on root exception + pyABC NaN weight crash
 
 **Symptom (hangs):** Non-scaling jobs (`gandk` shard_000, `straggler` shard_001, `sbc` shards 001/004) hang indefinitely. Progress log shows repeated identical lines (e.g. `simulations=1 elapsed=20.2s`) with no advancement. All are `all_ranks` methods using CommWorldMap.
@@ -229,3 +489,51 @@ records.
 **Symptom:** Collective allreduce each iteration caused synchronization overhead.
 
 **Fix:** Each rank checks its own clock independently; no collective ops in hot loop.
+
+## 2026-06-27: gaussian_mean benchmark OOM (54 GB) — extract_posterior O(n·k) over full history (propulate fork)
+
+**Symptom:** `gaussian_mean` production job (14061000) FAILED — sacct MaxRSS 53.96 GB / 94 GB, `task 0: Killed`
+at the end of the run, after all methods (async, abc_smc_baseline, rejection) logged `status=finish`. No
+plots, no timing/budget published (only the down-sampled 73 MB raw_results.csv). Only gaussian_mean failed;
+gandk/lotka/CPM finalize fine.
+
+**False lead:** the post-run posterior-quality/plotting stage. DISPROVED by profiling the real saved history —
+replaying the full `plot_benchmark_diagnostics` over the persisted 325k-record raw_results.csv peaks at 1.3 GB.
+
+**Root cause:** the async method's retroactive AMIS estimator `ABCPMC.extract_posterior(population)` runs on the
+FULL IN-MEMORY evaluated history. The Gaussian simulator is fast enough that the history is millions of
+individuals (~1e3 sims/s/worker × 48 × 300 s ≈ 1e7); raw_results is heavily down-sampled on persist (→325k),
+which is why the saved-history replay looked cheap. Each AMIS snapshot's `log_mixture_density` built an
+**(n, k)** Mahalanobis matrix over all n → tens of GB → OOM on rank 0. This is the O(n·k) path the docstring
+flags; gaussian_mean is the only benchmark whose simulator is fast enough to reach it (it sets
+compute_posterior_weights=true, unlike the scaling sweeps which set it false — see the 2026-06 scaling fixes).
+
+**Fix:** `extract_posterior` now evaluates the cumulative proposal mixture in CHUNKS over the n history points
+(`_EXTRACT_POSTERIOR_CHUNK = 65536` in `propulate/propulate/propagators/abcpmc.py`) → peak memory O(chunk·k)
+instead of O(n·k). logsumexp is column-wise so each particle's weight is independent of chunk boundaries:
+result is bit-identical (regression test `tests/test_abcpmc.py::TestExtractPosterior::test_chunking_matches_unchunked`;
+full TestExtractPosterior green). **This is a propulate-FORK change** — commit+push it and `git pull` on a
+JUWELS login node (compute nodes have no git) before re-running. gaussian_mean must be RE-RUN to produce the
+missing plots (1-rep repro first to confirm bounded RSS). gaussian_mean's SBC calibration (separate experiment)
+already succeeded; only the posterior-recovery-vs-time plots are missing.
+
+## 2026-06-28 — gaussian_mean OOM cause 2 (multi-method plotting) FIXED + full re-run VALIDATED
+
+**Second cause (the chunking fix alone was insufficient):** the full multi-method run still OOM'd at ~49 GB
+inside `plot_benchmark_diagnostics`, which held the full un-downsampled multi-method/multi-rep history in
+memory (async + abc_smc_baseline + rejection × 5 reps). The async-only profiler missed it.
+
+**Fix:** `_subsample_history_for_plots` in `experiments/async_abc/plotting/reporters.py` (async-abc
+`refactor/general@9423cc9`) — computes final-state (top-k) posteriors from the FULL history first, then
+uniformly subsamples the dense simulation-attempt stream per (method, replicate) before plotting (cfg
+`plots.max_history_records_for_plots`, default 200k; curves already cap at 500 eval pts; final posteriors
+preserved exactly).
+
+**Deploy (was a blocker — "deploy mechanism unknown"):** the async-abc repo has NO push alias; deploy is the
+same rsync pattern as `pushpropulate`, target `/p/project1/tissuetwin/herold2/async-abc-paper`. Recipe saved
+to memory `reference_asyncabc_cluster_deploy.md`.
+
+**VALIDATION (2026-06-28):** full gaussian_mean re-run (job 14066112, both fixes live +
+`PROPULATE_SKIP_DISCONNECT=1`, 1 node / 48 ranks) COMPLETED, exit 0:0, **MaxRSS 28.8 GB** (was 49–54 GB →
+OOM), 16 plots produced. async recovers the analytic posterior mean to 0.002–0.013 abs err (≈ sync baseline,
+≪ rejection). `quality_vs_wall_time.pdf` wired into the paper as Fig. `gaussian-recovery`. OOM closed.

@@ -14,11 +14,11 @@ SCRIPT_DIR = Path(__file__).parent
 EXPERIMENTS_DIR = SCRIPT_DIR.parent
 REPO_ROOT = EXPERIMENTS_DIR.parent
 CORES_PER_NODE = 48
-DEFAULT_ACCOUNT = "tissuetwin"
-DEFAULT_PARTITION = "batch"
 DEFAULT_TIME = "04:00:00"
 DEFAULT_MAX_TIME = "24:00:00"
-DEFAULT_NASTJAPY = "/p/project1/tissuetwin/herold2/nastjapy"
+
+sys.path.insert(0, str(SCRIPT_DIR))
+import _site  # noqa: E402
 
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 
@@ -202,8 +202,8 @@ def main() -> None:
             "<output_dir>/<experiment>/data/timing.csv."
         ),
     )
-    parser.add_argument("--account", default=DEFAULT_ACCOUNT, help=f"SLURM account (default: {DEFAULT_ACCOUNT}).")
-    parser.add_argument("--partition", default=DEFAULT_PARTITION, help=f"SLURM partition (default: {DEFAULT_PARTITION}).")
+    parser.add_argument("--account", default=None, help="SLURM account (default: auto-detect from $SYSTEMNAME via _site.py).")
+    parser.add_argument("--partition", default=None, help="SLURM partition (default: auto-detect from $SYSTEMNAME via _site.py).")
     parser.add_argument("--time", dest="time_limit", default=DEFAULT_TIME, help=f"SLURM wall time (default: {DEFAULT_TIME}).")
     parser.add_argument(
         "--max-time",
@@ -211,8 +211,23 @@ def main() -> None:
         default=DEFAULT_MAX_TIME,
         help=f"Maximum auto-derived SLURM wall time for estimated runs (default: {DEFAULT_MAX_TIME}).",
     )
-    parser.add_argument("--nastjapy-path", default=DEFAULT_NASTJAPY, help="Path containing the cluster virtualenv.")
+    parser.add_argument(
+        "--nastjapy-path",
+        default=None,
+        help="Path containing the cluster virtualenv (default: auto-detect from $SYSTEMNAME via _site.py, or $NASTJAPY_PATH).",
+    )
     args = parser.parse_args()
+
+    if args.account is None or args.partition is None:
+        site_account, site_partition = _site.detect_defaults()
+        if args.account is None:
+            args.account = site_account
+        if args.partition is None:
+            args.partition = site_partition
+
+    if args.nastjapy_path is None:
+        args.nastjapy_path = _site.detect_nastjapy_path()
+
     experiment_names = _resolve_experiments(args.experiments)
 
     if args.add_replicates and args.test:

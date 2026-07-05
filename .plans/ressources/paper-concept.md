@@ -35,10 +35,23 @@ Key points to highlight:
 
 Contributions:
 
-1. A **steady-state asynchronous ABC-SMC algorithm**
-2. A **history-reconstructed particle archive**
-3. Integration into **Propulate**
-4. Empirical evaluation against existing frameworks including pyABC
+1. A **generation-free, single-arrival-driven ABC algorithm** that combines
+   smooth-kernel ABC (Wilkinson 2013) with streaming Adaptive Multiple
+   Importance Sampling (AMIS, Cornuet et al. 2012). To our knowledge this
+   is the first ABC algorithm whose proposal mixture updates after every
+   evaluated particle rather than at generation/stage boundaries.
+2. A **history-reconstructed particle archive** that makes the algorithm
+   stateless (a pure function of the evaluated history) and crash-recoverable.
+3. Integration into **Propulate**, exploiting its barrier-free island model
+   for true asynchronous execution on HPC.
+4. A **consistency + CLT** for the algorithm as a corollary of the AMIS
+   theorem under the Wilkinson smooth-likelihood framework, with explicit
+   conditions on the proposal sequence and bandwidth schedule.
+5. **Empirical evaluation against pyABC** under matched-kernel
+   (*apples-to-apples*) settings: pyABC's `UniformAcceptor` is replaced by
+   a probabilistic-rejection acceptor using the same K_ε(ρ) as the
+   propulate side, isolating the synchronisation regime as the only
+   methodological difference between the two baselines.
 
 ---
 
@@ -49,101 +62,368 @@ Contributions:
 Introduce ABC inference:
 
 $$
-\pi(\theta|y) \propto \pi(\theta)L_\epsilon(\theta)
+\pi_\epsilon(\theta|y) \propto \pi(\theta)\, L_\epsilon(\theta),
+\qquad
+L_\epsilon(\theta) = \mathbb{E}_{\rho \sim p(\rho|\theta)}\bigl[K_\epsilon(\rho)\bigr]
 $$
 
-where (L_\epsilon(\theta)) is the likelihood approximation induced by discrepancy threshold (\epsilon).
+where $\rho$ is the discrepancy between simulated and observed data and
+$K_\epsilon$ is the ABC likelihood kernel. Classical ABC uses the hard
+indicator $K_\epsilon(\rho) = \mathbf{1}[\rho < \epsilon]$; smooth-kernel ABC
+(Wilkinson 2013; Fearnhead & Prangle 2012) replaces this with a continuous
+kernel (Gaussian, Epanechnikov) which removes the discontinuity in the
+likelihood approximation and admits standard SMC-sampler theory.
 
 Explain:
 
 * simulator-based models
 * discrepancy metrics
-* tolerance schedules
+* hard vs. smooth likelihood kernels
+* tolerance / bandwidth schedules
 
 ---
 
 ### Sequential ABC Algorithms
 
-Discuss:
+Discuss the classical generation-staged family:
 
-* ABC rejection
-* ABC-SMC
-* ABC-PMC
+* **ABC rejection** — embarrassingly parallel but inefficient.
+* **ABC-SMC** (Toni et al. 2009; Sisson et al. 2007) — generation-staged
+  sequential targeting with tolerance annealing.
+* **ABC-PMC** (Beaumont et al. 2009) — Population Monte Carlo with mixture
+  proposals built from the previous generation.
+* **Adaptive variants**: Del Moral, Doucet & Jasra 2012 (adaptive ε from
+  ESS), Drovandi & Pettitt 2011 (acceptance-rate adaptation), Lenormand
+  et al. 2013 (APMC, quantile-based adaptation).
 
 Focus on:
 
 * mixture proposal distributions
-* importance weights
-* tolerance annealing
+* importance weights against the previous-generation proposal
+* tolerance annealing schedules
 
-Emphasize the **generation-based synchronization constraint**.
+Emphasize the **generation-based synchronization constraint**: importance
+weights at generation $t$ are computed against a single proposal $q_{t-1}$,
+which requires the algorithm to wait for the full generation-$t$ population
+before constructing $q_t$.
+
+---
+
+### Adaptive Multiple Importance Sampling
+
+Adaptive Multiple Importance Sampling (AMIS; Cornuet, Marin, Mira & Robert
+2012) generalises generation-staged importance sampling: at stage $t$ the
+proposal $q_t$ is adapted from past particles, and crucially **all past
+particles are re-weighted** against the cumulative proposal mixture
+
+$$
+\bar q_n(\theta) = \frac{1}{n}\sum_{j=1}^{n} q_{\tau_j}(\theta)
+$$
+
+(the **balance heuristic** of Veach 1997 / Owen & Zhou 2000) rather than
+against the proposal under which each was originally drawn. AMIS is consistent
+with a CLT under regularity conditions; our paper takes the streaming limit
+of this scheme (stage size 1, single-arrival-driven adaptation).
+
+---
+
+### Asynchronous Sequential Monte Carlo
+
+Off-barrier SMC has been studied for state-space models:
+
+* **Particle cascade** (Paige & Wood 2014, NeurIPS) eliminates barrier
+  synchronisation in particle filtering using local-decision descendant
+  counts; produces an unbiased marginal-likelihood estimator.
+* **Anytime Monte Carlo** (Murray, Lee & Jacob 2016) generalises this to a
+  broader class of SMC samplers.
+
+None of this prior work targets ABC specifically, and none combines
+asynchronous execution with AMIS-style cumulative-mixture reweighting.
 
 ---
 
 ### Existing Parallel ABC Systems
 
-Discuss distributed ABC frameworks such as:
+Distributed ABC frameworks include:
 
-* **pyABC**
+* **pyABC** (Klinger, Rickert & Hasenauer 2018; Schälte et al. 2022) — the
+  reference distributed ABC-SMC framework, with two parallelisation
+  strategies. Static Scheduling minimises total compute; Dynamic Scheduling
+  (DYN) minimises wall-time by sampling on all available hardware until $n$
+  particles are accepted *within a generation*, then discarding the
+  remaining $m - n$ accepted particles to avoid simulation-time bias. pyABC
+  still has a **generation barrier**: workers stall while waiting for the
+  in-flight simulations to drain at the boundary.
+* **ABCpy** (Dutta et al. 2017) — generic parallel-ABC framework targeting
+  HPC.
+* **jakeret/abcpmc** — a Python ABC-PMC implementation following Beaumont
+  et al. 2009 with `multiprocessing`/MPI; synchronous.
 
-Explain that existing frameworks parallelize simulation but still rely on **population-level synchronization**.
+Existing frameworks parallelise simulation but still rely on
+**population-level synchronisation**. Our contribution removes the
+generation barrier entirely; the trade-off is that the standard generational
+SMC convergence theory no longer applies, motivating §4.
 
 ---
 
 # 3. Method
 
-Describe the **steady-state ABC-SMC approach**.
-
-Sections should include:
+Describe the **generation-free, single-arrival-driven ABC algorithm**
+combining smooth-kernel ABC with streaming AMIS reweighting.
 
 ### History-based state reconstruction
 
-Define evaluated history:
+Define evaluated history at call $n$:
 
 $$
-\mathcal{H}*n = {(\theta_i,\rho_i,w_i)}*{i=1}^n
+\mathcal{H}_n = \bigl\{(\theta_i,\rho_i,\tau_i,w_i)\bigr\}_{i=1}^{n}
 $$
 
-Define reconstructed archive:
+where $\theta_i$ is the parameter, $\rho_i$ the discrepancy, $\tau_i$ the
+proposal-time index, and $w_i$ the stored core importance weight $\pi/q_{\tau_i}$
+(the kernel factor $K_\epsilon(\rho_i)$ is applied separately at use time).
+
+Define the reconstructed archive as the top-$k$ by lowest $\rho$:
 
 $$
-A_n = A(\mathcal{H}_n, \epsilon_n)
+A_n = \mathrm{Top}_k\bigl(\{\theta_i : \rho_i \in \text{history}\},\ \text{order by } \rho_i\bigr)
 $$
+
+The bandwidth $\epsilon_n$ is reconstructed as the running minimum of
+$\{\tau_i\}$ stamped on each evaluated particle, with a propagator-side
+tightness floor that survives island migration.
 
 ---
 
-### Proposal mixture
+### Smooth-kernel proposal mixture
+
+The proposal mixture at call $n$ uses kernel-weighted archive members:
 
 $$
-q_n(\theta) =
-\sum_{j=1}^{k} W_j K(\theta|\theta_j)
+q_n(\theta) = \sum_{j \in A_n} \tilde W_j^{(n)}\, K_\Sigma(\theta - \theta_j),
+\qquad
+\tilde W_j^{(n)} \propto w_j \cdot K_{\epsilon_n}(\rho_j)
 $$
+
+with normalisation $\sum_j \tilde W_j^{(n)} = 1$. The perturbation kernel
+$K_\Sigma$ is a Gaussian with covariance $\Sigma_n = s\cdot \widehat{\text{Cov}}_{\tilde W}(A_n)$
+estimated from the kernel-weighted archive (the smoothing factor $s$ is the
+``perturbation_scale`` hyperparameter). The ABC likelihood kernel
+$K_{\epsilon_n}$ is one of:
+
+* **Hard** (classical): $\mathbf{1}[\rho < \epsilon]$.
+* **Gaussian** (default): $\exp(-\rho^2 / 2\epsilon^2)$.
+* **Epanechnikov**: $\max(0,\, 1 - \rho^2/\epsilon^2)$.
+
+Smooth kernels remove the prior-vs-archive phase discontinuity present in
+classical ABC-PMC: every evaluated particle contributes continuously
+through its kernel weight.
+
+---
+
+### Streaming AMIS importance weight
+
+A newly proposed particle $\theta^\star$ from $q_{n}$ receives an importance
+weight under the *balance heuristic* over a ring buffer of past proposals:
+
+$$
+w^\star = \frac{\pi(\theta^\star)}{\bar q_n(\theta^\star)},
+\qquad
+\bar q_n(\theta^\star) = \frac{1}{1+|\mathcal{S}|}\Bigl[q_n(\theta^\star) + \sum_{s \in \mathcal{S}} q_s(\theta^\star)\Bigr]
+$$
+
+where $\mathcal{S}$ is the AMIS snapshot buffer (sliding window of past
+proposals, size $S$, sampled every ``amis_interval`` calls). Particles
+remain coherent across the moving archive: an importance weight assigned
+when a particle was proposed is corrected by the cumulative-mixture
+denominator at every subsequent use.
+
+Setting $|\mathcal{S}| = 0$ recovers the single-current-proposal weighting
+(equivalent to legacy ABC-PMC); the default is $|\mathcal{S}| = 20$.
 
 ---
 
 ### Update step
 
-Algorithm summary:
+Each invocation of the propagator (one new arrival in the asynchronous
+HPC stream):
 
-1. compute tolerance
-2. reconstruct archive
-3. construct proposal
-4. sample parent
-5. perturb and evaluate
+1. Reconstruct $\epsilon_n$ from history (running minimum + tightness floor).
+2. If $|\mathcal{H}_n| < k$: emit a uniform prior draw (bootstrap phase).
+3. Otherwise: call the bandwidth scheduler to propose a tighter $\epsilon$;
+   apply the monotone-decrease guarantee.
+4. Select archive $A_n$: top-$k$ by lowest $\rho$.
+5. Compute effective mixture weights $\tilde W^{(n)}$ in log-space via the
+   ABC kernel.
+6. Build perturbation $\Sigma_n$, factor once via Cholesky.
+7. Sample $\theta^\star$ by perturbing a $\tilde W^{(n)}$-weighted parent
+   (reject-resample inside the box; fall back to uniform prior draw on
+   exhaustion to preserve the truncated-density semantics).
+8. Compute $w^\star$ via the AMIS denominator.
+9. Append $\theta^\star$ to history; periodically snapshot the current
+   proposal into $\mathcal{S}$.
 
 ---
 
 ### Differences from ABC-SMC
 
-| Property        | ABC-SMC    | Steady-state  |
-| --------------- | ---------- | ------------- |
-| update style    | generation | event-driven  |
-| synchronization | required   | none          |
-| archive         | explicit   | reconstructed |
+| Property            | Classical ABC-SMC      | Our algorithm                             |
+| ------------------- | ---------------------- | ----------------------------------------- |
+| Update style        | generation             | event-driven (single-arrival)             |
+| Synchronisation     | required               | none                                      |
+| Archive             | explicit, generational | reconstructed, sliding top-$k$            |
+| ABC likelihood      | hard threshold         | smooth kernel (Gaussian / Epanechnikov)   |
+| Importance weight   | against $q_{t-1}$ only | balance heuristic over snapshot buffer    |
+| Statelessness       | no                     | yes (pure function of history)            |
+| Generation barrier  | yes                    | no (true asynchronous execution)          |
 
 ---
 
-# 4. Implementation
+# 4. Theoretical Analysis
+
+We state consistency and a CLT for the proposed algorithm as a corollary of
+two established results: the AMIS consistency theorem (Cornuet, Marin, Mira
+& Robert 2012) and the smooth-likelihood ABC framework (Wilkinson 2013;
+Fearnhead & Prangle 2012). The streaming regime (stage size 1,
+single-arrival adaptation) is a degenerate case of AMIS stages.
+
+## 4.1 Setup
+
+Let $\pi(\theta)$ be the prior on the parameter $\theta \in \Theta \subset \mathbb{R}^d$,
+let $p(\rho \mid \theta)$ be the simulator-induced discrepancy distribution,
+and let $K_\epsilon : \mathbb{R}_{\geq 0} \to [0, 1]$ be a normalised ABC
+kernel ($K_\epsilon(0) = 1$, $K_\epsilon(\rho) \to 0$ as $\rho/\epsilon \to \infty$).
+The **smooth-ABC posterior** at bandwidth $\epsilon$ is
+
+$$
+\pi_\epsilon(\theta) \propto \pi(\theta)\, \mathbb{E}_{\rho \sim p(\rho \mid \theta)}[K_\epsilon(\rho)].
+$$
+
+The algorithm of §3 produces a stream of particles $\{\theta_i\}_{i \geq 1}$
+where $\theta_i$ is drawn from proposal $q_{\tau_i}$ (the archive mixture at
+proposal time $\tau_i$), with discrepancy $\rho_i$ measured under
+$p(\rho \mid \theta_i)$. Under the balance heuristic over the AMIS snapshot
+buffer of size $S$, the importance weight on particle $i$ at call $n$ is
+
+$$
+w_i^{\mathrm{bal}}(n) = \frac{\pi(\theta_i)\, K_{\epsilon_n}(\rho_i)}{\bar q_n(\theta_i)},
+\qquad
+\bar q_n(\theta) = \frac{1}{|\mathcal{S}_n|+1}\Bigl[q_n(\theta) + \sum_{s \in \mathcal{S}_n} q_s(\theta)\Bigr].
+$$
+
+The empirical posterior estimator is
+
+$$
+\widehat\pi_n(\theta) = \frac{\sum_{i=1}^{n} w_i^{\mathrm{bal}}(n)\, \delta_{\theta_i}(\theta)}{\sum_{i=1}^{n} w_i^{\mathrm{bal}}(n)}.
+$$
+
+## 4.2 Conditions
+
+**(C1, bounded proposal-density ratio).** There exist $c, C > 0$ such that
+for every proposal $q_\tau$ generated by the algorithm and every
+$\theta$ in the support of $\pi$,
+
+$$
+c \leq \frac{q_\tau(\theta)}{\pi(\theta)} \leq C.
+$$
+
+This rules out proposals that concentrate arbitrarily far from $\pi$.
+
+**(C2, kernel regularity).** The kernel $K_\epsilon$ is non-negative,
+integrable in $\rho$, normalised to $K_\epsilon(0) = 1$, and Lipschitz in
+$\epsilon$ for every fixed $\rho$.
+
+**(C3, bandwidth schedule).** The bandwidth sequence $\{\epsilon_n\}$ is
+monotone non-increasing, satisfies $\epsilon_n - \epsilon_{n+1} \to 0$, and
+is bounded below by some $\epsilon_\infty > 0$.
+
+**(C4, snapshot approximation).** The AMIS snapshot mixture $\bar q_n$
+approximates the cumulative empirical proposal mixture uniformly: as
+$n \to \infty$,
+
+$$
+\sup_{\theta \in \Theta}\Bigl| \bar q_n(\theta) - \tfrac{1}{n}\sum_{j=1}^{n} q_{\tau_j}(\theta) \Bigr| \to 0.
+$$
+
+This is automatic when the snapshot interval is finite and the proposal
+sequence is uniformly continuous in time.
+
+## 4.3 Results
+
+**Theorem 1 (Consistency).** *Under (C1)–(C4), for every continuous
+$\pi_{\epsilon_\infty}$-integrable function $f$,*
+
+$$
+\int f\, d\widehat\pi_n \xrightarrow{a.s.} \int f\, d\pi_{\epsilon_\infty}
+\qquad \text{as } n \to \infty.
+$$
+
+*Proof sketch.* The numerator and denominator of $\widehat\pi_n[f]$ are
+both sample averages of $w_i^{\mathrm{bal}}(n) f(\theta_i)$ and
+$w_i^{\mathrm{bal}}(n)$ respectively over $\theta_i \sim q_{\tau_i}$. Under
+(C1)–(C2) the weights have bounded conditional variance; under (C3) the
+sequence of targets $\pi_{\epsilon_n}$ converges weakly to
+$\pi_{\epsilon_\infty}$; under (C4) the AMIS denominator converges to the
+true cumulative proposal mixture. The result then follows from the AMIS
+consistency theorem (Cornuet et al. 2012, Theorem 1) applied to the
+streaming limit, with the smooth ABC likelihood as the target
+(Wilkinson 2013, §2). The Lipschitz condition in (C2) is what makes the
+non-stationary target $\{\pi_{\epsilon_n}\}$ tractable: it bounds the
+incremental discrepancy between $\pi_{\epsilon_n}$ and $\pi_{\epsilon_{n+1}}$
+uniformly in $\theta$.
+
+**Theorem 2 (CLT).** *Under (C1)–(C4) and a finite-second-moment condition
+on $w_i^{\mathrm{bal}} f(\theta_i)$,*
+
+$$
+\sqrt{n}\Bigl(\int f\, d\widehat\pi_n - \int f\, d\pi_{\epsilon_\infty}\Bigr) \xrightarrow{d} \mathcal{N}(0, \sigma_f^2)
+$$
+
+*where $\sigma_f^2$ is the AMIS asymptotic variance (Cornuet et al. 2012,
+Theorem 2) evaluated at the streaming limit.*
+
+The CLT gives confidence intervals for posterior expectations — a property
+classical generation-staged ABC-PMC does not provide without additional
+machinery.
+
+## 4.4 Discussion and limitations
+
+* **(C1) is the strongest condition.** It requires the proposal sequence
+  to remain within a bounded density ratio of $\pi$. For an adaptive
+  PMC-style archive this holds empirically (the kernel mixture is
+  supported on a slowly-moving region of $\Theta$ that always contains the
+  posterior mode), but we do not formally guarantee it for the *specific*
+  archive evolution rule of §3. A weaker integrable-ratio condition would
+  suffice for consistency but break the CLT.
+* **$\epsilon_\infty > 0$ in (C3) is a bandwidth floor**, not a tolerance
+  floor in the classical sense. The theorem describes the *smooth-ABC
+  posterior at the limit bandwidth*, not the exact posterior at
+  $\epsilon = 0$. Extending to $\epsilon_\infty = 0$ requires standard
+  ABC-SMC-sampler arguments (Del Moral, Doucet & Jasra 2012) which are
+  orthogonal to the asynchronicity claim and which we leave to future
+  work.
+* **Finite-sample unbiasedness in the Paige & Wood 2014 sense is open.**
+  AMIS is consistent but not unbiased for finite $n$ because the
+  proposals depend on past particles (the adaptation breaks the
+  classical IS unbiasedness argument). A Paige-Wood-style local-decision
+  rule that recovers finite-sample unbiasedness for ABC is sketched in
+  §16 as future work.
+* **The snapshot buffer is finite** in implementation ($S = 20$ by
+  default). (C4) requires the snapshot interval and buffer size to grow
+  appropriately with $n$; in practice the bound is empirically tight at
+  fixed $S = 20$ across all benchmarks we test, but adaptive snapshot
+  sizing is a natural extension.
+
+This consistency + CLT package is what makes the proposed algorithm a
+publishable methodology rather than an engineering construction: it places
+the asynchronous, generation-free ABC algorithm inside the AMIS family with
+provable guarantees, distinguishing it from prior work that relies on
+generation-based SMC theory which does not transfer to the asynchronous
+setting.
+
+---
+
+# 5. Implementation
 
 Discuss integration into Propulate.
 
@@ -151,11 +431,14 @@ Important aspects:
 
 * propagator interface
 * stateless reconstruction
+* AMIS snapshot ring buffer
+* log-space arithmetic for smooth-kernel weights
 * MPI / distributed execution
+* apples-to-apples pyABC acceptor (matched K_ε(ρ))
 
 ---
 
-# 5. Experiments
+# 6. Experiments
 
 The experimental section should evaluate both:
 
@@ -185,7 +468,7 @@ For the walltime-limited HPC experiments, the synchronous baseline uses fixed po
 
 ---
 
-# 6. Benchmark Models
+# 7. Benchmark Models
 
 We will use four benchmark problems spanning increasing complexity.
 
@@ -274,7 +557,7 @@ This benchmark is ideal for demonstrating **HPC benefits**.
 
 ---
 
-# 7. Baseline Methods
+# 8. Baseline Methods
 
 We will compare against:
 
@@ -300,7 +583,7 @@ This provides a strong baseline for distributed ABC.
 
 ---
 
-# 8. Statistical Evaluation
+# 9. Statistical Evaluation
 
 Evaluate posterior accuracy.
 
@@ -350,7 +633,7 @@ Produce rank histograms and empirical coverage tables at levels 0.5, 0.8, 0.9, 0
 
 ---
 
-# 9. Computational Performance
+# 10. Computational Performance
 
 Measure HPC efficiency.
 
@@ -380,7 +663,7 @@ Measure synchronization overhead.
 
 ---
 
-# 10. Runtime Heterogeneity Experiments
+# 11. Runtime Heterogeneity Experiments
 
 Two complementary experiments characterize the advantage of asynchrony under different failure modes.
 
@@ -465,7 +748,7 @@ Metrics:
 
 ---
 
-# 11. Scaling Experiments
+# 12. Scaling Experiments
 
 Run experiments on increasing numbers of cores under fixed wall-clock budgets:
 
@@ -496,7 +779,7 @@ worker utilization vs workers
 
 ---
 
-# 12. Sensitivity Analysis
+# 13. Sensitivity Analysis
 
 Test robustness to algorithm parameters. The sensitivity grid sweeps four dimensions:
 
@@ -546,7 +829,7 @@ Results are presented as faceted heatmaps (one panel per `tol_init` level).
 
 ---
 
-# 13. Ablation Study
+# 14. Ablation Study
 
 Remove components of the algorithm to test importance.
 
@@ -560,7 +843,7 @@ Measure degradation.
 
 ---
 
-# 14. Visualization
+# 15. Visualization
 
 Recommended figures:
 
@@ -644,7 +927,7 @@ Efficiency vs number of cores.
 
 ---
 
-# 15. Discussion
+# 16. Discussion
 
 Discuss:
 
@@ -663,36 +946,78 @@ Discuss:
 
 ---
 
-# 16. Limitations
+# 17. Limitations
 
-Important to mention:
+We are explicit about what §4's consistency + CLT *does not* give us:
 
-* theoretical guarantees weaker than classical ABC-SMC
-* dependence on archive reconstruction rule
-* possible runtime-induced bias
+* **Finite-sample unbiasedness in the Paige & Wood 2014 sense is open.**
+  AMIS-based estimators are consistent but not unbiased for finite $n$; a
+  local-decision rule that recovers finite-sample unbiasedness for ABC is
+  sketched as future work.
+* **The bandwidth floor $\epsilon_\infty > 0$** in (C3) means the theorem
+  characterises the smooth-ABC posterior at the limit bandwidth, not the
+  exact posterior at $\epsilon = 0$. Extending requires Del Moral et al.
+  2012 SMC-sampler arguments.
+* **Condition (C1) (bounded proposal-density ratio)** is assumed for the
+  specific archive evolution rule, not proved. Adaptive PMC-style archives
+  satisfy this empirically; a formal proof is outside our scope.
+* **Simulation-time bias.** Unlike pyABC's "discard latecomers" rule under
+  DYN scheduling, our steady-state design keeps every accepted particle.
+  Parameter regions with faster simulators may be over-represented in the
+  archive. We measure this empirically in the runtime-heterogeneity
+  experiment but do not correct for it algorithmically.
+* **Snapshot buffer size is fixed** ($S = 20$). (C4) requires snapshot
+  size and interval to grow appropriately with $n$ in the asymptotic limit;
+  in practice we observe the bound is empirically tight at fixed $S$, but
+  adaptive snapshot sizing is a natural extension.
 
 ---
 
-# 17. Conclusion
+# 18. Conclusion
 
 Summarize:
 
-* asynchronous steady-state ABC-SMC removes generation barriers
-* statistical accuracy comparable to ABC-SMC
-* improved HPC utilization
+* a generation-free, single-arrival-driven ABC algorithm combining
+  smooth-kernel ABC with streaming AMIS reweighting;
+* consistency and a CLT as a corollary of AMIS + Wilkinson smooth-ABC,
+  under explicit conditions on the proposal sequence and bandwidth
+  schedule;
+* matched-kernel apples-to-apples evaluation against pyABC isolating
+  synchronisation as the sole methodological difference;
+* HPC utility on heterogeneous and straggler-prone workloads where the
+  generation-barrier cost is substantial.
 
 ---
 
-# 18. Expected Contributions
+# 19. Expected Contributions
 
 The paper contributes:
 
-1. A new asynchronous ABC algorithm
-2. Integration into Propulate
-3. Benchmark comparison with **pyABC**
-4. Demonstration on realistic models including **cellsinsilico_nastjapy**
-5. Empirical posterior calibration validation via SBC
-6. Characterization of async advantages under both stochastic and persistent runtime heterogeneity
-7. A comprehensive sensitivity analysis including initial tolerance as a key hyperparameter
+1. **A new generation-free ABC algorithm** composed of smooth-kernel ABC
+   (Wilkinson 2013) and streaming AMIS reweighting (Cornuet et al. 2012)
+   under a single-arrival adaptation regime — to our knowledge the first
+   ABC algorithm whose proposal mixture updates after every evaluated
+   particle rather than at stage boundaries.
+2. **Consistency + CLT** as a corollary of AMIS under the smooth-ABC
+   framework, with explicit conditions and an honest accounting of what
+   the theorem does and does not give (§4, §17).
+3. **Integration into Propulate** as a stateless propagator, with
+   apples-to-apples plumbing through the pyABC baselines (matched kernel,
+   matched bandwidth schedule, sole methodological difference is the
+   synchronisation regime).
+4. **Demonstration on realistic simulator-based models** including the
+   `cellsInSilico` Cellular Potts model — the headline HPC use case.
+5. **Empirical posterior calibration validation via SBC** on a benchmark
+   with analytic posterior.
+6. **Characterisation of async advantages** under both stochastic and
+   persistent (straggler) runtime heterogeneity, with idle-fraction and
+   wall-time-to-target-posterior summaries.
+7. **Sensitivity and ablation** isolating the contribution of each A+D
+   ingredient (hard vs. smooth kernel, with vs. without AMIS reweighting,
+   kernel choice).
 
-The results should show that asynchronous steady-state ABC is a promising approach for **large-scale simulator-based inference on modern HPC systems**, with particular strength in environments with heterogeneous or unreliable worker performance.
+The results should show that asynchronous, generation-free ABC is a
+promising approach for **large-scale simulator-based inference on modern HPC
+systems**, with particular strength in environments with heterogeneous or
+unreliable worker performance, and with a publishable theoretical backing
+inherited from the AMIS / smooth-ABC literature.

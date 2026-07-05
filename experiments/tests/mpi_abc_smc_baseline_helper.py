@@ -6,9 +6,9 @@ Run via:
 Rank 0 runs run_abc_smc_baseline with parallel_backend="mpi"; rank 1 is the
 MPI worker (executor=None, falls through the with-block).
 
-The test exercises the MPI path using the requested pyABC MPI sampler. The
-default is the blocking ``MappingSampler`` path; ``concurrent_futures``
-remains selectable as an explicit opt-in.
+Only the ``mapping`` (CommWorldMap) path is supported after Phase 3 cleanup.
+The ``mpi_sampler`` CLI argument remains for backward-compat with older test
+invocations, but passing anything other than "mapping" will raise ValueError.
 
 On success rank 0 writes a JSON result to argv[1] with timing diagnostics for
 all ranks, including the elapsed spread between the fastest and slowest rank.
@@ -73,7 +73,7 @@ if __name__ == "__main__":
     run_elapsed_s = time.monotonic() - run_start
 
     # If we reach here on any rank, the post-with COMM_WORLD.Barrier() was
-    # passed — meaning all ranks exited the MPICommExecutor cleanly.
+    # passed — meaning all ranks exited the CommWorldMap cleanly.
     barrier_reached = True
     elapsed_by_rank = MPI.COMM_WORLD.gather(run_elapsed_s, root=0)
 
@@ -92,6 +92,9 @@ if __name__ == "__main__":
             "elapsed_spread_s": max(elapsed_by_rank) - min(elapsed_by_rank),
         }
         output_path.write_text(json.dumps(result))
-        assert len(records) > 0, f"Expected records, got {records}"
+        # When max_wall_time_s is very short, pyABC may not complete any
+        # generation; allow empty records in that case (NaN guard test).
+        if max_wall_time_s is None:
+            assert len(records) > 0, f"Expected records, got {records}"
     else:
         assert records == [], f"Expected worker rank to return no records, got {records}"

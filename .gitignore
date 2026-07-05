@@ -211,3 +211,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# LaTeX build intermediates (keep the compiled .pdf, drop the scratch files)
+latex/**/*.aux
+latex/**/*.bbl
+latex/**/*.blg
+latex/**/*.out
+latex/**/*.fdb_latexmk
+latex/**/*.fls

@@ -57,8 +57,10 @@ experiments_dir="$(cd "$script_dir/.." && pwd)"
 python_bin="${PYTHON_BIN:-python}"
 output_root="${1:-/p/scratch/tissuetwin/herold2/async-abc/test/sharded_smoke_$(date +%Y%m%d_%H%M%S)}"
 nastjapy_path="${NASTJAPY_PATH:-/p/project1/tissuetwin/herold2/nastjapy}"
-account="${SLURM_ACCOUNT_OVERRIDE:-tissuetwin}"
-partition="${SLURM_PARTITION_OVERRIDE:-batch}"
+# shellcheck source=/dev/null
+source "$script_dir/site_env.sh"
+account="$SITE_ACCOUNT"
+partition="$SITE_PARTITION"
 time_limit="${SLURM_TIME_OVERRIDE:-00:10:00}"
 
 mkdir -p "$output_root"

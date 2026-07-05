@@ -9,7 +9,9 @@
     "true_g": 2.0,
     "true_k": 0.5
   },
-  "methods": ["async_propulate_abc"],
+  "methods": [
+    "async_propulate_abc"
+  ],
   "inference": {
     "max_simulations": 2000,
     "k": 50,
@@ -18,17 +20,22 @@
     "max_wall_time_s": 300,
     "scheduler_type": "acceptance_rate",
     "perturbation_scale": 0.8,
-    "propulate_budget_mode": "total_simulations"
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
   },
   "execution": {
     "n_replicates": 2,
     "base_seed": 0
   },
   "sensitivity_grid": {
-    "k": [50],
-    "perturbation_scale": [0.4, 0.8],
-    "scheduler_type": ["acceptance_rate"],
-    "tol_init_multiplier": [0.5, 1.0]
+    "tol_init_multiplier": [
+      1.0
+    ],
+    "kernel": [
+      "gaussian",
+      "epanechnikov"
+    ]
   },
   "plots": {
     "sensitivity_heatmap": true

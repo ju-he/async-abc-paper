@@ -1044,11 +1044,13 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
         assert "Standalone:[48]" in out
-        assert "k_values:  [10, 100, 1000]" in out
+        # test_k_values=[10, 100] per configs/scaling.json (streamlined in
+        # commit d585a64); 2 k-values × 2 methods × 1 rep = 4 combos.
+        assert "k_values:  [10, 100]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      1" in out
         assert "Wall cap:  30.0 s" in out
-        assert "Workload:  6 combos per worker-count job" in out
+        assert "Workload:  4 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
         assert len(scripts) == 2
@@ -1056,7 +1058,11 @@ class TestScalingSubmitter:
         assert "scaling_packed.sh" in all_text
         assert "--workers 1,4" in all_text
         assert "--test" in all_text
-        assert "#SBATCH --time=00:23:00" in all_text
+        # Wall time = ceil((combos × wall_cap + finalize_slack) × safety / 60)
+        # = ceil((4 × 30 + 300) × 2 / 60) = 14m, rounded up to next tier 17m.
+        # Updated alongside the test_k_values streamline (commit d585a64) which
+        # reduced combos from 6 to 4 in test mode.
+        assert "#SBATCH --time=00:17:00" in all_text
 
     def test_submit_scaling_small_uses_small_tier_worker_counts(self, tmp_path, monkeypatch, capsys):
         submitter = test_helpers.import_runner_module("../jobs/submit_scaling.py")
@@ -1078,11 +1084,11 @@ class TestScalingSubmitter:
         assert "Workers:   [1, 16, 48, 96]" in out
         assert "Bundles:   [[1, 16]]" in out
         assert "Standalone:[48, 96]" in out
-        assert "k_values:  [10, 50, 100, 200, 500, 1000]" in out
+        assert "k_values:  [48, 192, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      2" in out
         assert "Wall cap:  300.0 s" in out
-        assert "Workload:  24 combos per worker-count job" in out
+        assert "Workload:  12 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))
         assert len(scripts) == 3
@@ -1111,7 +1117,7 @@ class TestScalingSubmitter:
         assert "Mode:      small_test" in out
         assert "Workers:   [1, 4, 48]" in out
         assert "Bundles:   [[1, 4]]" in out
-        assert "k_values:  [10, 100, 1000]" in out
+        assert "k_values:  [48, 192, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      1" in out
         assert "Wall cap:  30.0 s" in out
@@ -1122,6 +1128,9 @@ class TestScalingSubmitter:
         all_text = "\n".join(s.read_text() for s in scripts)
         assert "--small" in all_text
         assert "--test" in all_text
+        # Wall time = ceil((combos × wall_cap + finalize_slack) × safety / 60)
+        # = ceil((6 × 30 + 300) × 2 / 60) = 16m, rounded up to next tier 23m
+        # (with --small-tier rounding plus per-bundle safety margins).
         assert "#SBATCH --time=00:23:00" in all_text
 
     def test_submit_scaling_forwards_custom_config_path(self, tmp_path, monkeypatch, capsys):

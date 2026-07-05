@@ -164,6 +164,63 @@ class TestExtendBasicRunner:
             ("timed_fake", "1"),
         }
 
+    def test_extend_matches_fresh_run_same_seed(self, tmp_path, extend_runner_config_file):
+        def _rows_as_set(path, cols):
+            with open(path) as f:
+                return {tuple(row[c] for c in cols) for row in csv.DictReader(f)}
+
+        key_cols = ["method", "replicate", "seed", "step", "loss"]
+
+        with test_helpers.patched_method_registry({"timed_fake": test_helpers.timed_fake_method}):
+            # Step a: fresh run — ground truth
+            fresh_dir = tmp_path / "fresh"
+            fresh_dir.mkdir()
+            test_helpers.run_runner_main(
+                "gaussian_mean_runner.py", extend_runner_config_file, fresh_dir
+            )
+            fresh_csv = fresh_dir / "gaussian_mean" / "data" / "raw_results.csv"
+            assert fresh_csv.exists()
+
+            # Step b: write partial CSV into extend_dir (only rejection_abc, replicate=0)
+            extend_dir = tmp_path / "extended"
+            (extend_dir / "gaussian_mean" / "data").mkdir(parents=True)
+            extend_csv = extend_dir / "gaussian_mean" / "data" / "raw_results.csv"
+
+            with open(fresh_csv) as f:
+                reader = csv.DictReader(f)
+                fieldnames = reader.fieldnames
+                partial_rows = [
+                    row for row in reader
+                    if row["method"] == "rejection_abc" and row["replicate"] == "0"
+                ]
+
+            with open(extend_csv, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(partial_rows)
+
+            # Step c: run --extend to complete the remaining combinations
+            test_helpers.run_runner_main(
+                "gaussian_mean_runner.py",
+                extend_runner_config_file,
+                extend_dir,
+                extra_args=("--extend",),
+            )
+
+        # Assertions
+        assert set(_read_key_tuples(extend_csv, ["method", "replicate"])) == {
+            ("rejection_abc", "0"),
+            ("rejection_abc", "1"),
+            ("timed_fake", "0"),
+            ("timed_fake", "1"),
+        }
+
+        fresh_set = _rows_as_set(fresh_csv, key_cols)
+        extend_set = _rows_as_set(extend_csv, key_cols)
+        assert extend_set == fresh_set
+
+        assert _count_csv_rows(extend_csv) == _count_csv_rows(fresh_csv)
+
 
 class TestExtendScalingRunner:
     def test_extend_does_not_duplicate_rows(self, tmp_path):
@@ -264,3 +321,127 @@ class TestExtendOrchestrator:
         )
 
         assert (tmp_path / "results" / "timing_summary_test.csv").exists()
+
+
+class TestOrchestratorOutputGate:
+    def _import_run_all(self):
+        return test_helpers.import_runner_module("../run_all_paper_experiments.py")
+
+    def test_verify_outputs_exist_missing_dir(self, tmp_path):
+        run_all = self._import_run_all()
+        ok, reason = run_all._verify_outputs_exist("does_not_exist", tmp_path)
+        assert ok is False
+        assert reason is not None and "data directory missing" in reason
+
+    def test_verify_outputs_exist_empty_dir(self, tmp_path):
+        run_all = self._import_run_all()
+        (tmp_path / "myexp" / "data").mkdir(parents=True)
+        ok, reason = run_all._verify_outputs_exist("myexp", tmp_path)
+        assert ok is False
+        assert reason is not None and "data directory empty" in reason
+
+    def test_verify_outputs_exist_all_csvs_empty(self, tmp_path):
+        run_all = self._import_run_all()
+        data_dir = tmp_path / "myexp" / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "a.csv").write_text("")
+        (data_dir / "b.csv").write_text("")
+        ok, reason = run_all._verify_outputs_exist("myexp", tmp_path)
+        assert ok is False
+        assert reason is not None and "all CSVs empty" in reason
+
+    def test_verify_outputs_exist_non_empty_csv(self, tmp_path):
+        run_all = self._import_run_all()
+        data_dir = tmp_path / "myexp" / "data"
+        data_dir.mkdir(parents=True)
+        (data_dir / "results.csv").write_text("col\nvalue\n")
+        ok, reason = run_all._verify_outputs_exist("myexp", tmp_path)
+        assert ok is True
+        assert reason is None
+
+    def test_orchestrator_fails_when_output_missing(self, tmp_path, monkeypatch):
+        # Register a fake runner script that exits 0 without writing any output.
+        fake_script = tmp_path / "fake_runner.py"
+        fake_script.write_text(
+            "import sys\n"
+            "def main(argv=None):\n"
+            "    # Does not write any files -- simulates a silent no-op runner.\n"
+            "    return 0\n"
+            "if __name__ == '__main__':\n"
+            "    main()\n"
+        )
+
+        # Write a minimal valid config so schema validation passes when
+        # compute_scaling_factor is called in --test mode.
+        import json as _json
+        minimal_cfg = {
+            "experiment_name": "fake_exp",
+            "benchmark": {"name": "gaussian_mean"},
+            "methods": ["rejection_abc"],
+            "inference": {
+                "max_simulations": 60,
+                "k": 10,
+                "tol_init": 1e9,
+                "scheduler_type": "quantile",
+                "perturbation_scale": 1.0,
+            },
+            "execution": {"n_replicates": 1, "base_seed": 1},
+        }
+        config_path = tmp_path / "fake.json"
+        config_path.write_text(_json.dumps(minimal_cfg))
+
+        run_all = self._import_run_all()
+        monkeypatch.setattr(run_all, "CONFIGS_DIR", tmp_path)
+        monkeypatch.setattr(run_all, "SCRIPTS_DIR", tmp_path)
+        monkeypatch.setattr(
+            run_all,
+            "EXPERIMENT_REGISTRY",
+            {"fake_exp": ("fake_runner.py", "fake.json")},
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_all.main(
+                [
+                    "--output-dir",
+                    str(tmp_path / "results"),
+                    "--test",
+                    "--experiments",
+                    "fake_exp",
+                ]
+            )
+        assert exc_info.value.code == 1
+
+    def test_orchestrator_succeeds_when_outputs_present(self, tmp_path, monkeypatch):
+        cfg = test_helpers.make_fast_runner_config(
+            "gaussian_mean.json",
+            methods=["rejection_abc"],
+            inference_overrides={"max_simulations": 60, "k": 10},
+            execution_overrides={"n_replicates": 1, "base_seed": 1},
+            plots={},
+        )
+        config_path = test_helpers.write_config(tmp_path, "gaussian_gate_ok.json", cfg)
+        run_all = self._import_run_all()
+        monkeypatch.setattr(run_all, "CONFIGS_DIR", tmp_path)
+        monkeypatch.setattr(
+            run_all,
+            "EXPERIMENT_REGISTRY",
+            {"gaussian_mean": ("gaussian_mean_runner.py", config_path.name)},
+        )
+
+        # No SystemExit expected on clean run.
+        run_all.main(
+            [
+                "--output-dir",
+                str(tmp_path / "results"),
+                "--test",
+                "--experiments",
+                "gaussian_mean",
+            ]
+        )
+
+        data_dir = tmp_path / "results" / "gaussian_mean" / "data"
+        csvs = list(data_dir.glob("*.csv"))
+        assert csvs, f"Expected at least one CSV in {data_dir}, found none"
+        assert any(p.stat().st_size > 0 for p in csvs), (
+            "All gaussian_mean data CSVs are empty -- gate would (correctly) fire."
+        )

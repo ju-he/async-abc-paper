@@ -8,60 +8,90 @@ keeping the MPI import path isolated behind the ``"mpi"`` backend branch.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import wait as _wait
 
 logger = logging.getLogger(__name__)
-
-
-class TrackedFutureExecutor:
-    """Wrap an executor and retain references to every submitted future."""
-
-    def __init__(self, inner):
-        self._inner = inner
-        self._submitted: list = []
-
-    def submit(self, fn, /, *args, **kwargs):
-        future = self._inner.submit(fn, *args, **kwargs)
-        self._submitted.append(future)
-        return future
-
-    def pending_futures(self, *, exclude_cancelled: bool = False):
-        pending = [future for future in self._submitted if not future.done()]
-        if exclude_cancelled:
-            pending = [future for future in pending if not future.cancelled()]
-        return pending
-
-    def wait_for_pending(self, *, exclude_cancelled: bool = False) -> int:
-        pending = self.pending_futures(exclude_cancelled=exclude_cancelled)
-        if pending:
-            _wait(pending)
-        return len(pending)
-
-    @property
-    def submitted_count(self) -> int:
-        return len(self._submitted)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
 
 
 class CommWorldMap:
     """COMM_WORLD-based blocking parallel map for pyABC's MappingSampler.
 
-    Replaces ``MPICommExecutor`` to avoid ``Create_intercomm``/``Disconnect``
-    fragility on ParaStation MPI at high rank counts.  Uses only ``bcast``,
-    ``send``, and ``recv`` on ``COMM_WORLD`` — no inter-communicators.
+    Replaces ``MPICommExecutor`` to avoid ``Create_intercomm`` /
+    ``Disconnect`` fragility on ParaStation MPI at high rank counts.
+    Uses only ``bcast``, ``send``, and ``recv`` on ``COMM_WORLD`` —
+    no inter-communicators.
+
+    Coordination model
+    ------------------
+    Root (rank 0) drives the computation. Workers (rank 1..N-1) spin
+    in :meth:`worker_loop` until root signals shutdown. Each ``map()``
+    call is a self-contained batch: root broadcasts the function,
+    distributes work items one at a time (for load balance), collects
+    results, and sends sentinels to park workers back in their
+    outer loop. The same ``CommWorldMap`` instance can service many
+    ``map()`` calls between construction and ``shutdown()``.
+
+    Rank protocol (per ``map()`` call, ``size > 1``)
+    ------------------------------------------------
+    ::
+
+        Root (rank 0)                   Workers (rank 1..N-1)
+        ──────────────                  ─────────────────────
+        bcast(("map", fn))  ──────►     tag, payload = bcast(None)
+                                        fn = payload
+        send(idx, item) ×N  ──────►     item = recv(source=0, tag=0)
+                                        idx, work = item
+                                        result = fn(work)
+        recv(result) ×N     ◄──────     send((idx, result), tag=1)
+        send(sentinel) ×N   ──────►     item is sentinel → break inner loop
+                                        (wait on next bcast)
+        shutdown():
+          bcast(("shutdown", ...))──►   tag == "shutdown" → exit worker_loop
+        COMM_WORLD.Barrier()            COMM_WORLD.Barrier()
+
+    After ``shutdown()`` the caller should call ``COMM_WORLD.Barrier()``
+    (the wrapper / baseline functions do this) and then proceed to
+    ``allgather`` of results if needed.
+
+    Known failure modes
+    -------------------
+    1. **Worker crash during** ``map()``. Root receives a
+       ``_WorkerError`` wrapper, drains remaining workers with sentinels,
+       and re-raises. Workers that haven't yet received a sentinel wait
+       at ``recv(source=0, tag=0)`` until the drain completes. See the
+       drain block inside :meth:`map`.
+
+    2. **Root exception before** ``shutdown()``. The caller MUST wrap the
+       root branch in ``try/finally`` and call ``cmap.shutdown()`` in
+       ``finally``. Without this, workers block forever at
+       ``bcast(None, root=0)``. This was the Apr 8 2026 teardown fix
+       (see ``.plans/bug-fixes/previous-fixes.md``).
+
+    3. **Worker crash between** ``map()`` **calls.** No liveness check — by
+       design, no heartbeat. Root's next ``bcast(("map", fn))`` hangs
+       because not all ranks participate. Job is eventually killed by
+       SLURM timeout. Trade-off rationale: see
+       ``.plans/diagnose/mpi-evaluation.md`` (Residual Risks section).
+
+    4. **Single-process fallback** (``self.size <= 1``). :meth:`map`
+       bypasses all MPI calls and runs ``[fn(item) for item in items]``
+       sequentially. Used in local ``--test`` runs without ``mpirun``.
+
+    Full design evaluation: ``.plans/diagnose/mpi-evaluation.md``.
+    Bug history: ``.plans/bug-fixes/previous-fixes.md``.
 
     Usage (all ranks must call the same code path)::
 
         cmap = CommWorldMap(MPI.COMM_WORLD)
         if cmap.is_root:
-            sampler = build_pyabc_sampler(..., mpi_map=cmap.map)
-            result = run_abc(sampler=sampler, ...)
-            cmap.shutdown()          # tells workers to exit
+            try:
+                sampler = build_pyabc_sampler(..., mpi_map=cmap.map)
+                result = run_abc(sampler=sampler, ...)
+            finally:
+                cmap.shutdown()          # tells workers to exit
         else:
-            cmap.worker_loop()       # blocks until shutdown
-        comm.Barrier()
+            cmap.worker_loop()           # blocks until shutdown
+        if comm.Get_size() > 1:
+            comm.Barrier()
     """
 
     _SENTINEL = None  # end-of-batch marker for work items
@@ -74,11 +104,31 @@ class CommWorldMap:
         self._shutdown = False
 
     def map(self, fn, iterable):
-        """Distribute *fn* over *iterable* across MPI workers.  Root-only.
+        """Distribute *fn* over *iterable* across MPI workers. Root-only.
 
-        Broadcasts *fn* to all workers, then distributes items dynamically
-        (one at a time to idle workers) for load balance.  Returns results
-        in submission order.
+        Rank protocol (this call):
+
+        1. Broadcast ``("map", fn)`` so every worker's :meth:`worker_loop`
+           wakes up and receives the function to apply.
+        2. Seed each worker with one ``(idx, item)`` send on tag 0.
+        3. Collect results on tag 1 (``MPI.ANY_SOURCE``), dispatching a
+           new work item each time a worker reports done. Order is
+           preserved via the ``idx`` stored with each item.
+        4. Send a sentinel (``None``) to every worker when the queue
+           drains; workers exit their inner loop and wait on the next
+           :meth:`worker_loop` bcast.
+
+        If a worker raises, the exception comes back as a
+        ``_WorkerError`` wrapper on tag 1. Root drains every remaining
+        worker with sentinels before re-raising the original exception.
+
+        Single-process fallback: if ``self.size <= 1``, skip MPI entirely
+        and return ``[fn(item) for item in items]``.
+
+        Returns
+        -------
+        list
+            Results in submission order (matches ``iterable``).
         """
         items = list(iterable)
 
@@ -140,7 +190,17 @@ class CommWorldMap:
         return results
 
     def shutdown(self):
-        """Signal workers to exit their loop.  Root-only, idempotent."""
+        """Tell every worker to exit :meth:`worker_loop`. Root-only.
+
+        Broadcasts ``("shutdown", None)``; every worker sees
+        ``tag == "shutdown"`` and falls out of its outer ``while True``.
+        Idempotent: a second call is a no-op.
+
+        MUST be called from a ``finally`` block around the root branch
+        (see :class:`CommWorldMap` failure mode #2). Without this, any
+        exception on root leaves workers blocked at ``bcast(None)``
+        forever.
+        """
         if self._shutdown:
             return
         self._shutdown = True
@@ -148,7 +208,27 @@ class CommWorldMap:
             self.comm.bcast(("shutdown", None), root=0)
 
     def worker_loop(self):
-        """Process map batches until shutdown.  Workers-only (rank != 0)."""
+        """Process map batches until shutdown. Workers-only (rank != 0).
+
+        Rank protocol (outer loop):
+
+        1. Wait on ``bcast(None, root=0)`` for the next tag.
+        2. If ``tag == "shutdown"``, return (exits this worker's
+           participation in CommWorldMap).
+        3. Otherwise ``payload`` is the user function ``fn``. Enter the
+           inner work loop:
+
+           * ``recv(source=0, tag=0)`` — next work item or sentinel.
+           * Sentinel → break inner loop, wait on next outer ``bcast``.
+           * Otherwise compute ``fn(work)`` and ``send((idx, result),
+             dest=0, tag=1)``. Exceptions are wrapped in
+             ``_WorkerError`` and sent back on the same tag so root can
+             drain and re-raise.
+
+        No liveness check: if this rank crashes between map batches,
+        root's next ``bcast`` hangs until SLURM timeout. See
+        :class:`CommWorldMap` failure mode #3.
+        """
         while True:
             tag, payload = self.comm.bcast(None, root=0)
             if tag == "shutdown":
@@ -282,37 +362,21 @@ def resolve_pyabc_mpi_sampler(
     parallel_backend: str,
     method_name: str,
 ) -> str | None:
-    """Return the pyABC MPI sampler strategy for this run."""
+    """Return the pyABC MPI sampler strategy for this run.
+
+    After Phase 3 cleanup, only the CommWorldMap-backed ``"mapping"`` path
+    is supported. Legacy sampler names now raise ValueError.
+    """
     if parallel_backend != "mpi":
         return None
 
     configured = inference_cfg.get("pyabc_mpi_sampler")
-    if configured in (None, ""):
+    if configured in (None, "", "mapping"):
         return "mapping"
-
-    if configured == "mapping":
-        return "mapping"
-
-    if configured == "concurrent_futures":
-        logger.warning(
-            "Using %s with pyabc_mpi_sampler=concurrent_futures. "
-            "This path has a known teardown hang at high rank counts on "
-            "ParaStation MPI. The default is now 'mapping'.",
-            method_name,
-        )
-        return "concurrent_futures"
-
-    if configured == "concurrent_futures_legacy":
-        logger.warning(
-            "Using %s with pyabc_mpi_sampler=concurrent_futures_legacy. "
-            "This alias is deprecated; use pyabc_mpi_sampler=concurrent_futures instead.",
-            method_name,
-        )
-        return "concurrent_futures"
 
     raise ValueError(
-        f"Unknown pyabc_mpi_sampler={configured!r}. "
-        "Valid values: 'concurrent_futures', 'mapping', 'concurrent_futures_legacy'."
+        f"Unknown pyabc_mpi_sampler={configured!r} for {method_name}. "
+        "Valid values: 'mapping'."
     )
 
 
@@ -322,7 +386,6 @@ def build_pyabc_sampler(
     *,
     mpi_sampler: str | None = None,
     mpi_map=None,
-    cfuture_executor=None,
     client_max_jobs: int | None = None,
 ):
     """Construct a pyABC sampler.
@@ -334,25 +397,19 @@ def build_pyabc_sampler(
     parallel_backend:
         ``"multicore"`` — use :class:`pyabc.MulticoreEvalParallelSampler`
         (or :class:`pyabc.SingleCoreSampler` when *n_procs* == 1).
-        ``"mpi"`` — wrap an existing communicator-backed executor inside
-        :class:`pyabc.ConcurrentFutureSampler`.
+        ``"mpi"`` — wrap an MPI-backed ``map`` callable inside
+        :class:`pyabc.MappingSampler`.
     mpi_sampler:
-        Strategy to use when *parallel_backend* is ``"mpi"``.
-        ``"concurrent_futures"`` uses
-        :class:`pyabc.ConcurrentFutureSampler`.
-        ``"mapping"`` uses :class:`pyabc.MappingSampler`.
+        Strategy to use when *parallel_backend* is ``"mpi"``. Only
+        ``"mapping"`` (CommWorldMap) is supported after Phase 3 cleanup.
     mpi_map:
-        Existing blocking ``map``-like callable for the ``"mapping"``
-        MPI strategy, typically provided by an MPI executor.
-    cfuture_executor:
-        Existing ``concurrent.futures``-style executor for the ``"mpi"``
-        backend. Callers are expected to provision it from the already launched
-        MPI communicator via ``MPICommExecutor`` when using the futures
-        strategy.
+        Communicator-backed ``map``-like callable for the ``"mapping"``
+        MPI strategy, typically ``CommWorldMap.map``.
     client_max_jobs:
-        Maximum number of outstanding futures pyABC may keep submitted when
-        using the MPI backend. Defaults to pyABC's internal default unless an
-        explicit value is provided.
+        Retained for forward-compat with non-mapping samplers. Currently
+        unused; the mapping path does not consume it. Kept so call sites
+        that pass it (e.g. wrapper's ``_run_with_map_callable``) do not
+        need immediate edits.
 
     Returns
     -------
@@ -361,7 +418,8 @@ def build_pyabc_sampler(
     Raises
     ------
     ValueError
-        If *parallel_backend* is not a recognised value.
+        If *parallel_backend* is not recognised, or if *mpi_sampler* is
+        set to anything other than ``"mapping"``.
     """
     import pyabc
 
@@ -379,19 +437,9 @@ def build_pyabc_sampler(
                     "requires an existing communicator-backed map callable."
                 )
             return pyabc.MappingSampler(map_=mpi_map)
-        if mpi_sampler == "concurrent_futures":
-            if cfuture_executor is None:
-                raise ValueError(
-                    "The 'mpi' parallel_backend with pyabc_mpi_sampler='concurrent_futures' "
-                    "requires an existing communicator-backed executor."
-                )
-            kwargs = {"cfuture_executor": cfuture_executor}
-            if client_max_jobs is not None:
-                kwargs["client_max_jobs"] = int(client_max_jobs)
-            return pyabc.ConcurrentFutureSampler(**kwargs)
         raise ValueError(
             f"Unknown mpi_sampler={mpi_sampler!r}. "
-            "Valid values: 'concurrent_futures', 'mapping'."
+            "Valid values: 'mapping'."
         )
 
     else:

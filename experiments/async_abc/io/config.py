@@ -10,6 +10,7 @@ from .schema import (
     REQUIRED_INFERENCE,
     REQUIRED_TOP_LEVEL,
     VALID_BENCHMARK_NAMES,
+    VALID_KERNELS,
     VALID_SCHEDULER_TYPES,
     ValidationError,
     _validate_cpm_benchmark,
@@ -72,6 +73,15 @@ def _validate(cfg: dict) -> None:
         raise ValidationError(
             f"Config['inference']['scheduler_type'] = {scheduler_type!r} "
             f"is not valid. Must be one of: {sorted(VALID_SCHEDULER_TYPES)}"
+        )
+
+    # Validate kernel against allowed values (apples-to-apples knob shared by
+    # the propulate ABCPMC and the pyABC baselines).
+    kernel = cfg["inference"].get("kernel")
+    if kernel is not None and kernel not in VALID_KERNELS:
+        raise ValidationError(
+            f"Config['inference']['kernel'] = {kernel!r} "
+            f"is not valid. Must be one of: {sorted(VALID_KERNELS)}"
         )
 
     # Validate benchmark name against known benchmarks.

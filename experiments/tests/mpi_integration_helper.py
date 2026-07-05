@@ -4,8 +4,9 @@ Run via:
     mpirun -n 2 <python> <this_file> <output_json_path> [mpi_sampler] [client_max_jobs] [max_wall_time_s]
 
 Rank 0 runs run_pyabc_smc with parallel_backend="mpi"; rank 1 is the worker.
-The default is the blocking ``MappingSampler`` path; ``concurrent_futures``
-remains selectable as an explicit opt-in.
+Only the ``mapping`` (CommWorldMap) path is supported after Phase 3 cleanup.
+The ``mpi_sampler`` CLI argument remains for backward-compat with older test
+invocations, but passing anything other than "mapping" will raise ValueError.
 On success rank 0 writes a JSON result to the path given as argv[1] and exits 0.
 """
 import json
@@ -79,6 +80,9 @@ if __name__ == '__main__':
             "elapsed_spread_s": max(elapsed_by_rank) - min(elapsed_by_rank),
         }
         output_path.write_text(json.dumps(result))
-        assert len(records) > 0, f"Expected records, got {records}"
+        # When max_wall_time_s is very short, pyABC may not complete any
+        # generation; allow empty records in that case (NaN guard test).
+        if max_wall_time_s is None:
+            assert len(records) > 0, f"Expected records, got {records}"
     else:
         assert records == [], f"Expected worker rank to return no records, got {records}"

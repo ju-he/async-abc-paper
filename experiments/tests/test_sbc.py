@@ -11,7 +11,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 import conftest as test_helpers
 
-from async_abc.analysis.sbc import compute_rank, compute_rank_weighted, empirical_coverage, sbc_ranks
+from async_abc.analysis.sbc import (
+    compute_rank,
+    compute_rank_weighted,
+    empirical_coverage,
+    gaussian_credible_coverage,
+    sbc_ranks,
+)
 from async_abc.benchmarks import make_benchmark
 from async_abc.inference.method_registry import method_execution_mode_for_cfg
 from async_abc.io.config import load_config
@@ -60,6 +66,79 @@ def test_empirical_coverage_uniform_posterior():
     row_50 = df[df["coverage_level"] == 0.5]["empirical_coverage"].iloc[0]
     assert abs(row_50 - 0.5) < 0.05
     assert int(df[df["coverage_level"] == 0.5]["n_trials"].iloc[0]) == 500
+
+
+def test_gaussian_credible_coverage_nominal_under_normal_posterior():
+    """Empirical Gaussian-CI coverage matches the nominal level when the
+    posterior is in fact Gaussian and the true value is drawn from it."""
+    rng = np.random.default_rng(7)
+    n_trials = 2000
+    trials = []
+    for i in range(n_trials):
+        post_mean = rng.normal(0.0, 1.0)
+        post_sd = 0.5
+        true_value = float(rng.normal(post_mean, post_sd))  # drawn from the same Gaussian
+        samples = rng.normal(post_mean, post_sd, size=400)
+        trials.append(
+            {"trial": i, "param": "mu", "posterior_samples": samples, "true_value": true_value}
+        )
+    df = gaussian_credible_coverage(trials, coverage_levels=[0.5, 0.8, 0.9, 0.95])
+    for level in [0.5, 0.8, 0.9, 0.95]:
+        emp = df[df["coverage_level"] == level]["gaussian_coverage"].iloc[0]
+        # Wilson half-width at n=2000 is ~0.022 at level 0.5, so 3% tolerance is generous.
+        assert abs(emp - level) < 0.03, f"Gaussian-CI coverage off at level {level}: {emp}"
+
+
+def test_gaussian_credible_coverage_under_coverage_when_too_narrow():
+    """If posterior sd is half the true Gaussian sd, the Gaussian-CI under-covers.
+
+    Sanity check that the function detects a miscalibrated posterior — it
+    should NOT report nominal coverage when the posterior is too tight.
+    """
+    rng = np.random.default_rng(13)
+    n_trials = 1000
+    trials = []
+    for i in range(n_trials):
+        true_sd = 1.0
+        reported_sd = 0.5  # posterior claims half the true uncertainty
+        true_value = float(rng.normal(0.0, true_sd))
+        samples = rng.normal(0.0, reported_sd, size=400)
+        trials.append(
+            {"trial": i, "param": "mu", "posterior_samples": samples, "true_value": true_value}
+        )
+    df = gaussian_credible_coverage(trials, coverage_levels=[0.9])
+    emp = df[df["coverage_level"] == 0.9]["gaussian_coverage"].iloc[0]
+    # If the posterior sd is half the truth, a 90% CI of mean±1.645·0.5 covers
+    # mean±0.82 — but the truth is drawn from N(0,1), so coverage should be well
+    # under 90%. We expect ~58% (Phi(0.82) - Phi(-0.82) ~ 0.59).
+    assert emp < 0.75, f"Expected under-coverage; got {emp}"
+
+
+def test_gaussian_credible_coverage_handles_weights():
+    """Weighted samples produce a different (correct) mean/sd than unweighted."""
+    rng = np.random.default_rng(21)
+    samples = rng.normal(0.0, 1.0, size=200)
+    # Concentrate weight on the upper half — shifts the weighted mean positive.
+    weights = (samples > 0.0).astype(float) + 0.01
+    trials = [
+        {
+            "trial": 0,
+            "param": "mu",
+            "posterior_samples": samples,
+            "posterior_weights": weights,
+            "true_value": 0.5,
+        }
+    ]
+    df = gaussian_credible_coverage(trials, coverage_levels=[0.9])
+    # No assertion on coverage value (1-trial expectation); the test is that
+    # the call succeeds with weights and produces a single covered=0/1 row.
+    assert int(df["n_trials"].iloc[0]) == 1
+
+
+def test_gaussian_credible_coverage_empty_input():
+    df = gaussian_credible_coverage([], coverage_levels=[0.5, 0.9])
+    assert df.empty
+    assert set(df.columns) == {"benchmark", "method", "param", "coverage_level", "gaussian_coverage", "n_trials"}
 
 
 def test_sbc_plot_metadata_is_complete(tmp_path):
@@ -333,6 +412,39 @@ def test_posterior_samples_reconstructs_async_final_archive_per_replicate():
     ]
     samples, weights = module._posterior_samples(records, "mu", archive_size=2)
     assert np.allclose(np.sort(samples), np.array([-4.0, -3.0, 1.5, 2.5]))
+
+
+def test_posterior_samples_prefers_retroactive_posterior_weight():
+    """SBC must use the retroactive posterior_weight (the estimator the CLT is
+    stated for), not the frozen streaming weight."""
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    records = [
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=1,
+                       params={"mu": 1.0}, loss=0.1, weight=1.0, posterior_weight=0.25,
+                       tolerance=1.0, wall_time=1.0),
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=2,
+                       params={"mu": 2.0}, loss=0.2, weight=1.0, posterior_weight=0.75,
+                       tolerance=1.0, wall_time=2.0),
+    ]
+    samples, weights = module._posterior_samples(records, "mu", archive_size=2)
+    order = np.argsort(samples)
+    assert np.allclose(samples[order], [1.0, 2.0])
+    assert np.allclose(weights[order], [0.25, 0.75])  # from posterior_weight, not weight=1.0
+
+
+def test_posterior_samples_falls_back_to_streaming_weight():
+    """When posterior_weight is absent (pyABC / legacy records), fall back to
+    the streaming weight."""
+    module = test_helpers.import_runner_module("sbc_runner.py")
+    records = [
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=1,
+                       params={"mu": 1.0}, loss=0.1, weight=0.4, tolerance=1.0, wall_time=1.0),
+        ParticleRecord(method="async_propulate_abc", replicate=0, seed=1, step=2,
+                       params={"mu": 2.0}, loss=0.2, weight=0.6, tolerance=1.0, wall_time=2.0),
+    ]
+    samples, weights = module._posterior_samples(records, "mu", archive_size=2)
+    order = np.argsort(samples)
+    assert np.allclose(weights[order], [0.4, 0.6])
 
 
 def test_sbc_full_config_treats_abc_smc_baseline_as_all_ranks_under_mpi():
