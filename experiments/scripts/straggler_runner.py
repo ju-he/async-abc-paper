@@ -336,7 +336,6 @@ def main(argv: list[str] | None = None) -> None:
                     test_mode=test_mode,
                 )
                 tagged_method = f"{method}__straggler_slowdown{slowdown_factor:.4g}x"
-                skip_method = False
                 for replicate in selected_replicates:
                     seed = seeds[replicate]
                     if (tagged_method, str(replicate)) in done:
@@ -357,18 +356,16 @@ def main(argv: list[str] | None = None) -> None:
                             replicate,
                             seed,
                         )
-                    except ImportError as exc:
-                        logger.warning(
-                            "[straggler] skipping method %s due to missing dependency: %s",
+                    except ImportError:
+                        # A configured method silently dropping out of the
+                        # straggler comparison violates the crash-loudly rule
+                        # (review II.8.4): fail the run instead.
+                        logger.exception(
+                            "[straggler] method %s requires a missing "
+                            "dependency — failing the run",
                             method,
-                            exc,
                         )
-                        warnings.warn(
-                            f"Skipping method '{method}' (missing dependency): {exc}",
-                            stacklevel=2,
-                        )
-                        skip_method = True
-                        break
+                        raise
                     _validate_straggler_worker_presence(
                         records,
                         method_name=method,
@@ -406,8 +403,6 @@ def main(argv: list[str] | None = None) -> None:
                                 "test_mode": test_mode,
                             }
                         )
-                if skip_method:
-                    continue
 
             if slowdown_factor == max(slowdown_factors):
                 worst_records = factor_records

@@ -55,6 +55,7 @@ def _run_abc_smc_baseline_with_sampler(
     kernel: str = "hard",
     epsilon_mode: str = "quantile",
     ess_retention: float = 0.95,
+    allow_degenerate_stop: bool = False,
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -148,10 +149,17 @@ def _run_abc_smc_baseline_with_sampler(
             ),
         )
     except AssertionError as exc:
-        if "weight" in str(exc) and "nan" in str(exc).lower():
+        # A NaN population weight means the SMC importance weighting became
+        # degenerate — silently continuing understates baseline quality
+        # (review II.8.4). Crash unless the config explicitly opts in.
+        if (
+            "weight" in str(exc)
+            and "nan" in str(exc).lower()
+            and allow_degenerate_stop
+        ):
             logger.warning(
                 "[abc_smc_baseline] pyABC NaN population weight — "
-                "treating as early wall-time stop: %s",
+                "allow_degenerate_stop is set, treating as early stop: %s",
                 exc,
             )
             history = abc.history
@@ -303,6 +311,7 @@ def run_abc_smc_baseline(
         "epsilon_mode", "matched" if kernel != "hard" else "quantile"
     )
     ess_retention = float(inference_cfg.get("ess_retention", 0.95))
+    allow_degenerate_stop = bool(inference_cfg.get("allow_degenerate_stop", False))
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
@@ -375,6 +384,7 @@ def run_abc_smc_baseline(
                 kernel=kernel,
                 epsilon_mode=epsilon_mode,
                 ess_retention=ess_retention,
+                allow_degenerate_stop=allow_degenerate_stop,
                 progress=progress,
             )
 
@@ -415,5 +425,6 @@ def run_abc_smc_baseline(
         kernel=kernel,
         epsilon_mode=epsilon_mode,
         ess_retention=ess_retention,
+        allow_degenerate_stop=allow_degenerate_stop,
         progress=progress,
     )

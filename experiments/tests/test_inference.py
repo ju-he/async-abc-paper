@@ -121,7 +121,7 @@ class _FakeABCPMC:
         self.rng = rng
         self.extra = kwargs
 
-    def extract_posterior(self, inds):
+    def extract_posterior(self, inds, n_proposals=None):
         # Stand-in for the real retroactive estimator: returns deterministic,
         # normalised, non-uniform weights aligned to ``inds`` (distinct from the
         # frozen streaming weight=1.0) so the wiring is exercised end-to-end.
@@ -813,9 +813,9 @@ class TestRunPropulateAbc:
         calls = {"n": 0}
         original = _FakeABCPMC.extract_posterior
 
-        def _counting_extract_posterior(self, inds):
+        def _counting_extract_posterior(self, inds, n_proposals=None):
             calls["n"] += 1
-            return original(self, inds)
+            return original(self, inds, n_proposals=n_proposals)
 
         monkeypatch.setattr(_FakeABCPMC, "extract_posterior", _counting_extract_posterior)
 
@@ -828,6 +828,47 @@ class TestRunPropulateAbc:
         # Streaming weight and the rest of the record are unaffected by the opt-out.
         assert all(record.weight == 1.0 for record in records)
         assert all(record.method == "async_propulate_abc" for record in records)
+
+    def test_extract_posterior_failure_raises_by_default(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        # Review II.8.4: a failed retroactive estimator must not silently
+        # degrade the reported posterior to streaming weights.
+        def _boom(self, inds, n_proposals=None):
+            raise ValueError("synthetic estimator failure")
+
+        monkeypatch.setattr(_FakeABCPMC, "extract_posterior", _boom)
+        with pytest.raises(RuntimeError, match="extract_posterior failed"):
+            _run_fake_propulate(tmp_path_factory, seed=33)
+
+    def test_extract_posterior_failure_falls_back_when_allowed(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        def _boom(self, inds, n_proposals=None):
+            raise ValueError("synthetic estimator failure")
+
+        monkeypatch.setattr(_FakeABCPMC, "extract_posterior", _boom)
+        cfg = {**_test_inference_cfg(), "allow_streaming_weight_fallback": True}
+        records = _run_fake_propulate(tmp_path_factory, cfg=cfg, seed=34)
+        assert records
+        assert all(record.posterior_weight is None for record in records)
+
+    def test_posterior_n_proposals_forwarded(
+        self, fake_propulate_env, tmp_path_factory, monkeypatch
+    ):
+        # Review II.2.5: the config knob must reach extract_posterior so the
+        # m-convergence check can raise the retroactive mixture size.
+        seen = {}
+        original = _FakeABCPMC.extract_posterior
+
+        def _recording(self, inds, n_proposals=None):
+            seen["n_proposals"] = n_proposals
+            return original(self, inds, n_proposals=n_proposals)
+
+        monkeypatch.setattr(_FakeABCPMC, "extract_posterior", _recording)
+        cfg = {**_test_inference_cfg(), "posterior_n_proposals": 123}
+        _run_fake_propulate(tmp_path_factory, cfg=cfg, seed=35)
+        assert seen["n_proposals"] == 123
 
     def test_records_have_required_fields(self, propulate_records_default):
         record = propulate_records_default[0]

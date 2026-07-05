@@ -535,10 +535,12 @@ def run_propulate_abc(
     tol_init = inference_cfg.get("tol_init", 10.0)
     scheduler_type = inference_cfg.get("scheduler_type", "acceptance_rate")
     perturbation_scale = inference_cfg.get("perturbation_scale", 0.8)
-    # Smooth-kernel / AMIS configuration (paper A+D track). Defaults preserve
-    # the legacy hard-threshold behaviour for backwards compatibility.
+    # Smooth-kernel / AMIS configuration (paper A+D track). The AMIS snapshot
+    # buffer defaults to S=20, matching the ABCPMC default and the paper text
+    # (review II.9.4); configs wanting the legacy single-current-proposal
+    # weighting must set amis_snapshots=0 explicitly.
     kernel = inference_cfg.get("kernel", "hard")
-    amis_snapshots = int(inference_cfg.get("amis_snapshots", 0))
+    amis_snapshots = int(inference_cfg.get("amis_snapshots", 20))
     amis_interval_cfg = inference_cfg.get("amis_interval")
     # Retroactive AMIS posterior reweighting (extract_posterior) is the reported
     # estimator for posterior-quality experiments (SBC etc.), but it costs
@@ -550,10 +552,12 @@ def run_propulate_abc(
     # ``posterior_weight`` (the throughput/scaling sweeps) set this False; the
     # weights remain recomputable offline from the saved history if ever needed.
     compute_posterior_weights = bool(inference_cfg.get("compute_posterior_weights", True))
-    # Pass extra scheduler kwargs if present
+    # Pass extra scheduler kwargs if present. low_rate/expand_factor were
+    # removed from AcceptanceRateScheduler (the rule never expands ε) and
+    # must not be forwarded — doing so raises TypeError at construction
+    # (review II.9.3).
     scheduler_kwargs = {}
-    for key in ("percentile", "decay_factor", "low_rate", "high_rate",
-                "shrink_factor", "expand_factor"):
+    for key in ("percentile", "decay_factor", "high_rate", "shrink_factor"):
         if key in inference_cfg:
             scheduler_kwargs[key] = inference_cfg[key]
 
@@ -694,25 +698,61 @@ def run_propulate_abc(
             int(getattr(ind, "rank", 0) or 0),
         ),
     )
+    # Discard results that completed after the wall-time deadline BEFORE any
+    # posterior weighting or record building (review II.9.5): semantics
+    # identical to a hard job abort, and the retroactive estimator must not
+    # normalise over — nor build its mixture denominator from — particles
+    # that do not count.
+    if max_wall_time_s is not None:
+        population = [
+            ind for ind in population
+            if getattr(ind, "evaltime", None) is None
+            or (float(ind.evaltime) - run_start) <= max_wall_time_s
+        ]
     # Retroactive AMIS posterior weights. This is the estimator the paper's
     # consistency + CLT are stated for: every particle reweighted against the
     # cumulative proposal mixture, reconstructed from history (off the timed
     # inference path; see ABCPMC.extract_posterior). The streaming proposal-time
     # `ind.weight` is kept separately (records' `weight`) for the ESS-over-time
     # diagnostic. Computed on `population` in record order so the weights align
-    # index-for-index; falls back to None on any error, in which case downstream
-    # consumers (SBC) revert to the streaming weight.
+    # index-for-index. A failure here invalidates the reported posterior, so it
+    # raises (review II.8.4) unless the config explicitly opts into the legacy
+    # streaming-weight fallback.
+    posterior_n_proposals = inference_cfg.get("posterior_n_proposals")
+    allow_streaming_fallback = bool(
+        inference_cfg.get("allow_streaming_weight_fallback", False)
+    )
     posterior_weights: List[Optional[float]] = [None] * len(population)
     if population and compute_posterior_weights:
         try:
-            _, _retro = propagator.extract_posterior(population)
-            if len(_retro) == len(population):
-                posterior_weights = [float(w) for w in _retro]
-        except Exception as exc:  # pragma: no cover - defensive
+            _, _retro = propagator.extract_posterior(
+                population,
+                n_proposals=(
+                    int(posterior_n_proposals)
+                    if posterior_n_proposals is not None
+                    else None
+                ),
+            )
+        except Exception as exc:
+            if not allow_streaming_fallback:
+                raise RuntimeError(
+                    "extract_posterior failed — the reported posterior would "
+                    "silently degrade to streaming proposal-time weights. Set "
+                    "inference.allow_streaming_weight_fallback=true to accept "
+                    "that explicitly."
+                ) from exc
             logger.warning(
-                "extract_posterior failed (%s); SBC will fall back to streaming weights.",
+                "extract_posterior failed (%s); allow_streaming_weight_fallback "
+                "is set, so SBC will fall back to streaming weights.",
                 exc,
             )
+        else:
+            if len(_retro) != len(population):
+                raise RuntimeError(
+                    f"extract_posterior returned {len(_retro)} weights for "
+                    f"{len(population)} individuals — estimator/record misalignment."
+                )
+            posterior_weights = [float(w) for w in _retro]
     elif population and not compute_posterior_weights:
         logger.info(
             "compute_posterior_weights=False: skipping retroactive AMIS reweighting "
@@ -762,14 +802,8 @@ def run_propulate_abc(
             attempt_count=step,
         ))
 
-    # Discard results that completed after the wall-time deadline.  This gives
-    # semantics identical to a hard job abort: every rank runs independently and
-    # only work finished before the deadline counts.
-    if max_wall_time_s is not None:
-        records = [
-            r for r in records
-            if r.sim_end_time is None or r.sim_end_time <= max_wall_time_s
-        ]
+    # (The wall-time deadline filter runs on `population` BEFORE posterior
+    # weighting and record building above — review II.9.5.)
 
     if progress is not None:
         progress.finish(evaluations=eval_count, records=len(records))

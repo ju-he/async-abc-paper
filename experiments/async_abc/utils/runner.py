@@ -657,21 +657,19 @@ def run_experiment(
                         method, benchmark.simulate, benchmark.limits,
                         inference_cfg, output_dir, replicate, seed,
                     )
-                except ImportError as exc:
+                except ImportError:
+                    # A configured method silently disappearing from the
+                    # results is exactly the kind of failure the project's
+                    # crash-loudly rule forbids (review II.8.4): a missing
+                    # dependency must fail the run, not thin the comparison.
                     if is_root_rank():
-                        logger.warning(
-                            "[runner] failed method %s replicate=%s due to missing dependency: %s",
+                        logger.exception(
+                            "[runner] method %s replicate=%s requires a missing "
+                            "dependency — failing the run",
                             method,
                             replicate,
-                            exc,
                         )
-                    if is_root_rank():
-                        warnings.warn(
-                            f"Skipping method '{method}' (missing dependency): {exc}",
-                            stacklevel=2,
-                        )
-                    logger.warning("[runner] skipping '%s': %s", method, exc)
-                    break  # skip all replicates for this method
+                    raise
                 except Exception:
                     if is_root_rank():
                         logger.exception(
