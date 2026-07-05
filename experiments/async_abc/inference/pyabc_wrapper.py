@@ -358,6 +358,7 @@ def run_pyabc_smc(
                 mpi_sampler=mpi_sampler,
                 mpi_map=map_callable,
                 client_max_jobs=client_max_jobs,
+                run_seed=seed,
             )
             return _run_pyabc_smc_with_sampler(
                 sampler=sampler,
@@ -395,6 +396,7 @@ def run_pyabc_smc(
         parallel_backend,
         mpi_sampler=mpi_sampler,
         client_max_jobs=client_max_jobs,
+        run_seed=seed,
     )
     return _run_pyabc_smc_with_sampler(
         sampler=sampler,

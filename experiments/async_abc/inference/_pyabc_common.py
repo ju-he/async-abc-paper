@@ -19,11 +19,39 @@ Includes:
 """
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 from ..io.paths import OutputDir
+from ..utils.mpi import get_rank
+from ..utils.seeding import stable_seed
+
+# Per-process acceptance-RNG streams, keyed by (replicate seed, MPI rank,
+# pyABC generation index). pyABC's MappingSampler cloudpickles the acceptor
+# to the workers and unpickles it freshly FOR EVERY WORK ITEM
+# (pyabc/sampler/mapping.py::map_function), so instance state cannot carry a
+# random stream: it would restart identically on every item, and every
+# worker would share the root copy's initial state (cross-worker correlated
+# acceptance decisions). A module-level cache gives each (seed, rank, t) an
+# independent, reproducible stream that keeps advancing across items within
+# a generation.
+_ACCEPTOR_STREAMS: Dict[Tuple[int, int, int], "np.random.Generator"] = {}
+
+
+def _acceptor_rng(rng_seed: int, t: int) -> "np.random.Generator":
+    """Return the per-(seed, rank, generation) acceptance stream."""
+    key = (int(rng_seed), get_rank(), int(t))
+    rng = _ACCEPTOR_STREAMS.get(key)
+    if rng is None:
+        rng = np.random.default_rng(stable_seed("acceptor", *key))
+        _ACCEPTOR_STREAMS[key] = rng
+    return rng
+
+
+def _reset_acceptor_streams() -> None:
+    """Test hook: forget all cached acceptance streams."""
+    _ACCEPTOR_STREAMS.clear()
 
 
 class Deadline:
@@ -116,8 +144,12 @@ def make_acceptor(kernel: str, rng_seed: int) -> Any:
     kernel:
         ``"hard"`` | ``"gaussian"`` | ``"epanechnikov"``.
     rng_seed:
-        Seed for the local NumPy ``Generator`` used for the rejection step.
-        Each replicate should pass a distinct seed.
+        Base seed for the rejection-step streams. Each replicate should pass
+        a distinct seed. The actual draw comes from a per-process stream
+        keyed by ``(rng_seed, MPI rank, generation)`` (BLAKE2b-derived via
+        ``stable_seed``), so acceptance decisions are decorrelated across
+        workers and reproducible from the replicate seed — see
+        :func:`_acceptor_rng` for why instance state cannot hold the stream.
 
     Returns
     -------
@@ -133,7 +165,7 @@ def make_acceptor(kernel: str, rng_seed: int) -> Any:
     from propulate.propagators.abcpmc import _make_kernel
 
     kfn = _make_kernel(kernel)
-    rng = np.random.default_rng(rng_seed)
+    rng_seed = int(rng_seed)
 
     class _SmoothKernelAcceptor(Acceptor):
         """Probabilistic-rejection smooth-kernel ABC acceptor.
@@ -143,6 +175,12 @@ def make_acceptor(kernel: str, rng_seed: int) -> Any:
         with probability ``K_eps(rho)`` (peak-normalised so ``K_eps(0) = 1``).
         Accepted particles enter pyABC's importance-sampling machinery with
         weight 1, matching pyABC's standard SMC bookkeeping.
+
+        The rejection draw uses the module-level per-(seed, rank, generation)
+        stream (:func:`_acceptor_rng`), NOT instance state: MappingSampler
+        unpickles this object anew for every work item, so an instance-held
+        Generator would restart identically per item and be shared (same
+        initial state) across all workers.
         """
 
         def __init__(self) -> None:
@@ -166,7 +204,7 @@ def make_acceptor(kernel: str, rng_seed: int) -> Any:
             # acceptance probability is therefore K_eps(rho) directly. Clamp to
             # [0, 1] defensively in case of numerical edge cases.
             p_accept = min(max(w, 0.0), 1.0)
-            accept = bool(rng.random() < p_accept)
+            accept = bool(_acceptor_rng(rng_seed, t).random() < p_accept)
             return AcceptorResult(distance=d, accept=accept, weight=1.0)
 
     return _SmoothKernelAcceptor()

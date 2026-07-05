@@ -1115,7 +1115,7 @@ class TestPyabcWrapperFixes:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1678,7 +1678,7 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1699,7 +1699,7 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1722,7 +1722,7 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1752,7 +1752,7 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1784,7 +1784,7 @@ class TestPyabcWrapperMpiBackend:
         monkeypatch.setattr(
             wrapper_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((n_procs, parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1829,7 +1829,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1857,7 +1857,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1880,7 +1880,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1910,7 +1910,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1947,7 +1947,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: (
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: (
                 calls.append((n_procs, parallel_backend, mpi_sampler, callable(mpi_map), cfuture_executor is not None, client_max_jobs)),
                 pyabc.SingleCoreSampler(),
             )[1],
@@ -1985,7 +1985,7 @@ class TestAbcSmcBaselineMpiBackend:
         monkeypatch.setattr(
             baseline_mod,
             "build_pyabc_sampler",
-            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None: pyabc.SingleCoreSampler(),
+            lambda n_procs, parallel_backend, mpi_sampler=None, mpi_map=None, cfuture_executor=None, client_max_jobs=None, run_seed=None: pyabc.SingleCoreSampler(),
             raising=False,
         )
         bm = _gaussian_bm()

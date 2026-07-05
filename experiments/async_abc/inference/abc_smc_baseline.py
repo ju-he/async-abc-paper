@@ -336,6 +336,7 @@ def run_abc_smc_baseline(
                 mpi_sampler=mpi_sampler,
                 mpi_map=map_callable,
                 client_max_jobs=client_max_jobs,
+                run_seed=seed,
             )
             return _run_abc_smc_baseline_with_sampler(
                 sampler=sampler,
@@ -373,6 +374,7 @@ def run_abc_smc_baseline(
         n_procs,
         parallel_backend,
         client_max_jobs=client_max_jobs,
+        run_seed=seed,
     )
     return _run_abc_smc_baseline_with_sampler(
         sampler=sampler,

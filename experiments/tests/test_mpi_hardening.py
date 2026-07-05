@@ -176,10 +176,13 @@ class TestMpiHardeningNoMpiRun:
         # coordination inside run_pyabc_smc / run_abc_smc_baseline. A trailing
         # Barrier after the `if mpi_methods:` block ensures all ranks sync before
         # finalization.
+        # The Barrier sits behind a lazy mpi4py import with an
+        # `MPI is not None and` guard (unit-test environments without mpi4py),
+        # a few lines further down than the original pattern allowed.
         scaling_pattern = re.compile(
             r"if mpi_methods:\s*\n"
-            r"(?:[^\n]*\n){1,10}?"
-            r"\s*if MPI\.COMM_WORLD\.Get_size\(\) > 1:\s*\n"
+            r"(?:[^\n]*\n){1,15}?"
+            r"\s*if (?:MPI is not None and )?MPI\.COMM_WORLD\.Get_size\(\) > 1:\s*\n"
             r"\s*MPI\.COMM_WORLD\.Barrier\(\)",
             re.MULTILINE,
         )

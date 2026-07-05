@@ -8,6 +8,12 @@ keeping the MPI import path isolated behind the ``"mpi"`` backend branch.
 from __future__ import annotations
 
 import logging
+import random
+
+import numpy as np
+
+from ..utils.mpi import get_rank
+from ..utils.seeding import stable_seed
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +261,97 @@ class _WorkerError:
         self.exc = exc
 
 
+try:
+    # pyabc is an optional dependency at import time; build_pyabc_sampler
+    # imports it lazily. Without pyabc the class below is never instantiated.
+    from pyabc.sampler import MappingSampler as _MappingSamplerBase
+except ImportError:  # pragma: no cover - environments without pyabc
+    _MappingSamplerBase = object
+
+
+# Per-process record of which (run_seed, rank, generation) triples have
+# already seeded the global RNGs — see SeededMappingSampler.map_function.
+_SEEDED_GLOBAL_KEYS: set = set()
+
+
+def _seed_worker_globals(run_seed: int, t: int) -> None:
+    """Seed the global RNGs once per (run_seed, MPI rank, generation).
+
+    The first work item a process handles for generation *t* seeds the
+    global ``np.random`` and ``random`` deterministically; subsequent items
+    in the same generation continue the streams. Cross-rank streams are
+    decorrelated by including the rank in the BLAKE2b-derived seed.
+    """
+    key = (int(run_seed), get_rank(), int(t))
+    if key in _SEEDED_GLOBAL_KEYS:
+        return
+    _SEEDED_GLOBAL_KEYS.add(key)
+    seed = stable_seed("pyabc-worker-globals", *key)
+    np.random.seed(seed % (2**32))
+    random.seed(seed)
+
+
+def _reset_seeded_global_keys() -> None:
+    """Test hook: forget which (run_seed, rank, t) triples seeded globals."""
+    _SEEDED_GLOBAL_KEYS.clear()
+
+
+class SeededMappingSampler(_MappingSamplerBase):
+    """pyABC ``MappingSampler`` with deterministic worker RNG seeding.
+
+    Upstream ``MappingSampler.map_function`` reseeds the global
+    ``np.random``/``random`` from OS entropy once **per work item**
+    (pyabc/sampler/mapping.py). That makes the baseline's proposal sampling
+    non-reproducible from the config seed and restarts the entropy stream on
+    every item. This subclass replaces the per-item entropy reseed with one
+    deterministic reseed per (run_seed, MPI rank, generation) — reproducible
+    from the replicate seed and decorrelated across ranks — and otherwise
+    mirrors the upstream sampling loop exactly.
+
+    Run-level bit-reproducibility is still bounded by the dynamic dispatch of
+    items to ranks (arrival order), matching the caveat documented for the
+    asynchronous side.
+    """
+
+    def __init__(self, map_=map, mapper_pickles: bool = False, *, run_seed: int):
+        super().__init__(map_=map_, mapper_pickles=mapper_pickles)
+        self._run_seed = int(run_seed)
+        self._t = -1
+
+    def __getstate__(self):
+        return (super().__getstate__(), self._run_seed, self._t)
+
+    def __setstate__(self, state):
+        base_state, self._run_seed, self._t = state
+        super().__setstate__(base_state)
+
+    def sample_until_n_accepted(self, n, simulate_one, t, **kwargs):
+        # Record the generation index so the pickled self carried inside the
+        # mapped partial (functools.partial(self.map_function, ...)) knows t
+        # on the workers.
+        self._t = int(t)
+        return super().sample_until_n_accepted(n, simulate_one, t, **kwargs)
+
+    def map_function(self, simulate_one, _):
+        # Mirrors pyabc 0.12.17 MappingSampler.map_function except that the
+        # per-item `np.random.seed(); random.seed()` OS-entropy reseed is
+        # replaced by the deterministic once-per-(seed, rank, t) reseed.
+        _seed_worker_globals(self._run_seed, self._t)
+        simulate_one = self.unpickle(simulate_one)
+
+        nr_simulations = 0
+        sample = self._create_empty_sample()
+
+        while True:
+            new_sim = simulate_one()
+            nr_simulations += 1
+            sample.append(new_sim)
+            if new_sim.accepted:
+                break
+
+        return sample, nr_simulations
+
+
 def _pyabc_parallel_safe(simulate_fn) -> bool:
     """Return whether a benchmark can be shipped to parallel pyABC workers."""
     owner = getattr(simulate_fn, "__self__", None)
@@ -387,6 +484,7 @@ def build_pyabc_sampler(
     mpi_sampler: str | None = None,
     mpi_map=None,
     client_max_jobs: int | None = None,
+    run_seed: int | None = None,
 ):
     """Construct a pyABC sampler.
 
@@ -410,6 +508,11 @@ def build_pyabc_sampler(
         unused; the mapping path does not consume it. Kept so call sites
         that pass it (e.g. wrapper's ``_run_with_map_callable``) do not
         need immediate edits.
+    run_seed:
+        Replicate seed for deterministic worker RNG seeding on the mapping
+        path (see :class:`SeededMappingSampler`). ``None`` falls back to the
+        upstream ``MappingSampler`` with its per-item OS-entropy reseed —
+        pass the replicate seed from every production call site.
 
     Returns
     -------
@@ -436,7 +539,14 @@ def build_pyabc_sampler(
                     "The 'mpi' parallel_backend with pyabc_mpi_sampler='mapping' "
                     "requires an existing communicator-backed map callable."
                 )
-            return pyabc.MappingSampler(map_=mpi_map)
+            if run_seed is None:
+                logger.warning(
+                    "build_pyabc_sampler: no run_seed given for the mapping "
+                    "path — worker RNGs will be OS-entropy seeded per item "
+                    "(not reproducible from the config seed)."
+                )
+                return pyabc.MappingSampler(map_=mpi_map)
+            return SeededMappingSampler(map_=mpi_map, run_seed=run_seed)
         raise ValueError(
             f"Unknown mpi_sampler={mpi_sampler!r}. "
             "Valid values: 'mapping'."
