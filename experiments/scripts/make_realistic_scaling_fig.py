@@ -19,9 +19,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-FILL = "/home/juhe/remotes/scratch/herold2/async-abc/run_realistic_fillin_20260628/scaling_realistic/data"
-EXIST = "/home/juhe/remotes/scratch/herold2/async-abc/run_realistic_20260626_1906/scaling_realistic/data"
-EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_realistic/data"
+FILL = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_fillin_20260628/scaling_cpm/data"
+EXIST = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_20260626_1906/scaling_cpm/data"
+EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_cpm/data"
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_scaling.pdf"
 
 # 1/4/16 from the fill-in run; 48/96 from the original realistic-workload scaling run; 192/384 from

@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Cellular Potts worker utilization async vs.\ sync (fig_cpm_util.pdf).
+"""Realistic-workload worker utilization async vs.\ sync (fig_realistic_util.pdf).
 
 Instruments the \\S7.3 claim that the generation barrier --- not per-arrival overhead
---- is the binding cost on the cost-bearing CPM simulator. Uses the worker_utilization
-column already recorded in the existing CPM strong-scaling run (run_cpm_20260626_1906,
-k=100, 1800 s, five replicates per cell); no re-run. The asynchronous method stays
+--- is the binding cost on the cost-bearing realistic simulator. Uses the
+worker_utilization column already recorded in the existing strong-scaling run
+(k=100, 1800 s, five replicates per cell); no re-run. The asynchronous method stays
 near-fully utilized at both worker counts, while the synchronous baseline idles at the
 barrier --- and its idle fraction *grows* with scale (39% -> 59% from 48 to 96 workers)
 as more workers wait on the slowest simulation per generation, which is exactly why its
 throughput plateaus while the asynchronous method keeps scaling.
+
+Data-on-disk note: the on-disk run directories keep their original names
+(run_cpm_20260626_1906, cpm_scaling_ext_20260630); we read those paths verbatim.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ import pandas as pd
 SCR = "/home/juhe/remotes/scratch/herold2/async-abc"
 D = f"{SCR}/run_cpm_20260626_1906/scaling_cpm/data"
 EXT = f"{SCR}/cpm_scaling_ext_20260630/scaling_cpm/data"
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_util.pdf"
+OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_util.pdf"
 WORKERS = [48, 96, 192, 384]
 # Asynchronous utilisation from the async scaling runs (48/96 original, 192/384 extension).
 DIR_ASYNC = {48: (D, 100), 96: (D, 100), 192: (EXT, 100), 384: (EXT, 100)}

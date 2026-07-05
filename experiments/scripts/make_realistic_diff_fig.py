@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 CSV = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "realistic_workload/plots/quality_vs_attempt_budget_diagnostic_data.csv")
+       "cellular_potts/plots/quality_vs_attempt_budget_diagnostic_data.csv")
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_recovery_diff.pdf"
 ASYNC, SYNC = "async_propulate_abc", "abc_smc_baseline"
 

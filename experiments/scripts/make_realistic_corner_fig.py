@@ -28,13 +28,13 @@ import pandas as pd
 from scipy.stats import gaussian_kde
 
 CSV = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "realistic_workload/plots/corner_data.csv")
+       "cellular_potts/plots/corner_data.csv")
 # Raw per-particle records, used to reconstruct the async posterior from its actual
 # reported estimator (AMIS posterior_weight) instead of the hard tolerance cut that the
 # generic final-state extractor applies (that cut leaves only n=14 async points because
 # async drove the tolerance far lower than the sync baseline).
 RAW = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "realistic_workload/data/raw_results.csv")
+       "cellular_potts/data/raw_results.csv")
 N_ASYNC_RESAMPLE = 500          # match the sync/rejection final-population size
 RESAMPLE_SEED = 20260701
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_corner.pdf"
