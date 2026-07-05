@@ -572,6 +572,11 @@ def run_propulate_abc(
     )
     if amis_interval_cfg is not None:
         abcpmc_kwargs["amis_interval"] = int(amis_interval_cfg)
+    # One config key governs both arms of the matched comparison: the async
+    # side's kernel-aware scheduler and the baseline's matched epsilon
+    # (make_matched_epsilon) read the same ESS-retention target (review II.1).
+    if "ess_retention" in inference_cfg:
+        abcpmc_kwargs["ess_target"] = float(inference_cfg["ess_retention"])
     propagator = ABCPMC(**abcpmc_kwargs)
 
     run_start = time.time()

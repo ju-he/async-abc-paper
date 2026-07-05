@@ -26,6 +26,7 @@ from .pyabc_sampler import (
 from ._pyabc_common import (
     db_suffix as _db_suffix,
     make_acceptor as _make_acceptor,
+    make_matched_epsilon as _make_matched_epsilon,
     prepare_db_path as _prepare_db_path,
 )
 
@@ -46,6 +47,8 @@ def _run_pyabc_smc_with_sampler(
     checkpoint_tag: str = "",
     max_wall_time_s: float | None = None,
     kernel: str = "hard",
+    epsilon_mode: str = "quantile",
+    ess_retention: float = 0.95,
     progress=None,
 ) -> List[ParticleRecord]:
     import pyabc
@@ -92,13 +95,24 @@ def _run_pyabc_smc_with_sampler(
     # The default ``"hard"`` falls back to pyABC's UniformAcceptor and preserves
     # the legacy behaviour exactly.
     acceptor = _make_acceptor(kernel, rng_seed=seed)
+    # Matched bandwidth schedule: apply the async side's ESS-retention rule
+    # once per generation (see make_matched_epsilon). "quantile" keeps the
+    # legacy pyABC median-quantile schedule (and is the hard-kernel path).
+    if epsilon_mode == "matched":
+        eps = _make_matched_epsilon(kernel, tol_init, ess_retention=ess_retention)
+    elif epsilon_mode == "quantile":
+        eps = pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5)
+    else:
+        raise ValueError(
+            f"Unknown epsilon_mode={epsilon_mode!r}. Valid values: 'matched', 'quantile'."
+        )
     abc = pyabc.ABCSMC(
         models=pyabc_model,
         parameter_priors=prior,
         distance_function=pyabc_distance,
         population_size=k,
         transitions=pyabc.MultivariateNormalTransition(),
-        eps=pyabc.QuantileEpsilon(initial_epsilon=tol_init, alpha=0.5),
+        eps=eps,
         sampler=sampler,
         acceptor=acceptor,
     )
@@ -305,6 +319,12 @@ def run_pyabc_smc(
     # Apples-to-apples kernel for the pyABC baseline. Defaults to "hard" so
     # legacy configs keep pyABC's UniformAcceptor behaviour unchanged.
     kernel = inference_cfg.get("kernel", "hard")
+    # Matched bandwidth schedule by default for smooth kernels (review II.1);
+    # the hard kernel keeps the legacy quantile rule.
+    epsilon_mode = inference_cfg.get(
+        "epsilon_mode", "matched" if kernel != "hard" else "quantile"
+    )
+    ess_retention = float(inference_cfg.get("ess_retention", 0.95))
     n_procs          = inference_cfg.get("n_workers", 1)
     max_wall_time_s = inference_cfg.get("max_wall_time_s")
     max_wall_time_s = None if max_wall_time_s in (None, "") else float(max_wall_time_s)
@@ -373,6 +393,8 @@ def run_pyabc_smc(
                 checkpoint_tag=checkpoint_tag,
                 max_wall_time_s=max_wall_time_s,
                 kernel=kernel,
+                epsilon_mode=epsilon_mode,
+                ess_retention=ess_retention,
                 progress=progress,
             )
 
@@ -411,5 +433,7 @@ def run_pyabc_smc(
         checkpoint_tag=checkpoint_tag,
         max_wall_time_s=max_wall_time_s,
         kernel=kernel,
+        epsilon_mode=epsilon_mode,
+        ess_retention=ess_retention,
         progress=progress,
     )

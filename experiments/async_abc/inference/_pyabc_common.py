@@ -208,3 +208,105 @@ def make_acceptor(kernel: str, rng_seed: int) -> Any:
             return AcceptorResult(distance=d, accept=accept, weight=1.0)
 
     return _SmoothKernelAcceptor()
+
+
+def make_matched_epsilon(
+    kernel: str,
+    tol_init: float,
+    *,
+    ess_retention: float = 0.95,
+    max_tighten_factor: float = 0.5,
+) -> Any:
+    """Build a pyABC ``Epsilon`` applying the propulate ε rule per generation.
+
+    The asynchronous side selects its bandwidth per arrival with the
+    kernel-weighted ESS-retention rule (``select_eps_by_ess_retention`` in
+    ``propulate.propagators.abcpmc``). This adapter applies the *identical*
+    implementation once per pyABC generation — the granularity a
+    generation-staged sampler permits — on the finished population's weighted
+    distances, clamped monotone. Kernel and ε rule are thus both shared
+    between the two arms of the comparison; the remaining difference is the
+    update granularity (per arrival vs per generation), which is exactly the
+    synchronization variable under test.
+
+    Parameters
+    ----------
+    kernel:
+        ``"gaussian"`` | ``"epanechnikov"``. The hard kernel is rejected:
+        its ESS is a step function in ε, so the retention rule is degenerate
+        — use ``pyabc.QuantileEpsilon`` for hard-kernel runs.
+    tol_init:
+        Initial tolerance ε₀, same value the asynchronous side starts from.
+    ess_retention:
+        Retention target α (async side's ``ess_target``), default 0.95.
+    max_tighten_factor:
+        Per-generation tightening floor, default 0.5 (async side's default).
+
+    Returns
+    -------
+    pyabc.Epsilon
+        Ready to pass to ``pyabc.ABCSMC(eps=...)``.
+    """
+    import pyabc  # noqa: F401 -- clear ImportError if the dependency is missing
+    from pyabc.epsilon import QuantileEpsilon
+
+    from propulate.propagators.abcpmc import (
+        _make_kernel,
+        select_eps_by_ess_retention,
+    )
+
+    if kernel == "hard":
+        raise ValueError(
+            "make_matched_epsilon requires a smooth kernel; the hard kernel's "
+            "ESS is a step function in eps. Use pyabc.QuantileEpsilon "
+            "(epsilon_mode='quantile') for kernel='hard'."
+        )
+    kfn = _make_kernel(kernel)
+    tol_init = float(tol_init)
+
+    class _MatchedKernelEpsilon(QuantileEpsilon):
+        """ESS-retention epsilon matched to the asynchronous side.
+
+        Reuses QuantileEpsilon's ``initialize``/``__call__``/``update``
+        lookup plumbing (numeric initial epsilon, so no calibration sample);
+        only the ε computation (``_update``) differs.
+        """
+
+        def __init__(self) -> None:
+            super().__init__(initial_epsilon=tol_init, alpha=0.5)
+            self.kernel_name = kernel
+            self.ess_retention = float(ess_retention)
+            self.max_tighten_factor = float(max_tighten_factor)
+
+        def get_config(self):
+            config = super().get_config()
+            config.update(
+                {
+                    "rule": "ess_retention",
+                    "kernel": self.kernel_name,
+                    "ess_retention": self.ess_retention,
+                    "max_tighten_factor": self.max_tighten_factor,
+                }
+            )
+            return config
+
+        def _update(self, t: int, weighted_distances) -> None:
+            # pyABC calls update(t) after generation t-1 finishes, asking for
+            # generation t's epsilon; the finished generation's epsilon is the
+            # current tolerance the retention rule tightens from. A missing
+            # t-1 entry means the call convention changed — crash loudly.
+            eps_prev = float(self._look_up[t - 1])
+            distances = weighted_distances.distance.values.astype(float)
+            weights = weighted_distances.w.values.astype(float)
+            proposal = select_eps_by_ess_retention(
+                weights,
+                distances,
+                eps_prev,
+                kfn,
+                ess_target=self.ess_retention,
+                max_tighten_factor=self.max_tighten_factor,
+            )
+            # Monotone clamp, mirroring the async side's min(ε_hist, ε_sched).
+            self._look_up[t] = min(eps_prev, float(proposal))
+
+    return _MatchedKernelEpsilon()
