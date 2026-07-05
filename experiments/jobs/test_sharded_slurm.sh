@@ -56,7 +56,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 experiments_dir="$(cd "$script_dir/.." && pwd)"
 python_bin="${PYTHON_BIN:-python}"
 output_root="${1:-/p/scratch/tissuetwin/herold2/async-abc/test/sharded_smoke_$(date +%Y%m%d_%H%M%S)}"
-nastjapy_path="${NASTJAPY_PATH:-/p/project1/tissuetwin/herold2/nastjapy}"
+sim_backend_path="${SIM_BACKEND_PATH:-/p/project1/tissuetwin/herold2/sim_backend}"
 # shellcheck source=/dev/null
 source "$script_dir/site_env.sh"
 account="$SITE_ACCOUNT"
@@ -126,9 +126,9 @@ write_job_script() {
 #SBATCH --job-name=$(basename "$script_path" .sbatch)
 #SBATCH --output=$log_path
 
-module restore nastjapy
+module restore sim_backend
 module load ParaStationMPI
-source "$nastjapy_path/.venv/bin/activate"
+source "$sim_backend_path/.venv/bin/activate"
 
 mkdir -p "$output_root"
 srun $command

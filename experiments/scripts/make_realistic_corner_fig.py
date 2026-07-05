@@ -13,10 +13,9 @@ reference; θ₂ (the weakly-identified parameter) is weakly identified for ever
 Reads corner_data.csv; no re-derivation.
 
 Data-on-disk note: this figure reads OLD scratch runs that are not regenerated, so both
-the input directory and the CSV column names keep their original tokens. The columns are
-still named division_rate / motility in on-disk CSVs; we read those
-on-disk names verbatim and relabel the plot axes as θ₂ (division_rate = theta_2, weakly
-identified) and θ₁ (motility = theta_1, well identified).
+the input directory and the CSV column names keep their original tokens. The on-disk CSV
+columns use legacy parameter names; we read those verbatim and relabel the plot axes as
+θ₂ (weakly identified) and θ₁ (well identified).
 """
 from __future__ import annotations
 
@@ -71,9 +70,8 @@ def _async_amis_posterior():
     w = w / w.sum()
     idx = np.random.default_rng(RESAMPLE_SEED).choice(len(a), size=N_ASYNC_RESAMPLE, p=w)
     s = a.iloc[idx]
-    # Read the on-disk raw columns (param_division_rate/param_motility) and keep the same
-    # column names as corner_data.csv (division_rate/motility) so the concat aligns; these
-    # are relabelled to θ₂/θ₁ only at the plotting stage.
+    # Read the on-disk parameter columns and keep the same column names as corner_data.csv
+    # so the concat aligns; these are relabelled to θ₂/θ₁ only at the plotting stage.
     return pd.DataFrame({"method": "async_propulate_abc",
                          "division_rate": s["param_division_rate"].to_numpy(),
                          "motility": s["param_motility"].to_numpy()})
@@ -95,12 +93,12 @@ def main() -> None:
     for m in ORDER:
         sub = df[df["method"] == m]
         c = STYLE[m]["color"]
-        # θ₂ marginal (top-left); reads the on-disk "division_rate" column
+        # θ₂ marginal (top-left)
         k = _kde(sub["division_rate"])
         if k is not None:
             ax_d.plot(GRID, k, color=c, lw=1.6)
             ax_d.fill_between(GRID, k, color=c, alpha=0.12, linewidth=0)
-        # θ₁ marginal (bottom-right); reads the on-disk "motility" column
+        # θ₁ marginal (bottom-right)
         k = _kde(sub["motility"])
         if k is not None:
             ax_m.plot(GRID, k, color=c, lw=1.6)

@@ -50,21 +50,21 @@ def _lv_src(w: int, method: str) -> tuple[str, int]:
     return LV_FAIR, w                              # FAIR sync: population = world size
 
 # ---- Realistic-workload data sources -------------------------------------------------
-CPM_FILL = f"{SCRATCH}/run_cpm_fillin_20260628/scaling_cpm/data"    # 1/4/16
-CPM_ORIG = f"{SCRATCH}/run_cpm_20260626_1906/scaling_cpm/data"      # 48/96
-CPM_EXT = f"{SCRATCH}/cpm_scaling_ext_20260630/scaling_cpm/data"    # 192/384 async
-CPM_FAIR = {192: f"{SCRATCH}/cpm_fair_w192_20260701/scaling_cpm/data",
-            384: f"{SCRATCH}/cpm_fair_w384_20260701/scaling_cpm/data"}
-CPM_WORKERS = [1, 4, 16, 48, 96, 192, 384]
+RW_FILL = f"{SCRATCH}/run_cpm_fillin_20260628/scaling_cpm/data"    # 1/4/16
+RW_ORIG = f"{SCRATCH}/run_cpm_20260626_1906/scaling_cpm/data"      # 48/96
+RW_EXT = f"{SCRATCH}/cpm_scaling_ext_20260630/scaling_cpm/data"    # 192/384 async
+RW_FAIR = {192: f"{SCRATCH}/cpm_fair_w192_20260701/scaling_cpm/data",
+           384: f"{SCRATCH}/cpm_fair_w384_20260701/scaling_cpm/data"}
+RW_WORKERS = [1, 4, 16, 48, 96, 192, 384]
 
-def _cpm_src(w: int, method: str) -> tuple[str, int]:
+def _rw_src(w: int, method: str) -> tuple[str, int]:
     if w <= 16:
-        return CPM_FILL, 100
+        return RW_FILL, 100
     if w <= 96:
-        return CPM_ORIG, 100                       # <=96 workers: k=100 >= workers (fair)
+        return RW_ORIG, 100                        # <=96 workers: k=100 >= workers (fair)
     if method == ASYNC:
-        return CPM_EXT, 100
-    return CPM_FAIR[w], w                           # FAIR sync: population = world size
+        return RW_EXT, 100
+    return RW_FAIR[w], w                            # FAIR sync: population = world size
 
 # ---- shared reader ---------------------------------------------------------------
 def _median_iqr(data_dir: str, w: int, k: int, method: str):
@@ -132,14 +132,14 @@ def _panel_loglog(ax, workers, a, s, title):
 def main() -> None:
     lv_a = _curve(LV_WORKERS, _lv_src, ASYNC)
     lv_s = _curve(LV_WORKERS, _lv_src, SYNC)
-    cpm_a = _curve(CPM_WORKERS, _cpm_src, ASYNC)
-    cpm_s = _curve(CPM_WORKERS, _cpm_src, SYNC)
+    rw_a = _curve(RW_WORKERS, _rw_src, ASYNC)
+    rw_s = _curve(RW_WORKERS, _rw_src, SYNC)
 
     plt.rcParams.update({"font.size": 11, "axes.labelsize": 12, "legend.fontsize": 9.5})
     fig, (axL, axR) = plt.subplots(1, 2, figsize=(11.5, 4.4))
 
     _panel_categorical(axL, LV_WORKERS, lv_a, lv_s, "Lotka--Volterra (near-instant simulator)")
-    _panel_loglog(axR, CPM_WORKERS, cpm_a, cpm_s, "Realistic workload (costly simulator)")
+    _panel_loglog(axR, RW_WORKERS, rw_a, rw_s, "Realistic workload (costly simulator)")
 
     # One shared legend beneath both panels.
     handles, labels = axR.get_legend_handles_labels()
@@ -151,9 +151,9 @@ def main() -> None:
     print("LV  workers:", LV_WORKERS)
     print("LV  async  :", [round(x, 1) for x in lv_a[0]])
     print("LV  sync   :", [round(x, 1) for x in lv_s[0]])
-    print("RW workers:", CPM_WORKERS)
-    print("RW async  :", [round(x, 2) for x in cpm_a[0]])
-    print("RW sync   :", [round(x, 2) for x in cpm_s[0]])
+    print("RW workers:", RW_WORKERS)
+    print("RW async  :", [round(x, 2) for x in rw_a[0]])
+    print("RW sync   :", [round(x, 2) for x in rw_s[0]])
 
 
 if __name__ == "__main__":

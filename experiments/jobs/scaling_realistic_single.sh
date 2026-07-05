@@ -17,12 +17,12 @@
 #SBATCH --time=00:30:00
 #SBATCH --partition=batch
 #SBATCH --job-name=abc_scaling
-#SBATCH --output=/tmp/abc_scaling_cpm-%j.out
+#SBATCH --output=/tmp/abc_scaling_rw-%j.out
 
 # Paths are injected by submit_scaling.py (or submit.sh) via `sbatch --export`.
 backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via submit_scaling.py}"
 experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling.py}"
-config_path="$experiments_dir/configs/scaling_cpm.json"
+config_path="$experiments_dir/configs/scaling_realistic.json"
 output_dir=""
 test_flag=""
 small_flag=""
@@ -99,7 +99,7 @@ export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
 # (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. realistic workload's slow
 # sims keep message volume low so it has not hit the pscom teardown hang, but
 # isolating combos keeps it robust as the grid grows. Aggregates rebuilt at end.
-runner="$experiments_dir/scripts/scaling_cpm_runner.py"
+runner="$experiments_dir/scripts/realistic_workload_runner.py"
 
 # Read the (k, replicate) grid into an array FIRST, then loop. Do NOT feed the
 # grid into a `while read ... done < <(...)` loop: srun reads stdin and swallows

@@ -7,7 +7,7 @@ The default config already points at bundled reference assets in
 ``experiments/assets/realistic_workload``. Regenerate them only if you want to
 replace the default reference data::
 
-    python experiments/scripts/generate_cpm_reference.py \\
+    python experiments/scripts/generate_realistic_reference.py \\
         --config-template experiments/assets/realistic_workload/sim_config.json \\
         --config-builder-params experiments/assets/realistic_workload/config_builder_params.json \\
         --parameter-space experiments/assets/realistic_workload/parameter_space.json \\

@@ -49,7 +49,7 @@ def main(args=None):
     parser.add_argument(
         "--config-template",
         required=True,
-        help="Path to NAStJA sim_config.json template.",
+        help="Path to simulator config JSON template.",
     )
     parser.add_argument(
         "--config-builder-params",

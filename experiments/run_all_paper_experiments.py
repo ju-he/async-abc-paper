@@ -88,7 +88,7 @@ EXPERIMENT_REGISTRY = {
     "gaussian_mean": ("gaussian_mean_runner.py", "gaussian_mean.json"),
     "gandk": ("gandk_runner.py", "gandk.json"),
     "lotka_volterra": ("lotka_volterra_runner.py", "lotka_volterra.json"),
-    "cellular_potts": ("cellular_potts_runner.py", "cellular_potts.json"),
+    "realistic_workload": ("realistic_workload_runner.py", "realistic_workload.json"),
     "sbc": ("sbc_runner.py", "sbc.json"),
     "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),

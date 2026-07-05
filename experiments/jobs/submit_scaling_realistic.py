@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Submit scaling_cpm jobs defined in scaling_cpm.json.
+"""Submit scaling_realistic jobs for the realistic-workload benchmark.
 
-Analogous to submit_scaling.py but for the Cellular Potts Model benchmark.
-Key difference: CPM runs are wall-time dominated (SMC always hits wall_time_limit),
-so elapsed-time extrapolation scales by (full_reps × full_wall) / (active_reps × active_wall)
-rather than by simulation count.
+Analogous to submit_scaling.py but for the costly-simulator (realistic-workload)
+benchmark. Key difference: realistic-workload runs are wall-time dominated
+(SMC always hits wall_time_limit), so elapsed-time extrapolation scales by
+(full_reps × full_wall) / (active_reps × active_wall) rather than by simulation count.
 
 Usage
 -----
 Small-tier dry run to preview jobs::
 
-    python submit_scaling_cpm.py /path/to/output --small --dry-run
+    python submit_scaling_realistic.py /path/to/output --small --dry-run
 
 Submit small-tier jobs::
 
-    python submit_scaling_cpm.py /path/to/output --small
+    python submit_scaling_realistic.py /path/to/output --small
 
 Submit production jobs (uses timing CSV from a prior small run)::
 
-    python submit_scaling_cpm.py /path/to/output \\
-        --timing-csv /path/to/small_output/scaling_cpm/data/timing.csv
+    python submit_scaling_realistic.py /path/to/output \\
+        --timing-csv /path/to/small_output/scaling_realistic/data/timing.csv
 
 Manual fallback (no prior run)::
 
-    python submit_scaling_cpm.py /path/to/output --base-time 26.0
+    python submit_scaling_realistic.py /path/to/output --base-time 26.0
 """
 import argparse
 import csv
@@ -53,7 +53,7 @@ def _format_time(hours: float) -> str:
 def _read_timing_elapsed(
     timing_csv: Path,
     *,
-    experiment_name: str = "scaling_cpm",
+    experiment_name: str = "scaling_realistic",
     run_mode: str,
 ) -> float | None:
     if not timing_csv.exists():
@@ -139,7 +139,7 @@ def _render_packed_script(
     config_path: Path,
     output_dir: Path,
     experiments_dir: Path,
-    nastjapy_path: str,
+    sim_backend_path: str,
     workers_csv: str,
     test_mode: bool,
     small_mode: bool,
@@ -172,7 +172,7 @@ def _render_packed_script(
         f"#SBATCH --output={log_path}\n"
         f"\n"
         f"export EXPERIMENTS_DIR={experiments_dir}\n"
-        f"export NASTJAPY_PATH={nastjapy_path}\n"
+        f"export SIM_BACKEND_PATH={sim_backend_path}\n"
         f"\n"
         f"exec {packed_script} {output_dir} --workers {workers_csv}"
         f" --config {config_path}"
@@ -186,7 +186,7 @@ def _render_standalone_script(
     config_path: Path,
     output_dir: Path,
     experiments_dir: Path,
-    nastjapy_path: str,
+    sim_backend_path: str,
     test_mode: bool,
     small_mode: bool,
     extend: bool,
@@ -219,7 +219,7 @@ def _render_standalone_script(
         f"#SBATCH --output={log_path}\n"
         f"\n"
         f"export EXPERIMENTS_DIR={experiments_dir}\n"
-        f"export NASTJAPY_PATH={nastjapy_path}\n"
+        f"export SIM_BACKEND_PATH={sim_backend_path}\n"
         f"\n"
         f"exec {scaling_script} {output_dir}"
         f" --config {config_path}"
@@ -238,8 +238,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--config",
-        default=str(EXPERIMENTS_DIR / "configs" / "scaling_cpm.json"),
-        help="Path to scaling_cpm.json (default: experiments/configs/scaling_cpm.json).",
+        default=str(EXPERIMENTS_DIR / "configs" / "scaling_realistic.json"),
+        help="Path to scaling_realistic.json (default: experiments/configs/scaling_realistic.json).",
     )
     parser.add_argument(
         "--test",
@@ -257,7 +257,7 @@ def main() -> None:
         metavar="PATH",
         help=(
             "Path to a timing.csv from a previous matching-mode run "
-            "(e.g. <output>/scaling_cpm/data/timing.csv). "
+            "(e.g. <output>/scaling_realistic/data/timing.csv). "
             "Used to derive per-N wall-time estimates."
         ),
     )
@@ -324,7 +324,7 @@ def main() -> None:
         if args.partition is None:
             args.partition = site_partition
 
-    nastjapy_path = _site.detect_nastjapy_path()
+    sim_backend_path = _site.detect_backend_path()
 
     run_mode = compose_run_mode("small" if args.small else "full", args.test)
     config_path = Path(args.config).resolve()
@@ -353,7 +353,7 @@ def main() -> None:
     workload_count = max(1, len(k_values) * max(1, len(methods)) * n_replicates)
 
     # --- Determine base wall time for the job (in seconds) ---
-    # CPM is wall-time dominated: extrapolate by replicate × wall-time ratio,
+    # Realistic workload is wall-time dominated: extrapolate by replicate × wall-time ratio,
     # not by simulation count.
     full_wall = _effective_wall_time_limit_s(
         full_scaling_cfg,
@@ -368,7 +368,7 @@ def main() -> None:
     if args.timing_csv:
         active_elapsed = _read_timing_elapsed(
             Path(args.timing_csv),
-            experiment_name=active_cfg.get("experiment_name", "scaling_cpm"),
+            experiment_name=active_cfg.get("experiment_name", "scaling_realistic"),
             run_mode=run_mode,
         )
         if active_elapsed is not None:
@@ -382,7 +382,7 @@ def main() -> None:
             )
         else:
             print(
-                f"Warning: no scaling_cpm row with run_mode={run_mode!r} found in {args.timing_csv}. "
+                f"Warning: no scaling_realistic row with run_mode={run_mode!r} found in {args.timing_csv}. "
                 "Falling back to --base-time."
             )
             default_h = 3.5 if (args.small or args.test) else 26.0
@@ -396,10 +396,10 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     run_id = make_run_id()
-    jobs_dir = output_dir / "_jobs" / "scaling_cpm" / run_id
+    jobs_dir = output_dir / "_jobs" / "scaling_realistic" / run_id
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    scaling_script = SCRIPT_DIR / "scaling_cpm_single.sh"
-    packed_script = SCRIPT_DIR / "scaling_cpm_packed.sh"
+    scaling_script = SCRIPT_DIR / "scaling_realistic_single.sh"
+    packed_script = SCRIPT_DIR / "scaling_realistic_packed.sh"
     packed_bundles, standalone_counts = _pack_small_worker_counts(
         worker_counts,
         capacity=CORES_PER_NODE,
@@ -435,9 +435,9 @@ def main() -> None:
         time_str = _format_time(time_hours)
         bundle_label = "_".join(str(n) for n in bundle)
         workers_csv = ",".join(str(n) for n in bundle)
-        job_name = f"abc_scaling_cpm_bundle_{bundle_label}"
-        script_path = jobs_dir / f"scaling_cpm_bundle_{bundle_label}.sbatch"
-        log_path = jobs_dir / f"scaling_cpm_bundle_{bundle_label}-%j.out"
+        job_name = f"abc_scaling_rw_bundle_{bundle_label}"
+        script_path = jobs_dir / f"scaling_rw_bundle_{bundle_label}.sbatch"
+        log_path = jobs_dir / f"scaling_rw_bundle_{bundle_label}-%j.out"
 
         script_path.write_text(
             _render_packed_script(
@@ -445,7 +445,7 @@ def main() -> None:
                 config_path=config_path,
                 output_dir=output_dir,
                 experiments_dir=EXPERIMENTS_DIR,
-                nastjapy_path=nastjapy_path,
+                sim_backend_path=sim_backend_path,
                 workers_csv=workers_csv,
                 test_mode=args.test,
                 small_mode=args.small,
@@ -481,9 +481,9 @@ def main() -> None:
             finalize_slack_s=finalize_slack_s,
         )
         time_str = _format_time(time_hours)
-        job_name = f"abc_scaling_cpm_{n}"
-        script_path = jobs_dir / f"scaling_cpm_{n}.sbatch"
-        log_path = jobs_dir / f"scaling_cpm_{n}-%j.out"
+        job_name = f"abc_scaling_rw_{n}"
+        script_path = jobs_dir / f"scaling_rw_{n}.sbatch"
+        log_path = jobs_dir / f"scaling_rw_{n}-%j.out"
 
         script_path.write_text(
             _render_standalone_script(
@@ -491,7 +491,7 @@ def main() -> None:
                 config_path=config_path,
                 output_dir=output_dir,
                 experiments_dir=EXPERIMENTS_DIR,
-                nastjapy_path=nastjapy_path,
+                sim_backend_path=sim_backend_path,
                 test_mode=args.test,
                 small_mode=args.small,
                 extend=args.extend,
@@ -517,7 +517,7 @@ def main() -> None:
             subprocess.run(submit_cmd, check=True)
 
     if not args.dry_run:
-        print(f"\nAll {len(packed_bundles) + len(standalone_counts)} scaling_cpm jobs submitted.")
+        print(f"\nAll {len(packed_bundles) + len(standalone_counts)} scaling_realistic jobs submitted.")
         print("Monitor with:  squeue -u $USER")
 
 

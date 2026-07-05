@@ -11,7 +11,7 @@ as more workers wait on the slowest simulation per generation, which is exactly 
 throughput plateaus while the asynchronous method keeps scaling.
 
 Data-on-disk note: the on-disk run directories keep their original names
-(run_cpm_20260626_1906, cpm_scaling_ext_20260630); we read those paths verbatim.
+(legacy on-disk run directories); we read those paths verbatim.
 """
 from __future__ import annotations
 

@@ -83,12 +83,12 @@ class TestRunnerCliSmoke:
         assert result.returncode == 0, result.stderr
         assert list((tmp_path / "sensitivity" / "data").glob("sensitivity_*.csv"))
 
-    def test_cellular_potts_runner_routes_scratch_output_under_run_dir(self, tmp_path, monkeypatch):
-        module = test_helpers.import_runner_module("cellular_potts_runner.py")
+    def test_realistic_workload_runner_routes_scratch_output_under_run_dir(self, tmp_path, monkeypatch):
+        module = test_helpers.import_runner_module("realistic_workload_runner.py")
         captured = {}
 
         cfg = test_helpers.make_fast_runner_config(
-            "cellular_potts.json",
+            "realistic_workload.json",
             methods=["rejection_abc"],
             inference_overrides={"max_simulations": 5, "k": 2},
             execution_overrides={"n_replicates": 1, "base_seed": 1},
@@ -112,14 +112,14 @@ class TestRunnerCliSmoke:
         module.main(
             [
                 "--config",
-                str(tmp_path / "cellular_potts.json"),
+                str(tmp_path / "realistic_workload.json"),
                 "--output-dir",
                 str(tmp_path),
             ]
         )
 
         assert captured["cfg"]["benchmark"]["output_dir"] == str(
-            tmp_path / "cellular_potts" / "cpm_sims"
+            tmp_path / "realistic_workload" / "realistic_sims"
         )
 
 

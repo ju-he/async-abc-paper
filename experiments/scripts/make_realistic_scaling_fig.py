@@ -25,7 +25,7 @@ EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/sca
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_realistic_scaling.pdf"
 
 # 1/4/16 from the fill-in run; 48/96 from the original realistic-workload scaling run; 192/384 from
-# the node-scaling extension (cpm_scaling_ext_20260630, k=100). Medians over the
+# the node-scaling extension (k=100). Medians over the
 # available replicates (the single slow 384-worker replicate is robustly handled by
 # the median).
 POINTS = [(1, FILL), (4, FILL), (16, FILL), (48, EXIST), (96, EXIST), (192, EXT), (384, EXT)]

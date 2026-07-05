@@ -10,7 +10,7 @@ job survives a few Propulate combos then hangs as the next one starts. The
 ``_free_propulate_comm`` docstring fingers the cause: ``MPI_Comm_free`` can hang
 in ParaStation ``pscom_close`` at >=48 ranks. A clean A/B in the small run
 showed it is *message-volume* dependent: CPU scaling (~266k records/combo) hangs
-at w=48/96, while CPM scaling (~24k records/combo) survives at the *same* ranks.
+at w=48/96, while realistic-workload scaling (~24k records/combo) survives at the *same* ranks.
 
 What this script does
 ---------------------

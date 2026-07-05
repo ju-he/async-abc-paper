@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Submit CPM scaling jobs across a power-of-2 worker/node sweep.
+"""Submit realistic-workload scaling jobs across a power-of-2 worker/node sweep.
 
-Thin wrapper over :mod:`submit_scaling_cpm`: it generates a power-of-2 sweep
-(configurable maximum), writes a derived ``scaling_cpm`` config carrying those
+Thin wrapper over :mod:`submit_scaling_realistic`: it generates a power-of-2 sweep
+(configurable maximum), writes a derived ``scaling_realistic`` config carrying those
 worker counts, prints a total **CPU-hour / node-hour** estimate, and then
-delegates the actual submission to ``submit_scaling_cpm.py``.  All the heavy
+delegates the actual submission to ``submit_scaling_realistic.py``.  All the heavy
 lifting --- sbatch rendering, node math (``nodes = ceil(N / 48)``), single-node
 bin-packing of sub-node worker counts, the per-combo MPI-isolated run wrappers
 (``PROPULATE_SKIP_DISCONNECT`` etc.), and SLURM account/partition detection ---
@@ -19,16 +19,16 @@ Examples
 --------
 Estimate CPU-hours for a worker sweep up to 256 (no submission)::
 
-    python submit_cpm_node_scaling.py /scratch/.../run_cpm_nodes \\
+    python submit_realistic_node_scaling.py /scratch/.../run_realistic_nodes \\
         --max-workers 256 --dry-run
 
 Submit a full-node sweep up to 8 nodes (48, 96, 192, 384 workers)::
 
-    python submit_cpm_node_scaling.py /scratch/.../run_cpm_nodes --max-nodes 8
+    python submit_realistic_node_scaling.py /scratch/.../run_realistic_nodes --max-nodes 8
 
 Shorter runs (override per-run wall-time / replicates)::
 
-    python submit_cpm_node_scaling.py /scratch/.../run_cpm_nodes \\
+    python submit_realistic_node_scaling.py /scratch/.../run_realistic_nodes \\
         --max-workers 128 --wall-time-s 900 --reps 3 --dry-run
 """
 import argparse
@@ -44,7 +44,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 
 # Reuse the production submitter's helpers + constants verbatim.
-import submit_scaling_cpm as scpm  # noqa: E402
+import submit_scaling_realistic as scpm  # noqa: E402
 
 CORES_PER_NODE = scpm.CORES_PER_NODE
 
@@ -74,7 +74,7 @@ def _worker_sweep(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 def _estimate(cfg: dict, worker_counts: list[int], args: argparse.Namespace) -> None:
     """Print a per-job and total node-hour / CPU-hour estimate.
 
-    Mirrors the job layout that ``submit_scaling_cpm.py`` will produce: sub-node
+    Mirrors the job layout that ``submit_scaling_realistic.py`` will produce: sub-node
     worker counts are bin-packed onto single nodes, larger counts run standalone
     on ``ceil(N / 48)`` nodes; every job's wall time comes from the same
     ``_job_time_hours`` model the submitter uses.
@@ -98,7 +98,7 @@ def _estimate(cfg: dict, worker_counts: list[int], args: argparse.Namespace) -> 
 
     bundles, standalone = scpm._pack_small_worker_counts(worker_counts, capacity=CORES_PER_NODE)
 
-    print(f"CPM node-scaling sweep")
+    print(f"Realistic-workload node-scaling sweep")
     print(f"  worker counts : {worker_counts}")
     print(f"  k_values      : {k_values}")
     print(f"  methods       : {methods}")
@@ -142,8 +142,8 @@ def main() -> None:
                        help="Largest worker count (power of 2); sweep = 1,2,4,...,N.")
     sweep.add_argument("--max-nodes", type=int, default=None,
                        help="Largest node count (power of 2); sweep = 48*[1,2,4,...,M] (full nodes).")
-    parser.add_argument("--config", default=str(EXPERIMENTS_DIR / "configs" / "scaling_cpm.json"),
-                        help="Base scaling_cpm config (default: experiments/configs/scaling_cpm.json).")
+    parser.add_argument("--config", default=str(EXPERIMENTS_DIR / "configs" / "scaling_realistic.json"),
+                        help="Base scaling_realistic config (default: experiments/configs/scaling_realistic.json).")
     parser.add_argument("--k", type=int, default=100, help="Single archive size k (default: 100).")
     parser.add_argument("--wall-time-s", type=float, default=None, dest="wall_time_s",
                         help="Override per-run wall_time_limit_s (default: from config).")
@@ -174,12 +174,12 @@ def main() -> None:
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    derived = out / "scaling_cpm_nodesweep.json"
+    derived = out / "scaling_realistic_nodesweep.json"
     derived.write_text(json.dumps(base, indent=2))
     print(f"  derived config written: {derived}")
 
     cmd = [
-        sys.executable, str(SCRIPT_DIR / "submit_scaling_cpm.py"), str(out),
+        sys.executable, str(SCRIPT_DIR / "submit_scaling_realistic.py"), str(out),
         "--config", str(derived),
         "--safety", str(args.safety),
         "--min-time", str(args.min_time),
@@ -202,10 +202,10 @@ def main() -> None:
         if args.dry_run:
             # The CPU-hour estimate above is independent of site detection; only the
             # sbatch-command preview (and real submission) needs the cluster's SLURM
-            # site config (SYSTEMNAME) or NASTJAPY_PATH. Don't fail the estimate, and
+            # site config (SYSTEMNAME) or SIM_BACKEND_PATH. Don't fail the estimate, and
             # don't surface the off-cluster traceback.
             print("\n  NOTE: the sbatch preview/submission step needs the target cluster's\n"
-                  "  site detection (run on the JUWELS login node) or NASTJAPY_PATH set.\n"
+                  "  site detection (run on the JUWELS login node) or SIM_BACKEND_PATH set.\n"
                   "  The CPU-hour estimate above does not depend on it.")
         else:
             sys.stderr.write(result.stderr)

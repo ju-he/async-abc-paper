@@ -1792,7 +1792,7 @@ class TestPyabcWrapperMpiBackend:
         )
         bm = _gaussian_bm()
         bm.MULTIPROCESSING_SAFE = False
-        od = OutputDir(tmp_output_dir, "pyabc_cpm_safe").ensure()
+        od = OutputDir(tmp_output_dir, "pyabc_rw_safe").ensure()
         run_pyabc_smc(
             bm.simulate,
             bm.limits,
@@ -1955,7 +1955,7 @@ class TestAbcSmcBaselineMpiBackend:
         )
         bm = _gaussian_bm()
         bm.MULTIPROCESSING_SAFE = False
-        od = OutputDir(tmp_output_dir, "smc_cpm_safe").ensure()
+        od = OutputDir(tmp_output_dir, "smc_rw_safe").ensure()
         run_abc_smc_baseline(
             bm.simulate,
             bm.limits,
