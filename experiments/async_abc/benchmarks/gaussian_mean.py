@@ -79,3 +79,24 @@ class GaussianMean:
         float
         """
         return float(np.clip(self.observed_mean, self.prior_low, self.prior_high))
+
+    def analytic_posterior_samples(self, n: int, seed: int) -> np.ndarray:
+        """Draw *n* samples from the exact posterior (review II.3.b).
+
+        Under the flat Uniform(prior_low, prior_high) prior the posterior is
+        ``N(observed_mean, sigma_obs^2 / n_obs)`` truncated to the prior box.
+        Used as the reference sample for the Wasserstein-to-analytic-posterior
+        quality metric — distinct from the Wasserstein-to-true-parameter
+        (point mass) metric reported for the other benchmarks.
+        """
+        from scipy.stats import truncnorm
+
+        rng = np.random.default_rng(seed)
+        loc = self.observed_mean
+        scale = float(self.sigma_obs) / float(np.sqrt(self.n_obs))
+        a = (self.prior_low - loc) / scale
+        b = (self.prior_high - loc) / scale
+        return np.asarray(
+            truncnorm.rvs(a, b, loc=loc, scale=scale, size=int(n), random_state=rng),
+            dtype=float,
+        )

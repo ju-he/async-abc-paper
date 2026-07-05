@@ -140,6 +140,16 @@ def runtime_performance_summary(records: List[ParticleRecord], cfg: Dict[str, An
                     "final_quality_wasserstein": float(
                         _final_quality_wasserstein(subset, true_params=true_params, archive_size=archive_size)
                     ),
+                    "final_quality_wasserstein_weighted": float(
+                        _final_quality_wasserstein_weighted(
+                            subset, true_params=true_params, archive_size=archive_size
+                        )
+                    ),
+                    "final_quality_wasserstein_analytic": float(
+                        _final_quality_wasserstein_analytic(
+                            subset, cfg=cfg, archive_size=archive_size
+                        )
+                    ),
                     "throughput_sims_per_s": float(len(attempts) / elapsed) if elapsed > 0 else float("nan"),
                     "utilization_loss_fraction": float(
                         idle_map.get(tagged_method, {}).get(replicate, float("nan"))
@@ -171,6 +181,18 @@ def straggler_performance_summary_row(
                 records,
                 true_params=_true_params_from_benchmark_cfg(cfg.get("benchmark", {})),
                 archive_size=archive_size,
+            )
+        ),
+        "final_quality_wasserstein_weighted": float(
+            _final_quality_wasserstein_weighted(
+                records,
+                true_params=_true_params_from_benchmark_cfg(cfg.get("benchmark", {})),
+                archive_size=archive_size,
+            )
+        ),
+        "final_quality_wasserstein_analytic": float(
+            _final_quality_wasserstein_analytic(
+                records, cfg=cfg, archive_size=archive_size
             )
         ),
         "utilization_loss_fraction": float(
@@ -215,6 +237,110 @@ def _final_posterior_size(records: List[ParticleRecord], *, archive_size: int | 
     for result in final_state_results(records, archive_size=archive_size):
         return int(result.n_particles_used)
     return 0
+
+
+def _weighted_final_frame(
+    records: List[ParticleRecord],
+    *,
+    param_names: List[str],
+    archive_size: int | None,
+    n_resample: int = 500,
+) -> pd.DataFrame | None:
+    """Weighted resample of the method's REPORTED posterior (review II.4.2).
+
+    Uses each method's own posterior weighting: the asynchronous arm's
+    retroactive AMIS ``posterior_weight`` over every evaluated particle (the
+    paper's reported estimator; falls back to the final-state records with
+    their streaming ``weight`` when the retroactive pass was disabled), the
+    synchronous arms' final-population SMC ``weight``, and uniform weights
+    for rejection ABC's accepted set. Returns ``None`` when no weighted
+    state can be built. The resample seed is stable per (method, replicate).
+    """
+    from ..utils.seeding import stable_seed
+
+    records = [r for r in records if r.params]
+    if not records:
+        return None
+    family = base_method_name(records[0].method)
+    state: List[ParticleRecord] | None = None
+    values: np.ndarray | None = None
+    if family == "async_propulate_abc":
+        weighted = [r for r in records if r.posterior_weight is not None]
+        if weighted:
+            state = weighted
+            values = np.array(
+                [float(r.posterior_weight) for r in weighted], dtype=float
+            )
+    if state is None:
+        results = final_state_results(records, archive_size=archive_size)
+        if not results:
+            return None
+        state = results[0].records
+        values = np.array(
+            [1.0 if r.weight is None else float(r.weight) for r in state],
+            dtype=float,
+        )
+    values = np.where(np.isfinite(values) & (values > 0.0), values, 0.0)
+    total = float(values.sum())
+    if not state or total <= 0.0:
+        return None
+    rng = np.random.default_rng(
+        stable_seed("weighted-final-frame", state[0].method, int(state[0].replicate))
+    )
+    idx = rng.choice(len(state), size=int(n_resample), replace=True, p=values / total)
+    rows = [
+        [float(state[i].params[name]) for name in param_names] for i in idx
+    ]
+    return pd.DataFrame(rows, columns=param_names)
+
+
+def _final_quality_wasserstein_weighted(
+    records: List[ParticleRecord],
+    *,
+    true_params: Dict[str, float],
+    archive_size: int | None,
+) -> float:
+    """W-to-truth on the weighted reported posterior (vs the raw archive)."""
+    if not true_params:
+        return float("nan")
+    frame = _weighted_final_frame(
+        records, param_names=list(true_params.keys()), archive_size=archive_size
+    )
+    if frame is None or frame.empty:
+        return float("nan")
+    # Intra-package use of the same distance the unweighted metric applies.
+    from ..analysis.convergence import _wasserstein_to_true_params
+
+    return float(_wasserstein_to_true_params(frame, true_params, n_projections=50))
+
+
+def _final_quality_wasserstein_analytic(
+    records: List[ParticleRecord],
+    *,
+    cfg: Dict[str, Any],
+    archive_size: int | None,
+) -> float:
+    """Exact 1-D W1 between the weighted reported posterior and the analytic
+    posterior (Gaussian-mean benchmark only; NaN otherwise — review II.3.b).
+
+    This is the honest 'distance to the analytic posterior': for a perfectly
+    recovered posterior it goes to ~0, whereas the point-mass metric
+    (`final_quality_wasserstein`) floors at the posterior's own spread.
+    """
+    benchmark_cfg = cfg.get("benchmark", {})
+    if benchmark_cfg.get("name") != "gaussian_mean":
+        return float("nan")
+    from scipy.stats import wasserstein_distance
+
+    from ..benchmarks.gaussian_mean import GaussianMean
+
+    frame = _weighted_final_frame(
+        records, param_names=["mu"], archive_size=archive_size
+    )
+    if frame is None or frame.empty:
+        return float("nan")
+    analytic = GaussianMean(benchmark_cfg).analytic_posterior_samples(10_000, seed=0)
+    return float(wasserstein_distance(frame["mu"].to_numpy(dtype=float), analytic))
 
 
 def _final_quality_wasserstein(

@@ -139,11 +139,14 @@ def _wasserstein_to_true_params(
                 ]
             )
         )
+    # Fixed projection seed: multi-D sliced-Wasserstein values must be
+    # deterministic across reruns of the analysis (review II.9.7).
     return float(
         ot.sliced_wasserstein_distance(
             samples,
             target,
             n_projections=n_projections,
+            seed=0,
         )
     )
 
@@ -705,13 +708,15 @@ def _apply_time_uniform_strategy(
 
     For each (method, replicate) group the function picks the row whose
     ``wall_time`` is closest-but-not-exceeding each grid point (LOCF /
-    last-observation-carried-forward).  This gives every method the same
-    number of evaluation checkpoints regardless of native granularity.
+    last-observation-carried-forward) and stamps it with the GRID time, so
+    every method and replicate shares identical axis values regardless of
+    native granularity. The grid spans [min, max] of the observed wall
+    times across ALL methods (review II.9.8).
     """
     if checkpoint_count is None or checkpoint_count <= 0:
         return quality_df.reset_index(drop=True)
 
-    # Build a shared time grid spanning [0, max_wall_time] across ALL methods.
+    # Build a shared time grid spanning [t_min, t_max] across ALL methods.
     t_max = float(quality_df["wall_time"].max())
     t_min = float(quality_df["wall_time"].min())
     if t_max <= t_min:
@@ -725,38 +730,22 @@ def _apply_time_uniform_strategy(
         ordered = group.sort_values("wall_time").reset_index(drop=True)
         wall_times = ordered["wall_time"].to_numpy(dtype=float)
 
-        # For each grid point find the latest checkpoint at or before that time.
+        # For each grid point find the latest checkpoint at or before that
+        # time; grid points before a group's first observation carry nothing.
         indices = np.searchsorted(wall_times, grid, side="right") - 1
-        # Keep only valid indices (>= 0) and deduplicate.
-        valid_mask = indices >= 0
-        unique_indices = sorted(set(int(i) for i in indices[valid_mask]))
-
-        if not unique_indices:
+        locf_rows = []
+        for g_idx, (g_time, raw_idx) in enumerate(zip(grid, indices)):
+            if raw_idx < 0:
+                continue
+            row = ordered.iloc[int(raw_idx)].copy()
+            row["checkpoint_id"] = g_idx + 1
+            row["wall_time"] = float(g_time)
+            row["axis_value"] = float(g_time)
+            locf_rows.append(row)
+        if not locf_rows:
             continue
 
-        rows = ordered.iloc[unique_indices].copy()
-        # Re-number checkpoint_id for the resampled output.
-        rows = rows.reset_index(drop=True)
-        rows["checkpoint_id"] = np.arange(1, len(rows) + 1)
-
-        # If we got fewer checkpoints than requested because multiple grid
-        # points mapped to the same row, replicate the last observation for
-        # each remaining grid point (LOCF).
-        if len(rows) < checkpoint_count:
-            # Map each grid point to its LOCF row
-            locf_rows = []
-            for g_idx, (g_time, raw_idx) in enumerate(zip(grid, indices)):
-                if raw_idx < 0:
-                    continue
-                row = ordered.iloc[int(raw_idx)].copy()
-                row["checkpoint_id"] = g_idx + 1
-                row["wall_time"] = float(g_time)
-                row["axis_value"] = float(g_time)
-                locf_rows.append(row)
-            if locf_rows:
-                rows = pd.DataFrame(locf_rows).reset_index(drop=True)
-
-        selected.append(rows)
+        selected.append(pd.DataFrame(locf_rows).reset_index(drop=True))
 
     if not selected:
         return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
