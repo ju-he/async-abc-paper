@@ -991,7 +991,11 @@ class TestShardSubmitter:
         assert plan["small_mode"] is True
         assert plan["run_mode"] == "small"
 
-    def test_submit_replicate_shards_defaults_to_single_task_when_n_workers_missing(self, tmp_path, monkeypatch):
+    def test_submit_replicate_shards_requires_ntasks_when_n_workers_missing(self, tmp_path, monkeypatch):
+        # n_workers is a system parameter that sensitivity deliberately omits
+        # from its config; the submitter used to default to ntasks=1, which
+        # silently ran the paper's 48-worker experiment serially (review
+        # II.8.6). It must now fail loudly without an explicit --ntasks.
         submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
         monkeypatch.setattr(
             submitter.run_all,
@@ -1013,13 +1017,40 @@ class TestShardSubmitter:
                 "--dry-run",
             ],
         )
+        with pytest.raises(SystemExit, match="n_workers"):
+            submitter.main()
+
+    def test_submit_replicate_shards_honors_explicit_ntasks(self, tmp_path, monkeypatch):
+        submitter = test_helpers.import_runner_module("../jobs/submit_replicate_shards.py")
+        monkeypatch.setattr(
+            submitter.run_all,
+            "EXPERIMENT_REGISTRY",
+            {"sensitivity": ("sensitivity_runner.py", "sensitivity.json")},
+        )
+
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "submit_replicate_shards.py",
+                str(tmp_path),
+                "--experiments",
+                "sensitivity",
+                "--jobs-per-experiment",
+                "2",
+                "--small",
+                "--dry-run",
+                "--ntasks",
+                "48",
+            ],
+        )
         submitter.main()
 
         scripts = sorted((tmp_path / "_jobs" / "sensitivity").glob("*/*.sbatch"))
         assert len(scripts) == 2
         for script_path in scripts:
             script_text = script_path.read_text()
-            assert "#SBATCH --ntasks=1" in script_text
+            assert "#SBATCH --ntasks=48" in script_text
             assert "#SBATCH --nodes=1" in script_text
 
 

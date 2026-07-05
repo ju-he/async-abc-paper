@@ -27,7 +27,7 @@
     "perturbation_scale": 0.8,
     "n_workers": 1,
     "propulate_budget_mode": "total_simulations",
-    "max_wall_time_s": 900.0,
+    "max_wall_time_s": 1800.0,
     "kernel": "gaussian",
     "amis_snapshots": 20,
     "compute_posterior_weights": false
@@ -53,9 +53,9 @@
       4
     ],
     "wall_time_budgets_s": [
-      900.0
+      1800.0
     ],
-    "wall_time_limit_s": 900.0,
+    "wall_time_limit_s": 1800.0,
     "max_simulations_policy": {
       "min_total": 500,
       "per_worker": 20,

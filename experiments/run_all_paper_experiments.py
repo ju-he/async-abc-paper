@@ -92,7 +92,11 @@ EXPERIMENT_REGISTRY = {
     "sbc": ("sbc_runner.py", "sbc.json"),
     "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),
+    # Parameter-coupled runtime bias (paper Fig. fig_param_bias) reuses the
+    # heterogeneity runner with its own config (review II.8.6).
+    "parameter_bias": ("runtime_heterogeneity_runner.py", "parameter_bias.json"),
     "scaling": ("scaling_runner.py", "scaling.json"),
+    "scaling_cpm": ("scaling_cpm_runner.py", "scaling_cpm.json"),
     "sensitivity": ("sensitivity_runner.py", "sensitivity.json"),
     "sensitivity_gandk": ("sensitivity_runner.py", "sensitivity_gandk.json"),
     "ablation": ("ablation_runner.py", "ablation.json"),

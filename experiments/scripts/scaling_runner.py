@@ -951,6 +951,22 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
     if args.k is not None:
         # One-combo-per-process mode: restrict to the single requested k.
         k_values = [int(args.k)]
+    elif bool(scaling_cfg.get("k_equals_workers", False)):
+        # Fair-baseline rule (review II.8.6): the synchronous baseline gets a
+        # population equal to the worker count so it can occupy every core.
+        # Previously this k=W override lived only in submit-time tribal
+        # knowledge; the flag makes it reproducible from the checked-in
+        # config. Requires an unambiguous worker count per invocation.
+        if args.n_workers is not None:
+            k_values = [int(args.n_workers)]
+        elif len(worker_counts) == 1:
+            k_values = [int(worker_counts[0])]
+        else:
+            raise ValueError(
+                "k_equals_workers=true requires a single worker count per "
+                "invocation: pass --n-workers or configure a one-element "
+                "worker_counts list."
+            )
 
     wall_time_budgets_s = [
         float(value) for value in scaling_cfg.get("wall_time_budgets_s", [])

@@ -216,6 +216,17 @@ def main() -> None:
         default=None,
         help="Path containing the cluster virtualenv (default: auto-detect from $SYSTEMNAME via _site.py, or $NASTJAPY_PATH).",
     )
+    parser.add_argument(
+        "--ntasks",
+        type=int,
+        default=None,
+        help=(
+            "MPI tasks per shard job. Required for configs whose inference "
+            "block omits n_workers (a system parameter, e.g. sensitivity): "
+            "silently defaulting to 1 would run the paper's 48-worker "
+            "experiments serially (review II.8.6)."
+        ),
+    )
     args = parser.parse_args()
 
     if args.account is None or args.partition is None:
@@ -318,7 +329,19 @@ def main() -> None:
             shard_assignments=shard_assignments,
         )
 
-        n_tasks = int(actual_cfg.get("inference", {}).get("n_workers", 1) or 1)
+        cfg_workers = actual_cfg.get("inference", {}).get("n_workers")
+        if args.ntasks is not None:
+            n_tasks = int(args.ntasks)
+        elif cfg_workers not in (None, ""):
+            n_tasks = int(cfg_workers)
+        else:
+            # n_workers is a system parameter that some configs (sensitivity)
+            # deliberately omit; defaulting to 1 here silently ran the paper's
+            # 48-worker experiments serially (review II.8.6). Fail loudly.
+            raise SystemExit(
+                f"{experiment_name}: config omits inference.n_workers — pass "
+                "--ntasks explicitly (e.g. --ntasks 48)."
+            )
         nodes = max(1, math.ceil(n_tasks / CORES_PER_NODE))
         script_dir = jobs_root / experiment_name / run_id
         script_dir.mkdir(parents=True, exist_ok=True)

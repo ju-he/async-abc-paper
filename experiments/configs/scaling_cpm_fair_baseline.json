@@ -36,15 +36,13 @@
     "base_seed": 0
   },
   "scaling": {
-    "k_values": [
-      100
-    ],
     "test_k_values": [
       10,
       100
     ],
     "worker_counts": [
-      192
+      192,
+      384
     ],
     "test_worker_counts": [
       1,
@@ -60,7 +58,8 @@
       "min_total": 500,
       "per_worker": 20,
       "k_factor": 2
-    }
+    },
+    "k_equals_workers": true
   },
   "plots": {
     "scaling_curve": true,
