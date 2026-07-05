@@ -19,7 +19,7 @@
 set -u
 
 # Paths are injected by submit_scaling.py (or submit.sh) via `sbatch --export`.
-nastjapy_path="${NASTJAPY_PATH:?NASTJAPY_PATH not set — submit via submit_scaling.py}"
+backend_path="${SIM_BACKEND_PATH:?SIM_BACKEND_PATH not set — submit via submit_scaling.py}"
 experiments_dir="${EXPERIMENTS_DIR:?EXPERIMENTS_DIR not set — submit via submit_scaling.py}"
 config_path="$experiments_dir/configs/scaling.json"
 output_dir=""
@@ -96,15 +96,15 @@ fi
 # Environment setup. Override SCALING_ENV_SETUP to point at a script that loads a
 # different MPI stack + activates a matching venv — e.g. an OpenMPI-linked mpi4py
 # venv to sidestep the ParaStation pscom teardown hang at high message volume.
-# Default keeps ParaStation+nastja unchanged. The setup script owns both the
+# Default keeps ParaStation and the simulation backend unchanged. The setup script owns both the
 # module loads AND `source <venv>/bin/activate`.
 if [ -n "${SCALING_ENV_SETUP:-}" ]; then
     # shellcheck source=/dev/null
     source "$SCALING_ENV_SETUP"
 else
-    module restore nastjapy
+    module restore sim_backend
     module load ParaStationMPI
-    source "$nastjapy_path/.venv/bin/activate"
+    source "$backend_path/.venv/bin/activate"
 fi
 
 mkdir -p "$output_dir"

@@ -17,12 +17,12 @@ SITE_TABLE: dict[str, tuple[str, str]] = {
 # Per-site filesystem defaults (mirror of the case statement in site_env.sh).
 # "$USER" is expanded via os.path.expandvars at lookup time.
 SITE_PATHS: dict[str, dict[str, str]] = {
-    "jureca":  {"nastjapy": "/p/project1/eats-rna/$USER/nastjapy",
-                "scratch":  "/p/scratch/eats-rna/$USER/async-abc"},
-    "juwels":  {"nastjapy": "/p/project1/tissuetwin/herold2/nastjapy",
-                "scratch":  "/p/scratch/tissuetwin/herold2/async-abc"},
-    "jupiter": {"nastjapy": "/p/project1/tissuetwin/herold2/nastjapy",
-                "scratch":  "/p/scratch/tissuetwin/herold2/async-abc"},
+    "jureca":  {"sim_backend": "/p/project1/eats-rna/$USER/sim_backend",
+                "scratch":     "/p/scratch/eats-rna/$USER/async-abc"},
+    "juwels":  {"sim_backend": "/p/project1/tissuetwin/herold2/sim_backend",
+                "scratch":     "/p/scratch/tissuetwin/herold2/async-abc"},
+    "jupiter": {"sim_backend": "/p/project1/tissuetwin/herold2/sim_backend",
+                "scratch":     "/p/scratch/tissuetwin/herold2/async-abc"},
 }
 
 
@@ -52,14 +52,14 @@ def detect_defaults() -> tuple[str, str]:
     return account, partition
 
 
-def detect_nastjapy_path() -> str:
+def detect_backend_path() -> str:
     """Return the cluster virtualenv parent path for the current $SYSTEMNAME.
 
-    Honors the NASTJAPY_PATH env var, which alone fully defines the path
+    Honors the SIM_BACKEND_PATH env var, which alone fully defines the path
     (useful for test harnesses and one-off runs on unlisted sites). Raises
-    RuntimeError on unknown $SYSTEMNAME unless NASTJAPY_PATH is set.
+    RuntimeError on unknown $SYSTEMNAME unless SIM_BACKEND_PATH is set.
     """
-    override = os.environ.get("NASTJAPY_PATH")
+    override = os.environ.get("SIM_BACKEND_PATH")
     if override:
         return override
 
@@ -67,7 +67,7 @@ def detect_nastjapy_path() -> str:
     if sysname not in SITE_PATHS:
         raise RuntimeError(
             f"Unknown SYSTEMNAME={sysname!r}. "
-            f"Pass --nastjapy-path explicitly, set NASTJAPY_PATH, or extend "
+            f"Pass --backend-path explicitly, set SIM_BACKEND_PATH, or extend "
             f"experiments/jobs/_site.py."
         )
-    return os.path.expandvars(SITE_PATHS[sysname]["nastjapy"])
+    return os.path.expandvars(SITE_PATHS[sysname]["sim_backend"])

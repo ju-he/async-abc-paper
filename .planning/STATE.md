@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: context exhaustion at 77% (2026-06-27)
-last_updated: "2026-06-27T20:12:01.160Z"
+stopped_at: context exhaustion at 75% (2026-07-04)
+last_updated: "2026-07-04T22:16:09.457Z"
 last_activity: 2026-04-14
 progress:
   total_phases: 4
@@ -102,10 +102,10 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-06-28 (resume-work)
-Stopped at: Resume complete — both open paper data-panels filled. Deployed async-abc 9423cc9 to cluster
+Last session: 2026-07-04T22:16:09.441Z
+Stopped at: context exhaustion at 75% (2026-07-04)
 (deploy mechanism found: rsync, no alias); sensitivity merged over shards 1-3 + heatmap (job 14066118);
 gaussian_mean re-run COMPLETED with both OOM fixes (job 14066112, MaxRSS 28.8 GB, 16 plots); both figures
 wired into latex/sn-article-template/sn-article.tex; paper recompiles clean (0 undefined refs). Working tree
 uncommitted. Ad-hoc paper effort tracked in .planning/.continue-here.md (NOT a GSD phase; v1.0 milestone done).
-Resume file: .planning/.continue-here.md
+Resume file: None

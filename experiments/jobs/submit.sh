@@ -4,7 +4,7 @@
 # Forwards all positional arguments to sbatch (target script + its args).
 #
 # A submitted #SBATCH script runs from SLURM's spool copy and cannot locate the
-# repo, so this login-node wrapper resolves EXPERIMENTS_DIR / NASTJAPY_PATH /
+# repo, so this login-node wrapper resolves EXPERIMENTS_DIR / SIM_BACKEND_PATH /
 # SITE_SCRATCH_ROOT here and exports them via `sbatch --export`; the batch
 # scripts read them from the environment (failing loudly if unset).
 #
@@ -19,5 +19,5 @@ source "$script_dir/site_env.sh"
 exec sbatch \
     --account="$SITE_ACCOUNT" \
     --partition="$SITE_PARTITION" \
-    --export="ALL,EXPERIMENTS_DIR=$experiments_dir,NASTJAPY_PATH=$SITE_NASTJAPY_PATH,SITE_SCRATCH_ROOT=$SITE_SCRATCH_ROOT" \
+    --export="ALL,EXPERIMENTS_DIR=$experiments_dir,SIM_BACKEND_PATH=$SITE_SIM_BACKEND_PATH,SITE_SCRATCH_ROOT=$SITE_SCRATCH_ROOT" \
     "$@"
