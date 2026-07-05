@@ -16,7 +16,7 @@ The problems concentrate in **claim-vs-code mismatches** — places where the pa
 2. **The retroactive posterior estimator is *not* the exact cumulative mixture** the theory section claims it is — it is a ≤20-snapshot approximation with a defensive prior floor (critical; theory firewall).
 3. **"Wasserstein to the analytic posterior" is actually Wasserstein to the true-parameter point mass** in the param-bias and Gaussian-recovery figures (critical; referee-checkable, values impossible as labeled).
 4. **The baseline's smooth-kernel acceptor RNG is correlated across MPI workers** and non-reproducible from the config seed (high; plausibly contributes to the baseline's SBC under-coverage the paper reports as a finding).
-5. **Two shipped figure PDFs still contain "Cellular Potts" panel titles** (`fig_scaling_combined.pdf`, `fig_posterior_recovery.pdf`) — the paper-clean scrub missed the binary figure content (blocker for the scrubbed submission).
+5. **Two shipped figure PDFs contain "Cellular Potts" panel titles** (`fig_scaling_combined.pdf`, `fig_posterior_recovery.pdf`) while the surrounding paper-clean captions say "realistic workload" — a figure/caption mismatch. *(Re-scoped 2026-07-05: the scrub was a test only and the final paper names CPM/NAStJA, so this dissolves into the naming-consistency item, II.5; the missing `fig_posterior_recovery` generator remains a real gap.)*
 
 Additionally, all 15 referenced figures embed **Type 3 fonts** (commonly rejected by Springer production), effective print font sizes are 4–6.5 pt (target ≥7–8 pt), 5 of 15 referenced figures have **no in-repo generator script**, and figure styling (colors, labels, error conventions) is inconsistent across figures — including one figure where the async/sync **colors are inverted** relative to the rest of the paper.
 
@@ -205,7 +205,7 @@ Context: sn-jnl `\textwidth` = 372 pt ≈ 13.1 cm (from `sn-article.log`). "Effe
 
 ### 5.1 Blockers
 
-1. **Unscrubbed "Cellular Potts" inside two shipped PDFs.** `fig_scaling_combined.pdf` still has a panel titled "Cellular Potts (costly simulator)" (the script already says "Realistic workload" — the committed PDF is stale; just rerun), and `fig_posterior_recovery.pdf` has a "Cellular Potts" panel title **and no generator script exists anywhere** (must be written first). Both contradict captions and defeat the paper-clean scrub. Also unscrubbed `run_cpm_*`/`scaling_cpm` path tokens remain in `make_scaling_combined_fig.py:53-57` and `make_realistic_scaling_fig.py`.
+1. **"Cellular Potts" panel titles inside two shipped PDFs** *(re-scoped 2026-07-05 — no scrub, CPM/NAStJA named in the final paper; see II.5)*: `fig_scaling_combined.pdf` has a panel titled "Cellular Potts (costly simulator)" while the paper-clean script says "Realistic workload" (stale PDF vs script), and `fig_posterior_recovery.pdf` has a "Cellular Potts" panel title **and no generator script exists anywhere** (must be written first — the real remaining gap). With CPM naming restored, this reduces to using one canonical name in captions and figure labels; the `run_cpm_*`/`scaling_cpm` scratch-path constants in `make_scaling_combined_fig.py:53-57` and `make_realistic_scaling_fig.py` are unobjectionable.
 2. **Type 3 fonts in all 15 figures** (pdffonts: DejaVu Sans, `Type 3, Custom`, every file). Springer production commonly rejects Type 3. Nothing in the codebase sets `pdf.fonttype`. Fix: `matplotlib.rcParams["pdf.fonttype"] = 42` in a shared style module; regenerate everything.
 3. **Five referenced figures have no in-repo generator:** `fig_straggler_throughput` (run-output `throughput_vs_slowdown.pdf` from `shard_finalizers.py:223`, manually renamed), `fig_hetero_idle` and `fig_hetero_quality` (nearest code `reporters.plot_idle_fraction_comparison` / `plot_quality_by_sigma`, `reporters.py:955, 983`, produce *different titles* than the committed PDFs → not reproducible as-is), `fig_posterior_recovery` (no matching code at all), `fig_sensitivity_heatmap` (`reporters.plot_sensitivity_summary` writes into run dirs; manually renamed). `replot.py` regenerates run-dir diagnostics, not paper PDFs.
 
@@ -275,7 +275,7 @@ Context: sn-jnl `\textwidth` = 372 pt ≈ 13.1 cm (from `sn-article.log`). "Effe
 | 2 | Retroactive estimator not exact cumulative mixture (§2.1) | code (`n_proposals` = full history for reported runs) **or** text (rewrite tex:115/171; add prior floor to Eq. 7 description) | `abcpmc.py:1318-1371`; tex:115, 171 |
 | 3 | "Wasserstein to analytic posterior" mislabeled (§4.1) | text/labels (numbers are consistent as W-to-truth) | tex:228, 233, 306; `make_gaussian_recovery_fig.py:53`; `analyze_param_bias.py` |
 | 4 | Param-bias "AMIS weights cancel it" unsupported (§4.2) | code (weighted metric) **or** text (soften §6 + Limitation iv; fix tex:115 "all quality metrics") | `runtime_summary.py:220-241`, `convergence.py:449-476`; tex:228, 350, 115 |
-| 5 | Cellular Potts tokens in `fig_scaling_combined.pdf` + `fig_posterior_recovery.pdf` (§5.1) | regenerate + write missing generator | figures dir; `make_scaling_combined_fig.py`; new `make_posterior_recovery_fig.py` |
+| 5 | Figure/caption naming mismatch + missing generator (§5.1; **re-scoped — no scrub, CPM/NAStJA named in final paper**) | pick canonical naming (II.5.1), regenerate, write missing generator | figures dir; `make_scaling_combined_fig.py`; new `make_posterior_recovery_fig.py` |
 | 6 | Baseline acceptor RNG correlated + non-reproducible (§3.2) | code (per-worker/per-generation seed); consider SBC rerun for baseline | `_pyabc_common.py:136`; `mapping.py:87-88` |
 | 7 | Type 3 fonts in all figures (§5.1) | code (`pdf.fonttype=42` in shared style) + regenerate | new shared style module |
 
@@ -308,6 +308,10 @@ Context: sn-jnl `\textwidth` = 372 pt ≈ 13.1 cm (from `sn-article.log`). "Effe
 ## II.0 Conventions and order of operations
 
 > **Decision log (2026-07-05):** the Propulate propagator has been further improved since the experiments were last run, so **all experiments rerun regardless**. Consequently: the matched-ε **code fix (II.1) is chosen** over the text fix; every behavior- or analysis-affecting code change must land **before** the rerun campaign (reruns are the expensive step — anything not in the binary that produces the final data forces a repeat); and every number quoted in the paper is stale by construction until re-derived from the new runs.
+
+> **Decision log (2026-07-05, addendum — no scrub):** the `paper-clean` scrub was a **test only**; the final paper **will name NAStJA and the Cellular Potts model** and cite them. All scrub items in this document are re-scoped to *naming consistency* (one canonical benchmark name everywhere: text, captions, figure labels, configs) — see II.5.
+> **Branch consequence:** do **not** continue from old `main` — it lacks the entire review-3/4 revision line (`245dc6c`…`4fd79d7`) and the newer configs (`parameter_bias.json`, `scaling_realistic*.json`, `scaling_fair_baseline.json` exist only on `paper-clean`). Branch the campaign from the pre-scrub baseline **`4fd79d7`** ("baseline: carry review-4 working state onto paper-clean"), which is the latest working state with original CPM/NAStJA naming; `paper-clean`'s five scrub commits are then simply not carried forward. Carry over the uncommitted `experiments/jobs/*` edits from the current working tree.
+> **Path mapping for this document:** the review was conducted on `paper-clean`, so it uses the scrubbed names throughout. On the pre-scrub baseline map: `benchmarks/realistic_workload.py` ↔ `benchmarks/cellular_potts.py`, `configs/realistic_workload.json` ↔ `configs/cellular_potts.json`, `make_realistic_*` ↔ `make_cpm_*`, `scaling_realistic*` ↔ `scaling_cpm*`, "realistic workload" ↔ "Cellular Potts (NAStJA)". All file:line findings refer to code that is identical up to these renames (the scrub renamed, it did not change logic).
 
 - **Python:** `sim_backend_venv/.venv/bin/python` for all local runs and tests.
 - **Test loop after every code change:** `sim_backend_venv/.venv/bin/python -m pytest experiments/tests -x -q` (the SBC/seeding/walltime subset is fast; run the full suite before committing).
@@ -432,17 +436,18 @@ The param-bias experiment reruns in the campaign, so build the weighted metric i
 
 ---
 
-## II.5 Cellular Potts scrub in shipped figures (must-fix #5)
+## II.5 Benchmark naming consistency + missing generator (must-fix #5 — re-scoped, no scrub)
 
-1. **Verify the extent first:**
-   `for f in latex/sn-article-template/figures/*.pdf; do sim_backend_venv/.venv/bin/python -c "import sys,pdfminer" 2>/dev/null || true; done` — simpler: `pdftotext "$f" - | grep -il "potts\|cpm\|nastja"` over all PDFs (pdftotext is in poppler-utils; if missing, `pdfgrep` or python + pypdf). Record every hit, including the 13 orphans.
-2. **`fig_scaling_combined.pdf`:** the script is already scrubbed — regenerate: mount scratch (per `reference_asyncabc_cluster_deploy` memory), run `sim_backend_venv/.venv/bin/python experiments/scripts/make_scaling_combined_fig.py`. Do this in the II.7 pass so it picks up the style module.
-3. **`fig_posterior_recovery.pdf`:** write `experiments/scripts/make_posterior_recovery_fig.py` (it does not exist):
-   - Three panels (g-and-k, Lotka–Volterra, realistic workload), each: per-method median Wasserstein-vs-time with IQR band over replicates, on the LOCF grid.
-   - Data source: the per-run quality-over-time CSVs produced by `posterior_quality_curve` (`convergence.py:151`) in each benchmark run dir (`gandk`, `lotka_volterra`, `realistic_workload` runs). Model the loading + differencing logic on `make_realistic_diff_fig.py`, which already reads the realistic-workload pair of curves — reuse its loader for panel 3 and generalize for panels 1–2.
-   - Panel labels "(a) g-and-k", "(b) Lotka–Volterra", "(c) Realistic workload" — as axis text tags, not titles.
-4. **Path-token scrub in scripts:** `make_scaling_combined_fig.py:53-57` and `make_realistic_scaling_fig.py` contain `run_cpm_*` / `scaling_cpm` remote directory names. Do NOT blind-rename (they are real scratch dir names). Instead **vendor the data**: copy each figure's input CSVs into `experiments/data/paper_figures/<fig_name>/` with scrubbed filenames (e.g. `realistic_scaling_throughput_w384.csv`), commit them, and point the scripts at the in-repo copies (scratch paths only as an optional `--refresh-from-scratch` flag). This simultaneously fixes reproducibility (§5.3.7) and removes the tokens.
-5. **Re-verify:** rerun the grep of step 1 over the regenerated `figures/` — zero hits; also `grep -rin "potts\|nastja" experiments/ latex/ --include="*.py" --include="*.tex" --include="*.sh"`.
+**Re-scoped 2026-07-05:** the final paper names NAStJA/CPM, so there is nothing to scrub. What remains is (a) picking one canonical name and using it everywhere, (b) the genuinely missing figure generator, (c) the data vendoring for reproducibility.
+
+1. **Pick the canonical naming and citations.** Recommended: introduce once as "a production Cellular Potts model (CPM) tissue simulation in the NAStJA framework" with citations (NAStJA: Berghoff et al.; CPM: Graner & Glazier 1992), then use "Cellular Potts" consistently in section headers, captions, figure labels, and Table 1/5 rows. Rename θ₁/θ₂ to the actual CPM parameter names — this materially improves the weak-identifiability discussion (tex:320), which currently has to say "both chiefly modulate the same summary statistic" in the abstract. Un-scrubbing the paper text means reverting to (or continuing from) the pre-scrub tex at `4fd79d7` and porting any post-scrub text improvements manually.
+2. **`fig_scaling_combined.pdf`:** regenerate in the II.7 pass from the campaign data; with CPM naming restored, the panel label and caption agree again — just make sure both use the canonical name from step 1 (and in-figure titles go away anyway, II.7.b).
+3. **`fig_posterior_recovery.pdf`:** write `experiments/scripts/make_posterior_recovery_fig.py` (it does not exist under any name — checked both naming schemes):
+   - Three panels (g-and-k, Lotka–Volterra, Cellular Potts), each: per-method median Wasserstein-vs-time with IQR band over replicates, on the LOCF grid.
+   - Data source: the per-run quality-over-time CSVs produced by `posterior_quality_curve` (`convergence.py:151`) in each benchmark run dir. Model the loading logic on `make_realistic_diff_fig.py` (pre-scrub name: the CPM diff-figure script), which already reads the CPM pair of curves — reuse its loader for panel 3 and generalize for panels 1–2.
+   - Panel labels "(a) g-and-k", "(b) Lotka–Volterra", "(c) Cellular Potts" — as axis text tags, not titles.
+4. **Vendor the figure data (reproducibility, §5.3.7):** copy each figure's input CSVs into `experiments/data/paper_figures/<fig_name>/`, commit them, and point the make scripts at the in-repo copies (scratch paths only behind an optional `--refresh-from-scratch` flag). The `run_cpm_*` / `scaling_cpm` scratch directory constants in `make_scaling_combined_fig.py:53-57` are real remote dir names and now unobjectionable — leave them under the refresh flag.
+5. **Verify consistency:** `grep -rin "realistic.workload\|realistic workload" latex/ experiments/scripts/` after the un-scrub — the scrubbed framing should be gone from paper-facing text and figure labels; `pdftotext` sweep over the regenerated `figures/*.pdf` confirms every figure uses the canonical name.
 
 ---
 
@@ -535,7 +540,7 @@ Rules encoded by this module: **figures are drawn at final print width** (`fig_s
 4. CVD fixes: `make_ablation_fig.py` — recolor the three bar classes to Okabe–Ito + add hatching (`hatch="//"` for removals); `make_realistic_corner_fig.py` — sync/rejection fills get distinct hatch or contour linestyles in addition to color.
 5. **Regenerate all 15 referenced figures**, then verify:
    - `for f in latex/sn-article-template/figures/fig_*.pdf; do pdffonts "$f" | grep -q "Type 3" && echo "TYPE3: $f"; done` → no output.
-   - `pdftotext` grep for potts/cpm/nastja → no output.
+   - `pdftotext` naming sweep: every figure label uses the canonical benchmark name from II.5.1 (no leftover "realistic workload" strings, no mixed naming).
    - Recompile the paper; visually check font sizes now ≈ constant across figures.
 6. **Housekeeping:** `git rm` the 13 unreferenced PDFs (`fig_ablation_amis, fig_ablation_comparison, fig_gandk_corner, fig_gandk_progress, fig_hetero_throughput, fig_lotka_corner, fig_lotka_progress, fig_realistic_progress, fig_realistic_scaling, fig_realistic_scaling_quality, fig_realistic_scaling_throughput, fig_scaling_attempts, fig_scaling_throughput`) and the empty `benchmarks/ overview/ runtime/` dirs; move to an `archive/` outside `latex/` if you want to keep them.
 
@@ -610,7 +615,7 @@ In `propulate/propulate/propagators/abcpmc.py` (`compute_cached`, :1861-1879): s
 Run after all fixes, before the next submission-ready commit:
 
 1. `sim_backend_venv/.venv/bin/python -m pytest experiments/tests -q` — all green (including the new tests from II.1.b/II.6/II.8.3/II.8.4/II.9.5).
-2. Scrub sweep: `grep -rin "potts\|nastja\|cpm" experiments latex --include="*.py" --include="*.sh" --include="*.tex" --include="*.json"` → only innocuous hits (none expected); `pdftotext` sweep over `latex/.../figures/*.pdf` → none.
+2. Naming-consistency sweep (no scrub — CPM/NAStJA are named in the final paper): `grep -rin "realistic.workload" latex experiments/scripts --include="*.py" --include="*.tex"` → no paper-facing hits of the scrubbed framing; `pdftotext` sweep over `latex/.../figures/*.pdf` → every figure uses the canonical "Cellular Potts" naming from II.5.1.
 3. Font sweep: `pdffonts` over all referenced figures → no `Type 3`.
 4. Figure regeneration from a clean checkout: every `\includegraphics` target regenerable via an in-repo `make_*_fig.py` reading in-repo `experiments/data/paper_figures/` CSVs (satisfies the Declarations, tex:372/378).
 5. Paper claim re-check against final code — the five rewritten claim sites (matched schedule, exact estimator, statelessness, weight usage, W-metric labels) must match what the code now does; grep the tex for "matched", "exactly", "stateless", "analytic" and re-read each hit.
