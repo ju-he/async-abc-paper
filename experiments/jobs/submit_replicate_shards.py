@@ -125,6 +125,7 @@ def _render_script(
     job_name: str,
     log_path: Path,
     nastjapy_path: str,
+    ntasks_per_node: int | None = None,
 ) -> str:
     args = [
         "python",
@@ -147,11 +148,12 @@ def _render_script(
     if extend:
         args.append("--extend")
     command = " ".join(args)
+    tpn_line = f"#SBATCH --ntasks-per-node={ntasks_per_node}\n" if ntasks_per_node else ""
     return f"""#!/bin/bash -x
 #SBATCH --account={account}
 #SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
-#SBATCH --cpus-per-task=1
+{tpn_line}#SBATCH --cpus-per-task=1
 #SBATCH --threads-per-core=2
 #SBATCH --time={time_limit}
 #SBATCH --partition={partition}
@@ -163,6 +165,11 @@ nastjapy_path={nastjapy_path}
 module restore nastjapy
 module load ParaStationMPI
 source "$nastjapy_path/.venv/bin/activate"
+
+# Avoid the intermittent ParaStation pscom MPI-teardown hang on non-scaling
+# multi-rank jobs: skip MPI_Comm_free and let the leaked comm be reclaimed at
+# process exit (safe for one-shot shard jobs). See reference_asyncabc_cluster_deploy.
+export PROPULATE_SKIP_DISCONNECT=1
 
 mkdir -p "{output_dir}"
 srun {command}
@@ -225,6 +232,19 @@ def main() -> None:
             "block omits n_workers (a system parameter, e.g. sensitivity): "
             "silently defaulting to 1 would run the paper's 48-worker "
             "experiments serially (review II.8.6)."
+        ),
+    )
+    parser.add_argument(
+        "--ntasks-per-node",
+        type=int,
+        default=None,
+        dest="ntasks_per_node",
+        help=(
+            "MPI tasks per node. Spreads the fixed worker count across more "
+            "nodes for more RAM/rank; needed for fast-simulator benchmarks whose "
+            "unbounded evaluated-population history OOMs a 94 GB node at 48 "
+            "ranks/node (see .plans/bug-fixes/previous-fixes.md 2026-07-08). "
+            "Default: pack CORES_PER_NODE per node."
         ),
     )
     args = parser.parse_args()
@@ -342,7 +362,12 @@ def main() -> None:
                 f"{experiment_name}: config omits inference.n_workers — pass "
                 "--ntasks explicitly (e.g. --ntasks 48)."
             )
-        nodes = max(1, math.ceil(n_tasks / CORES_PER_NODE))
+        tasks_per_node = args.ntasks_per_node or CORES_PER_NODE
+        if tasks_per_node > CORES_PER_NODE:
+            raise SystemExit(
+                f"--ntasks-per-node={tasks_per_node} exceeds CORES_PER_NODE={CORES_PER_NODE}."
+            )
+        nodes = max(1, math.ceil(n_tasks / tasks_per_node))
         script_dir = jobs_root / experiment_name / run_id
         script_dir.mkdir(parents=True, exist_ok=True)
         submitted_job_ids: list[str] = []
@@ -397,6 +422,7 @@ def main() -> None:
                     time_limit=time_limit,
                     ntasks=n_tasks,
                     nodes=nodes,
+                    ntasks_per_node=args.ntasks_per_node,
                     job_name=job_name,
                     log_path=log_path,
                     nastjapy_path=args.nastjapy_path,

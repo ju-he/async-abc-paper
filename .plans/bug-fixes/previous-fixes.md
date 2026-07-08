@@ -1,5 +1,38 @@
 # Previous Bug Fixes
 
+## 2026-07-08 — Rerun-campaign OOM: fast-sim benchmarks OOM-killed mid-run on 94 GB/48-rank batch nodes
+
+**Symptom:** In the review rerun campaign (frozen main@0aa1237 + propulate@e148f4f), Stage-1 shard jobs
+for the **fast-simulator** benchmarks (gaussian_mean, gandk, lotka_volterra, ablation) FAIL ~60 s into
+the run: exactly one rank per job is `Killed` (SIGKILL: task 11/24/27/14), the rest `Terminated`, exit
+15, **no Python traceback** = Linux OOM-killer. `runtime_heterogeneity` (lognormal-delay-throttled)
+COMPLETED. The `--test` smoke run passed (small budget); only full mode OOMs.
+
+**Root cause (NOT a code-logic bug):** JUWELS **`batch` nodes are only 94 GB / 48 ranks = 1.96 GB/rank**
+(`scontrol show node`: RealMemory=94000; `sacct` MaxRSS ≈ 2.19 GB/task → 48×2 GB ≈ 100 GB > 94 GB →
+collective OOM). The async-ABC `propulator.population` is **unbounded by design** — every rank retains
+every evaluated Individual (active+inactive) to build the `raw_results` attempt history (`propulate_abc.py`:
+when `max_wall_time_s` is set the generation budget is -1 and the run executes the FULL wall-time;
+this doc already notes history reaches "1e5–1e6 individuals/rank" for a near-instant simulator; CPM
+survives only because its slow simulator caps history at ~41k). Fast sims (gaussian ~172 evals/s/rank)
+fill this to ~2.5M individuals/rank over 300 s ≈ **~6.6 GB/rank** (measured ~2.2 KB/individual incl.
+Python overhead). **Amplifier:** propulate fork commit `52f44e2` ("incrementally maintained
+active-population view") made the propagator ~1.54× faster → ~1.5× more individuals accumulate in the
+same fixed 300 s wall-time → tips a previously-marginal footprint over the 94 GB ceiling. This is WHY
+the campaign reruns (propagator changed) AND why it now OOMs.
+
+**Scope:** only the 4 fast-sim benchmarks. Slower experiments fit: runtime_heterogeneity completed;
+straggler/SBC/sensitivity are throttled or short-per-unit; scaling LV/CPM ran before at ~1 GB/rank
+(w96_k192 finalized at 978k records ≈ 0.87 GB/task).
+
+**Fix (memory workaround — preserves the frozen commit AND exact record semantics; a proper engine fix
+would stream records to disk mid-run = a refactor that risks changing outputs):** spread the 48 workers
+across more nodes so each rank gets more RAM. batch: **12 ranks/node × 4 nodes = 7.8 GB/rank**; or
+mem192 (180 GB): 24/node × 2 nodes = 7.5 GB/rank. Add `--ntasks-per-node` control to
+`submit_replicate_shards.py`. Topology change is benign for the fixed-48-worker quality benchmarks
+(posterior is statistical; cross-node latency ≪ eval time). **Validation:** job 14095184 (gaussian,
+4 nodes × 12/node) — result pending.
+
 ## 2026-06-25 — CPU scaling "MPI teardown hang" was extract_posterior O(n·S·k) on the analysis path
 
 **Symptom:** The CPU `scaling` (lotka_volterra) sweep wedges on JUWELS at high worker counts ×
