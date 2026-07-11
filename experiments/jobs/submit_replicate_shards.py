@@ -126,6 +126,7 @@ def _render_script(
     log_path: Path,
     nastjapy_path: str,
     ntasks_per_node: int | None = None,
+    exclusive: bool = False,
 ) -> str:
     args = [
         "python",
@@ -149,11 +150,12 @@ def _render_script(
         args.append("--extend")
     command = " ".join(args)
     tpn_line = f"#SBATCH --ntasks-per-node={ntasks_per_node}\n" if ntasks_per_node else ""
+    excl_line = "#SBATCH --exclusive\n#SBATCH --mem=0\n" if exclusive else ""
     return f"""#!/bin/bash -x
 #SBATCH --account={account}
 #SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
-{tpn_line}#SBATCH --cpus-per-task=1
+{tpn_line}{excl_line}#SBATCH --cpus-per-task=1
 #SBATCH --threads-per-core=2
 #SBATCH --time={time_limit}
 #SBATCH --partition={partition}
@@ -245,6 +247,16 @@ def main() -> None:
             "unbounded evaluated-population history OOMs a 94 GB node at 48 "
             "ranks/node (see .plans/bug-fixes/previous-fixes.md 2026-07-08). "
             "Default: pack CORES_PER_NODE per node."
+        ),
+    )
+    parser.add_argument(
+        "--exclusive",
+        action="store_true",
+        help=(
+            "Request whole nodes (adds #SBATCH --exclusive --mem=0). REQUIRED "
+            "with --ntasks-per-node below CORES_PER_NODE, else Slurm grants only "
+            "a core-proportional memory slice (half a node for 48/96 tasks), "
+            "starving the spread of the RAM/rank it was meant to buy."
         ),
     )
     args = parser.parse_args()
@@ -423,6 +435,7 @@ def main() -> None:
                     ntasks=n_tasks,
                     nodes=nodes,
                     ntasks_per_node=args.ntasks_per_node,
+                    exclusive=args.exclusive,
                     job_name=job_name,
                     log_path=log_path,
                     nastjapy_path=args.nastjapy_path,

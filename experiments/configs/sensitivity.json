@@ -40,9 +40,7 @@
       2.0
     ],
     "scheduler_type": [
-      "acceptance_rate",
-      "quantile",
-      "geometric_decay"
+      "acceptance_rate"
     ],
     "tol_init_multiplier": [
       0.5,
