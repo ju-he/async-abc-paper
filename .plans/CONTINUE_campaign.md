@@ -42,10 +42,17 @@ SBC-1000 (async well-calibrated, baseline over-confident — see `sbc/data/cover
    `scaling_cpm.json` + `scaling_cpm_fillin.json` + `scaling_cpm_fair_baseline.json`
    (batch, unchanged — slow sims fit packed). Paper text must adopt the new budget axis
    (quote 180 s, not 900 s) in the §II.0 step-4/5 pass.
-2. **straggler MERGE**: runs done (data at `rerun_20260707/_shards/straggler/runs/run_20260708_074437`),
-   but the finalizer is O(n²)-slow (timed out 6 h even on mem192 via `experiments/jobs/finalize_shards.py`).
-   Investigate `experiments/async_abc/utils/shard_finalizers.py` straggler path — fix the
-   slowness, don't just add nodes.
+2. **straggler MERGE — ROOT CAUSE FOUND (2026-07-11): the worker GANTT, not the merge.**
+   _merge_tmp mtimes from the timed-out 6 h job (14097105): 9.7 GB merge done in 11 min,
+   load_records 12 min, summaries + slowdown plot by 16:15, runtime_debug_summary 16:20 —
+   then silence for 5.5 h inside `plot_worker_gantt` (one `ax.barh` artist PER RECORD on the
+   worst-slowdown async subset; same pathology as the 2026-04-14 runtime_heterogeneity gantt).
+   FIX: `gantt_plot` now renders one `broken_barh` collection per (lane, method) and clips to
+   `GANTT_MAX_INTERVALS` (20k) earliest-by-start records with a loud title/metadata annotation
+   (`clip_gantt_records` in plotting/common.py); `plot_worker_gantt` clips per panel and the
+   companion CSV holds exactly the drawn records. Stale merge.lock is auto-stolen (dead owner).
+   Resubmit `finalize_shards.py --experiment straggler --run-id run_20260708_074437` after
+   deploying the fix.
 3. **Commit** the uncommitted tooling to the `campaign-tooling` branch: the `--exclusive` flag
    in `submit_replicate_shards.py` and the `sensitivity.json` scheduler_type de-dup.
 4. After all experiments land: figures + paper-text edits + re-derive every number

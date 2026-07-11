@@ -1118,7 +1118,7 @@ class TestScalingSubmitter:
         assert "k_values:  [48, 192, 1000]" in out
         assert "Methods:   ['async_propulate_abc', 'abc_smc_baseline']" in out
         assert "Reps:      2" in out
-        assert "Wall cap:  300.0 s" in out
+        assert "Wall cap:  180.0 s" in out
         assert "Workload:  12 combos per worker-count job" in out
         assert "Finalize:  300.0 s slack" in out
         scripts = sorted((tmp_path / "_jobs" / "scaling").glob("*/*.sbatch"))

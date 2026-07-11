@@ -1,5 +1,41 @@
 # Previous Bug Fixes
 
+## 2026-07-11 — straggler finalize "merge timeout" was TWO quadratic paths in the worker gantt
+
+**Symptom:** the standalone straggler finalize (`finalize_shards.py`, 9.7 GB raw_results across 5
+shards) times out at 6 h even on an exclusive mem192 node (job 14097105), with NO Python output.
+Misattributed first to "9.7 GB load slow", then to "an O(n²) merge".
+
+**Diagnosis (from `_merge_tmp` mtimes — the job logs nothing):** merge wrote the 9.7 GB CSV in
+11 min (streaming, fine); `load_records` took 12 min; throughput summary + slowdown plot done by
+16:15; `runtime_debug_summary` by 16:20 — then 5.5 h of silence inside `plot_worker_gantt` on the
+worst-slowdown async subset. Two independent quadratic paths:
+1. `gantt_plot` (plotting/common.py) drew **one `ax.barh` artist per record** — matplotlib
+   per-artist bookkeeping makes millions of bars take hours (same pathology as the 2026-04-14
+   runtime_heterogeneity gantt hang, which was only gated in test mode).
+2. `plot_worker_gantt` (plotting/reporters.py) computed
+   `omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})`
+   — the inner set literal sits in the comprehension's condition and is REBUILT PER RECORD:
+   O(N²) set construction. A local repro on 2M records sat >10 min at flat RSS/100 % CPU in this
+   line alone.
+
+**Fix:** (1) `gantt_plot` renders one `broken_barh` collection per (lane, method) and defensively
+clips to `GANTT_MAX_INTERVALS` (20k) records via the new `clip_gantt_records` — the kept set is
+the leading wall-time window by `sim_start_time` (a scattered subsample would misrepresent worker
+occupancy), and clipping is LOUD: title suffix "(first N s, kept/total sims)", INFO log, and
+`gantt_clip_by_panel` in the plot metadata; `plot_worker_gantt` clips per panel and the companion
+data CSV holds exactly the drawn records (raw_results.csv keeps the full set). (2) the timed-method
+set is hoisted out of the comprehension. Benchmark: `plot_worker_gantt` on 2,000,000 records =
+**5.8 s** (previously did not finish in 5.5 h). Regression tests:
+`test_clip_gantt_records_keeps_leading_window`, `test_plot_worker_gantt_clips_oversized_record_sets`.
+
+**Lesson:** a "merge too slow" symptom in a finalizer that logs nothing is localized fastest by
+the temp dir's file MTIMES — each completed stage leaves an artifact; the hang lives after the
+newest one. Also: a set/list literal in a comprehension's `if` is re-evaluated per element.
+
+**Files:** `experiments/async_abc/plotting/common.py`, `experiments/async_abc/plotting/reporters.py`,
+`experiments/tests/test_plotting.py`
+
 ## 2026-07-11 — LV scaling OOM at packed 48/node: PER-COMBO memory, not cross-combo accumulation
 
 **Symptom:** Full-tier LV `scaling` jobs (14100319–324, wall_time_limit_s=900) fail: N=48 and N=144

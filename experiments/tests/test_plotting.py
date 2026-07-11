@@ -24,6 +24,7 @@ from async_abc.io.records import ParticleRecord, write_records
 import async_abc.plotting.export as export_mod
 from async_abc.plotting.export import save_figure, get_git_hash
 from async_abc.plotting.common import (
+    clip_gantt_records,
     corner_plot,
     gantt_plot,
     posterior_quality_plot,
@@ -326,6 +327,60 @@ class TestPhase3Reporters:
         assert meta["experiment_name"] == "plots"
         assert meta["benchmark"] is False
         assert "methods" in meta
+        assert meta["gantt_clip_by_panel"] == {}
+
+    @staticmethod
+    def _gantt_stress_records(n: int, workers: int = 4) -> list:
+        return [
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=i,
+                params={"mu": 0.1},
+                loss=1.0,
+                wall_time=float(i) / 10.0 + 0.05,
+                worker_id=str(i % workers),
+                sim_start_time=float(i) / 10.0,
+                sim_end_time=float(i) / 10.0 + 0.05,
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+            )
+            for i in range(n)
+        ]
+
+    def test_clip_gantt_records_keeps_leading_window(self):
+        records = self._gantt_stress_records(100)
+        kept, clip_info = clip_gantt_records(records, max_intervals=30)
+        assert len(kept) == 30
+        assert clip_info == {
+            "total": 100,
+            "kept": 30,
+            "window_end_s": max(float(r.sim_end_time) for r in kept),
+        }
+        # The kept set is the leading wall-time window, not a scattered sample.
+        assert [r.step for r in kept] == list(range(30))
+        # Below the cap nothing is clipped.
+        kept_all, no_clip = clip_gantt_records(records, max_intervals=100)
+        assert len(kept_all) == 100
+        assert no_clip is None
+
+    def test_plot_worker_gantt_clips_oversized_record_sets(self, tmp_path, monkeypatch):
+        """Regression: the straggler finalize hung >6 h drawing one bar per
+        record; oversized sets must be clipped, loudly (title + metadata),
+        and the companion CSV must hold exactly the drawn records."""
+        import async_abc.plotting.common as common_mod
+
+        monkeypatch.setattr(common_mod, "GANTT_MAX_INTERVALS", 50)
+        output_dir = OutputDir(tmp_path, "plots").ensure()
+        plot_worker_gantt(self._gantt_stress_records(300), output_dir)
+        with open(output_dir.plots / "worker_gantt_data.csv", newline="") as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 50
+        meta = json.loads((output_dir.plots / "worker_gantt_meta.json").read_text())
+        clip = meta["gantt_clip_by_panel"]["all"]
+        assert clip["total"] == 300
+        assert clip["kept"] == 50
 
     def test_plot_worker_gantt_separates_base_methods_and_replicate_worker_lanes(self, tmp_path):
         output_dir = OutputDir(tmp_path, "plots").ensure()

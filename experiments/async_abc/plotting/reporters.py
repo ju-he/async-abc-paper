@@ -35,6 +35,7 @@ from ..analysis import (
 )
 from .common import (
     archive_evolution_plot,
+    clip_gantt_records,
     corner_plot,
     gantt_plot,
     idle_fraction_comparison_plot,
@@ -557,10 +558,27 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
     else:
         title = "Worker timeline"
 
+    def _clip_suffix(clip_info) -> str:
+        if clip_info is None:
+            return ""
+        return (
+            f" (first {clip_info['window_end_s']:.0f} s, "
+            f"{clip_info['kept']:,}/{clip_info['total']:,} sims)"
+        )
+
+    # Clip per panel BEFORE rendering and surface the clip in the panel title
+    # and metadata — the companion data CSV holds exactly the drawn records,
+    # so figure and data stay consistent (raw_results.csv keeps the full set).
+    drawn: List[ParticleRecord] = []
+    clip_reports: Dict[str, Dict[str, float]] = {}
     if len(base_methods) <= 1 and len(conditions) <= 1:
-        fig = gantt_plot(timed)
+        kept, clip_info = clip_gantt_records(timed)
+        drawn = kept
+        if clip_info:
+            clip_reports["all"] = clip_info
+        fig = gantt_plot(kept)
         if fig.axes:
-            fig.axes[0].set_title(title)
+            fig.axes[0].set_title(title + _clip_suffix(clip_info))
     else:
         fig, axes = plt.subplots(
             len(base_methods),
@@ -578,32 +596,41 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
                 if not panel_records:
                     ax.set_axis_off()
                     continue
-                gantt_plot(panel_records, ax=ax)
+                kept, clip_info = clip_gantt_records(panel_records)
+                drawn.extend(kept)
+                if clip_info:
+                    clip_reports[f"{base_method}|{condition}"] = clip_info
+                gantt_plot(kept, ax=ax)
                 legend = ax.get_legend()
-                if legend is not None and len({r.method for r in panel_records}) <= 1:
+                if legend is not None and len({r.method for r in kept}) <= 1:
                     legend.remove()
                 title_parts = []
                 if show_base_methods:
                     title_parts.append(base_method)
                 if show_conditions:
                     title_parts.append("all conditions" if condition == "all" else condition.replace("_", " "))
-                ax.set_title(" | ".join(title_parts) if title_parts else title)
+                panel_title = " | ".join(title_parts) if title_parts else title
+                ax.set_title(panel_title + _clip_suffix(clip_info))
         fig.tight_layout()
-    omitted_methods = sorted({r.method for r in records if r.method not in {t.method for t in timed}})
+    # Hoist the timed-method set out of the comprehension: inlined it is
+    # rebuilt per record (O(N^2)) — at millions of records that alone runs
+    # for hours (part of the straggler finalize timeout).
+    timed_methods = {t.method for t in timed}
+    omitted_methods = sorted({r.method for r in records if r.method not in timed_methods})
     show_replicate = len({int(r.replicate) for r in timed}) > 1
     data = {
-        "method": [r.method for r in timed],
-        "base_method": [base_method_name(r.method) for r in timed],
-        "condition": [_condition_name(r.method) for r in timed],
-        "replicate": [r.replicate for r in timed],
-        "worker_id": [r.worker_id for r in timed],
+        "method": [r.method for r in drawn],
+        "base_method": [base_method_name(r.method) for r in drawn],
+        "condition": [_condition_name(r.method) for r in drawn],
+        "replicate": [r.replicate for r in drawn],
+        "worker_id": [r.worker_id for r in drawn],
         "lane_label": [
             f"rep {int(r.replicate)} | worker {r.worker_id}" if show_replicate else f"worker {r.worker_id}"
-            for r in timed
+            for r in drawn
         ],
-        "sim_start_time": [r.sim_start_time for r in timed],
-        "sim_end_time": [r.sim_end_time for r in timed],
-        "generation": [r.generation for r in timed],
+        "sim_start_time": [r.sim_start_time for r in drawn],
+        "sim_end_time": [r.sim_end_time for r in drawn],
+        "generation": [r.generation for r in drawn],
     }
     save_paths = save_figure(
         fig,
@@ -620,6 +647,7 @@ def plot_worker_gantt(records: List[ParticleRecord], output_dir: OutputDir) -> N
                 "omitted_methods": omitted_methods,
                 "base_methods": base_methods,
                 "conditions": conditions,
+                "gantt_clip_by_panel": clip_reports,
             },
         ),
     )

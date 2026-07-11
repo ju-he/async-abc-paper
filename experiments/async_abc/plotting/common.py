@@ -4,6 +4,7 @@ Each function creates a matplotlib figure, optionally annotates it, and
 delegates persistence to :func:`~async_abc.plotting.export.save_figure`.
 All functions return the dict produced by ``save_figure``.
 """
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -16,6 +17,8 @@ import numpy as np
 import pandas as pd
 
 from .export import save_figure
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -372,14 +375,59 @@ def compute_wasserstein(
 # Phase 3 figures
 # ---------------------------------------------------------------------------
 
-def gantt_plot(records, ax=None):
-    """Horizontal worker timeline using sim_start_time/sim_end_time metadata."""
+# Hard ceiling on rectangles drawn per gantt panel. A cheap-simulator run
+# accumulates millions of simulation_attempt records; drawing one bar per
+# record made the straggler finalize exceed a 6 h wall clock (matplotlib's
+# per-artist bookkeeping — see .plans/bug-fixes 2026-07-11 gantt entry) and
+# would produce an unreadable, hundreds-of-MB figure anyway. 20k bars keep a
+# panel readable and render in seconds.
+GANTT_MAX_INTERVALS = 20_000
+
+
+def clip_gantt_records(records, max_intervals: int | None = None):
+    """Clip timed gantt records to a leading wall-time window.
+
+    Returns ``(kept, clip_info)``. ``clip_info`` is ``None`` when everything
+    fits; otherwise ``{"total", "kept", "window_end_s"}`` and ``kept`` holds
+    the ``max_intervals`` earliest records by ``sim_start_time`` — a
+    contiguous leading window per run clock, because a gantt of scattered
+    subsamples would misrepresent worker occupancy. Callers must surface
+    ``clip_info`` (title suffix / metadata); never clip silently.
+    ``max_intervals`` defaults to :data:`GANTT_MAX_INTERVALS` at call time.
+    """
+    if max_intervals is None:
+        max_intervals = GANTT_MAX_INTERVALS
     timed = [
         record for record in records
         if record.worker_id is not None
         and record.sim_start_time is not None
         and record.sim_end_time is not None
     ]
+    if len(timed) <= max_intervals:
+        return timed, None
+    timed.sort(key=lambda record: float(record.sim_start_time))
+    kept = timed[:max_intervals]
+    clip_info = {
+        "total": len(timed),
+        "kept": len(kept),
+        "window_end_s": max(float(record.sim_end_time) for record in kept),
+    }
+    logger.info(
+        "gantt: clipping %d timed records to the first %d by sim_start_time "
+        "(window ends at %.1f s)",
+        clip_info["total"], clip_info["kept"], clip_info["window_end_s"],
+    )
+    return kept, clip_info
+
+
+def gantt_plot(records, ax=None):
+    """Horizontal worker timeline using sim_start_time/sim_end_time metadata.
+
+    Defensively clips to :data:`GANTT_MAX_INTERVALS` bars (annotated in the
+    panel title); pre-clip via :func:`clip_gantt_records` to control the
+    annotation yourself.
+    """
+    timed, clip_info = clip_gantt_records(records)
     created_fig = ax is None
     if ax is None:
         lane_count = len({(int(record.replicate), str(record.worker_id)) for record in timed})
@@ -411,14 +459,22 @@ def gantt_plot(records, ax=None):
     cmap = plt.get_cmap("tab10")
     method_colors = {method: cmap(i % 10) for i, method in enumerate(methods)}
 
+    # One broken_barh collection per (lane, method) instead of one barh
+    # artist per record: matplotlib's per-artist overhead makes the naive
+    # loop take hours at ~1e5+ records, while a collection of the same
+    # rectangles renders in seconds.
+    spans: Dict[tuple, List[tuple]] = {}
     for record in timed:
         lane = (int(record.replicate), str(record.worker_id))
-        ax.barh(
-            worker_to_y[lane],
-            float(record.sim_end_time) - float(record.sim_start_time),
-            left=float(record.sim_start_time),
-            height=0.7,
-            color=method_colors[record.method],
+        start = float(record.sim_start_time)
+        spans.setdefault((lane, record.method), []).append(
+            (start, float(record.sim_end_time) - start)
+        )
+    for (lane, method), xranges in spans.items():
+        ax.broken_barh(
+            xranges,
+            (worker_to_y[lane] - 0.35, 0.7),
+            facecolors=method_colors[method],
             alpha=0.85,
         )
 
@@ -434,7 +490,13 @@ def gantt_plot(records, ax=None):
     ax.set_yticklabels(worker_labels)
     ax.set_xlabel("wall-clock time")
     ax.set_ylabel("replicate | worker" if show_replicate else "worker")
-    ax.set_title("Worker timeline")
+    if clip_info:
+        ax.set_title(
+            f"Worker timeline (first {clip_info['window_end_s']:.0f} s, "
+            f"{clip_info['kept']:,}/{clip_info['total']:,} sims)"
+        )
+    else:
+        ax.set_title("Worker timeline")
 
     handles = [
         plt.Rectangle((0, 0), 1, 1, color=method_colors[method], alpha=0.85)
