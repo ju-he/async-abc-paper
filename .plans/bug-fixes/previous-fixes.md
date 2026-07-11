@@ -1,5 +1,47 @@
 # Previous Bug Fixes
 
+## 2026-07-11 — LV scaling OOM at packed 48/node: PER-COMBO memory, not cross-combo accumulation
+
+**Symptom:** Full-tier LV `scaling` jobs (14100319–324, wall_time_limit_s=900) fail: N=48 and N=144
+show one rank `Killed` (OOM) per srun step. Initially misdiagnosed as *cross-combo* accumulation
+("runner runs ~20 combos/job without freeing memory → OOM at ~combo 10").
+
+**Corrected diagnosis (from sacct + job log, do not repeat the wrong turn):** `scaling_single.sh`
+already isolates each (k, replicate) combo in its own srun process, so nothing persists across
+combos. sacct shows ALL 10 steps (= the full k∈{100,1000} × 5-rep grid) FAILED individually at
+~2–2.5 GB/task × 48 tasks > 94 GB, each ~100–165 s into its 900 s run. Every rank holds the full
+island history (all-to-all sync): at N=48/k=100 the island produces ~4,500 sims/s (~3,500 at
+k=1000, ~flat in N — N=144 filled its budget in the same wall time), and an LV individual costs
+~3.5–4 KB in memory (d=4; the earlier 2.2 KB figure was gaussian d=1). A 900 s run needs
+~3–4 M individuals ≈ 12–15 GB/rank — no partition supports that packed. Same faster-propagator
+(52f44e2) root cause as the 2026-07-08 entry; scaling cannot be spread (corrupts throughput).
+
+**Fix (user decision, config-only — frozen propulate commit untouched):** rescale the wall-time
+axis ÷5, preserving the 5-point budget grid: `wall_time_limit_s` 900→180,
+`wall_time_budgets_s` [60,120,300,600,900]→[12,24,60,120,180] in `scaling.json` +
+`scaling_fair_baseline.json` (+ `scaling_timing.json` 300→180 and `small/scaling.json` for tier
+consistency; `inference.max_wall_time_s` matched in each). Rationale: wall time is arbitrary —
+quality is determined by evaluation count, and the 1.54× faster propagator makes 180 s ≈ 277 s of
+old-propagator evals ≈ the previously-validated 300 s regime (~805 k evals/combo at N=48/k=100).
+Run on **mem192 packed 48/node `--exclusive`** (same 48 physical cores as batch → throughput
+valid; 3.75 GB/rank): predicted peak ~3.4 GB/task ≈ 8–10 % margin, validated by memtest before
+the full sweep (worst case N=48/k=100; job 14100336). CPM scaling (1800 s) unaffected — slow
+sims cap the history at ~150 MB/rank.
+
+**Supporting changes:** `submit_scaling.py` `--exclusive` flag (mandatory on mem192: without it a
+48-task job on a 96-CPU node gets a half-node memory slice — same trap as SBC 2026-07-10);
+`PROPULATE_DISABLE_CHECKPOINT=1` in `scaling_single.sh`/`scaling_packed.sh` (checkpoints never
+resume under per-combo isolation, crashed-combo checkpoints poison recomputes, and per-generation
+population pickling both distorts throughput and adds a multi-GB transient on the dumping rank).
+NOTE: `PROPULATE_DISABLE_CHECKPOINT` gates only dumping — checkpoint LOADING still happens if
+pickles exist, so never reuse an output dir that contains old `logs/propulate_*` checkpoint dirs
+(the failed `scaling_lv_20260711` dir is dead for this reason).
+
+**Files:** `experiments/configs/scaling.json`, `experiments/configs/scaling_fair_baseline.json`,
+`experiments/configs/scaling_timing.json`, `experiments/configs/small/scaling.json`,
+`experiments/jobs/submit_scaling.py`, `experiments/jobs/scaling_single.sh`,
+`experiments/jobs/scaling_packed.sh`
+
 ## 2026-07-08 — Rerun-campaign OOM: fast-sim benchmarks OOM-killed mid-run on 94 GB/48-rank batch nodes
 
 **Symptom:** In the review rerun campaign (frozen main@0aa1237 + propulate@e148f4f), Stage-1 shard jobs

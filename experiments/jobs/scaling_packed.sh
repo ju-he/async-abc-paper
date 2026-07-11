@@ -110,6 +110,11 @@ fi
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
+# Same rationale as scaling_single.sh: scaling runs never resume (a crashed
+# combo's checkpoint poisons the recompute) and the per-generation population
+# pickling distorts the throughput measurement.
+export PROPULATE_DISABLE_CHECKPOINT="${PROPULATE_DISABLE_CHECKPOINT:-1}"
+
 pids=()
 failed=0
 had_any_run=0

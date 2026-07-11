@@ -196,6 +196,7 @@ def _render_packed_script(
     extend: bool,
     account: str,
     partition: str,
+    exclusive: bool,
     time_limit: str,
     ntasks: int,
     job_name: str,
@@ -210,6 +211,12 @@ def _render_packed_script(
     if extend:
         flags.append("--extend")
     flag_str = " ".join(flags)
+    # --exclusive + --mem=0 grants the job the node's FULL memory. Without it,
+    # partitions with shared-node scheduling (mem192: 96 CPUs, 180 GB) give a
+    # job only a CPU-proportional memory slice — 48 tasks on a 96-CPU node =
+    # half the RAM. --mem=0 makes the whole-node memory grant explicit (the
+    # validated submit_replicate_shards.py recipe uses the same pair).
+    exclusive_line = "#SBATCH --exclusive\n#SBATCH --mem=0\n" if exclusive else ""
     return (
         f"#!/bin/bash -x\n"
         f"#SBATCH --account={account}\n"
@@ -219,6 +226,7 @@ def _render_packed_script(
         f"#SBATCH --threads-per-core=2\n"
         f"#SBATCH --time={time_limit}\n"
         f"#SBATCH --partition={partition}\n"
+        f"{exclusive_line}"
         f"#SBATCH --job-name={job_name}\n"
         f"#SBATCH --output={log_path}\n"
         f"\n"
@@ -243,6 +251,7 @@ def _render_standalone_script(
     extend: bool,
     account: str,
     partition: str,
+    exclusive: bool,
     time_limit: str,
     ntasks: int,
     nodes: int,
@@ -258,6 +267,7 @@ def _render_standalone_script(
     if extend:
         flags.append("--extend")
     flag_str = " ".join(flags)
+    exclusive_line = "#SBATCH --exclusive\n#SBATCH --mem=0\n" if exclusive else ""
     return (
         f"#!/bin/bash -x\n"
         f"#SBATCH --account={account}\n"
@@ -267,6 +277,7 @@ def _render_standalone_script(
         f"#SBATCH --threads-per-core=2\n"
         f"#SBATCH --time={time_limit}\n"
         f"#SBATCH --partition={partition}\n"
+        f"{exclusive_line}"
         f"#SBATCH --job-name={job_name}\n"
         f"#SBATCH --output={log_path}\n"
         f"\n"
@@ -365,6 +376,15 @@ def main() -> None:
         "--partition",
         default=None,
         help="SLURM partition (default: auto-detect from $SYSTEMNAME via _site.py).",
+    )
+    parser.add_argument(
+        "--exclusive",
+        action="store_true",
+        help=(
+            "Add '#SBATCH --exclusive' to every job. MANDATORY on shared-node "
+            "partitions (mem192): without it a 48-task job on a 96-CPU node "
+            "gets only a CPU-proportional (half-node) memory slice."
+        ),
     )
     args = parser.parse_args()
 
@@ -519,6 +539,7 @@ def main() -> None:
                 extend=args.extend,
                 account=args.account,
                 partition=args.partition,
+                exclusive=args.exclusive,
                 time_limit=time_str,
                 ntasks=CORES_PER_NODE,
                 job_name=job_name,
@@ -564,6 +585,7 @@ def main() -> None:
                 extend=args.extend,
                 account=args.account,
                 partition=args.partition,
+                exclusive=args.exclusive,
                 time_limit=time_str,
                 ntasks=n,
                 nodes=nodes,

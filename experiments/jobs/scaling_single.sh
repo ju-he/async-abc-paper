@@ -107,6 +107,14 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 # not an accumulating leak. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce the hang.
 export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
 
+# Checkpoints are useless AND harmful for scaling: each combo runs in its own
+# srun (below) so resume never applies; a crashed combo's checkpoint poisons
+# the recompute (resuming a crashed state re-triggers the crash); and dumping
+# pickles the FULL population (multi-GB on cheap-simulator combos) — a serial
+# stall that distorts the throughput measurement plus a same-size transient
+# allocation on the dumping rank that eats into the packed-node memory margin.
+export PROPULATE_DISABLE_CHECKPOINT="${PROPULATE_DISABLE_CHECKPOINT:-1}"
+
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
 # (k, replicate) combo. At >=48 ranks, sweeping many combos inside one
 # long-lived process makes the per-combo MPI_Comm_free hang in ParaStation
