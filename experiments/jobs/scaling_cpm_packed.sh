@@ -100,6 +100,10 @@ source "$nastjapy_path/.venv/bin/activate"
 mkdir -p "$output_dir"
 cp "$0" "$output_dir/" 2>/dev/null || true
 
+# See scaling_cpm_single.sh: scaling runs never resume and per-generation
+# population pickling distorts the throughput measurement.
+export PROPULATE_DISABLE_CHECKPOINT="${PROPULATE_DISABLE_CHECKPOINT:-1}"
+
 pids=()
 failed=0
 had_any_run=0

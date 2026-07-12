@@ -674,26 +674,38 @@ class TestCellularPotts:
         }
         assert param_values == pytest.approx(denormalize_cpm_params(public_params))
 
-    def test_simulate_returns_nan_on_simulation_failure(self, cpm_config, cpm_mocks):
-        """Simulation runtime error → float('nan'), not re-raised exception."""
+    def test_simulate_returns_inf_on_simulation_failure(self, cpm_config, cpm_mocks):
+        """Simulation runtime error → float('inf') (failed sim = infinitely-bad
+        discrepancy), not a re-raised exception and not NaN (which the ABCPMC
+        crash-loudly guard rejects, aborting the run)."""
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         mock_sim.run_simulation.side_effect = RuntimeError("NAStJA crashed")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
-        assert math.isnan(result)
+        assert result == float("inf")
 
-    def test_simulate_returns_nan_on_distance_failure(self, cpm_config, cpm_mocks):
-        """Distance computation failure → float('nan'), eval dir still removed."""
+    def test_simulate_returns_inf_on_distance_failure(self, cpm_config, cpm_mocks):
+        """Distance computation failure → float('inf'), eval dir still removed."""
         from async_abc.benchmarks.cellular_potts import CellularPotts
         mock_sim, mock_dist = cpm_mocks
         sim_dir = Path(mock_sim.build_simulation_config.return_value).parent
         mock_dist.calculate_distance.side_effect = ValueError("feature extraction failed")
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
-        assert math.isnan(result)
+        assert result == float("inf")
         assert not sim_dir.exists()
         mock_sim.cleanup_simdir.assert_called_once()
+
+    def test_simulate_maps_nan_distance_to_inf(self, cpm_config, cpm_mocks):
+        """A NaN distance from the metric is mapped to inf so the ABCPMC
+        loss guard does not abort the run on a degenerate feature vector."""
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+        mock_sim, mock_dist = cpm_mocks
+        mock_dist.calculate_distance.return_value = float("nan")
+        bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
+        result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
+        assert result == float("inf")
 
     def test_simulate_cleanup_called_even_on_distance_failure(self, cpm_config, cpm_mocks):
         """The eval directory is always deleted, even when distance fails."""
@@ -726,7 +738,7 @@ class TestCellularPotts:
         bm = CellularPotts(cpm_config, _sim_manager=mock_sim, _distance_metric=mock_dist)
         result = bm.simulate({"division_rate": 0.1, "motility": 0.2}, seed=0)
 
-        assert math.isnan(result)
+        assert result == float("inf")
         assert len(created_paths) == 1
         assert not created_paths[0].exists()
         mock_sim.cleanup_simdir.assert_called_once()

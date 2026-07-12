@@ -1,5 +1,46 @@
 # Previous Bug Fixes
 
+## 2026-07-12 — CPM scaling crash: NaN-loss contract mismatch between two review fixes
+
+**Symptom:** `scaling_cpm` jobs (14102673-679) crash ~60% of combos 3-15 min in with
+`ValueError: ABCPMC received an individual with loss=nan` (exit 1, NOT OOM/timeout —
+MaxRSS ~900 MB/task). Surviving combos complete fine (~1 h). The `cellular_potts` QUALITY
+benchmark (same NAStJA simulator) was unaffected — zero NaNs in its run — so this is specific
+to the scaling sweep's wider/longer parameter exploration.
+
+**Root cause — contract mismatch between two independently-added frozen-commit fixes:**
+1. `cellular_potts.py::simulate()` returns `float("nan")` on a NAStJA simulation/scoring failure
+   BY DESIGN (documented contract; keeps a `_nan_counter` + warns only above a 15 % failure rate —
+   i.e. occasional failed sims were always expected to be TOLERATED).
+2. The crash-loudly `_check_loss` guard in the frozen propagator (`abcpmc.py`) RAISES on any NaN
+   loss (`loss != loss`).
+A combo runs thousands of evals over 1800 s, so a SINGLE failed NAStJA run anywhere aborts the
+whole combo — hence ~60 % combo loss despite a low per-sim failure rate. The crash-loudly review
+fix silently broke the CPM benchmark's "NaN = tolerated failed sim" contract.
+
+**Fix:** `cellular_potts.py::simulate()` now returns `float("inf")` (not `nan`) on
+simulation/scoring failure, and maps a NaN distance result to `inf`. A failed simulation is, in
+ABC terms, an infinitely-bad discrepancy: the `_check_loss` guard EXPLICITLY allows `inf` ("a
+failed simulation is an infinitely bad discrepancy"), and `inf` is excluded from every archive
+(`loss < tol` is False) exactly as the old `nan` was — so archive/proposal/throughput semantics are
+IDENTICAL to the pre-crash-loudly behaviour the paper's original CPM runs used, but the run no
+longer aborts. Crash-loudly stays meaningful: a genuine NaN from a real bug elsewhere still raises.
+Localized to the CPM benchmark — does NOT touch the frozen propulate commit, does NOT change the
+completed `cellular_potts` benchmark (zero NaNs there → byte-identical), only CPM scaling re-runs.
+
+**Also:** added `PROPULATE_DISABLE_CHECKPOINT=1` to `scaling_cpm_single.sh` / `scaling_cpm_packed.sh`
+(the LV wrappers already had it; the CPM ones were missed — the crashed combos wrote poison
+checkpoints, so the old `scaling_cpm/` dir was moved aside to `_scaling_cpm_CRASHED_20260712` and
+the sweep resubmitted fresh: jobs 14103005-011).
+
+**Files:** `experiments/async_abc/benchmarks/cellular_potts.py`,
+`experiments/jobs/scaling_cpm_single.sh`, `experiments/jobs/scaling_cpm_packed.sh`,
+`experiments/tests/test_benchmarks.py` (nan→inf assertions + `test_simulate_maps_nan_distance_to_inf`).
+
+**Lesson:** when adding a crash-loudly guard on a value, audit every producer of that value for an
+existing "sentinel = tolerated" contract. A benchmark that returns NaN-on-failure and a guard that
+raises-on-NaN are individually reasonable and jointly fatal.
+
 ## 2026-07-11 — straggler finalize "merge timeout" was TWO quadratic paths in the worker gantt
 
 **Symptom:** the standalone straggler finalize (`finalize_shards.py`, 9.7 GB raw_results across 5

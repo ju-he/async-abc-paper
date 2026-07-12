@@ -567,8 +567,14 @@ class CellularPotts:
         The NAStJA random seed is injected as an extra parameter alongside the
         inference parameters so every call is reproducible.
 
-        Returns ``float('nan')`` on simulation or scoring failure rather than
-        raising, matching the contract expected by all inference methods.
+        Returns ``float('inf')`` on simulation or scoring failure rather than
+        raising. A failed simulation is, in ABC terms, an infinitely-bad
+        discrepancy: ``inf`` is excluded from every archive (``loss < tol`` is
+        False) exactly as a rejected sample should be, yet the ABCPMC
+        ``_check_loss`` guard accepts it — whereas ``nan`` is rejected by that
+        guard (crash-loudly), so a single failed NAStJA run would otherwise
+        abort a whole scaling combo. ``inf`` is behaviourally identical to the
+        old ``nan`` for archive selection but keeps the run alive.
 
         Parameters
         ----------
@@ -580,7 +586,7 @@ class CellularPotts:
         Returns
         -------
         float
-            ABC distance (lower is better). ``nan`` on failure.
+            ABC distance (lower is better). ``inf`` on failure.
         """
         from simulation.simulation_config import Parameter, ParameterList
 
@@ -628,10 +634,10 @@ class CellularPotts:
             _restore_default_fp_state()
             self._nan_counter += 1
             self._warn_if_high_nan_rate()
-            return float("nan")
+            return float("inf")
 
         # --- compute distance ---
-        score = float("nan")
+        score = float("inf")
         try:
             distance_result = self._distance_metric.calculate_distance(sim_dir)
             score = float(distance_result)
@@ -643,9 +649,13 @@ class CellularPotts:
             self._cleanup_eval_dir(sim_dir)
             _restore_default_fp_state()
 
+        # A NaN distance (e.g. a degenerate feature vector) is treated as a
+        # failed score: map it to inf so the ABCPMC crash-loudly guard does not
+        # abort the run. The counter still tracks it as a failed evaluation.
         if score != score:  # isnan without importing math
             self._nan_counter += 1
             self._warn_if_high_nan_rate()
+            score = float("inf")
         return score
 
     def _warn_if_high_nan_rate(self) -> None:

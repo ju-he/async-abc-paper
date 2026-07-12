@@ -95,6 +95,11 @@ cp "$0" "$output_dir/" 2>/dev/null || true
 # it robust. Set PROPULATE_SKIP_DISCONNECT=0 to reproduce.
 export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
 
+# Disable checkpointing (see scaling_single.sh): each combo runs in its own
+# srun so resume never applies, a crashed combo's checkpoint would poison the
+# recompute, and dumping the full population distorts the throughput timing.
+export PROPULATE_DISABLE_CHECKPOINT="${PROPULATE_DISABLE_CHECKPOINT:-1}"
+
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
 # (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. CPM's slow
 # sims keep message volume low so it has not hit the pscom teardown hang, but
