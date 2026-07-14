@@ -101,10 +101,17 @@ export PROPULATE_SKIP_DISCONNECT="${PROPULATE_SKIP_DISCONNECT:-1}"
 export PROPULATE_DISABLE_CHECKPOINT="${PROPULATE_DISABLE_CHECKPOINT:-1}"
 
 # One srun (a fresh MPI world, hence a single Propulate MPI_Comm_free) per
-# (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. CPM's slow
-# sims keep message volume low so it has not hit the pscom teardown hang, but
-# isolating combos keeps it robust as the grid grows. Aggregates rebuilt at end.
+# (k, replicate) combo — see scaling_single.sh / .plans/bug-fixes. At high
+# worker counts (>=2 nodes) CPM DOES intermittently hit a pscom teardown hang
+# in the async->baseline handoff (observed w96/w384, 2026-07-13): the hung step
+# runs past its 1800s method budget and, without a step cap, blocks every later
+# combo until the JOB wall — one hang cost ~12h and lost 6+ combos. Cap each
+# step's wall so a hung teardown is killed (SIGTERM->non-zero) and the loop
+# advances to the next combo instead. A healthy combo is ~70 min (async 1800s +
+# baseline + teardown); the cap is generous above that. Tune via
+# SCALING_CPM_STEP_TIMEOUT_MIN. Missing combos are refilled by a later --extend.
 runner="$experiments_dir/scripts/scaling_cpm_runner.py"
+step_timeout_min="${SCALING_CPM_STEP_TIMEOUT_MIN:-120}"
 
 # Read the (k, replicate) grid into an array FIRST, then loop. Do NOT feed the
 # grid into a `while read ... done < <(...)` loop: srun reads stdin and swallows
@@ -122,7 +129,10 @@ status=0
 for combo in "${combos[@]}"; do
     [ -z "$combo" ] && continue
     read -r k rep <<< "$combo"
-    srun -n "$n_workers" python "$runner" \
+    # --time caps THIS step's wall (SLURM kills a hung teardown and srun returns
+    # non-zero -> the loop continues). --kill-on-bad-exit is irrelevant here (one
+    # task set per step); the point is the step-level time limit.
+    srun -n "$n_workers" --time="$step_timeout_min" python "$runner" \
         --config "$config_path" \
         --output-dir "$output_dir" \
         --n-workers "$n_workers" \
