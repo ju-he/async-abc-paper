@@ -9,6 +9,28 @@ This plan covers **Tier 0 + Tier 1** in actionable detail (mostly text + one sma
 experiment). Tier 2/3 are previewed at the end and will get their own plan once the
 positioning question is settled.
 
+---
+## STATUS (2026-07-15, in progress)
+**DONE + committed** (7e2b0d6, ff8ecc8, dc4a961): Tier 0 (all: T0.1–T0.5); T1.1 (estimator
+honesty + measured cost ~20 min/0.3 GB at n≈3e7); T1.2 (weight-lifecycle paragraph); T1.3;
+T1.4; T1.6 (computing environment); T1.8 (Table 1).
+**T1.9 DONE (surprising result):** the no-AMIS coupling run (jobs 14109310–313) shows the
+async posterior-mean error is comparable **with and without AMIS** (~0.005–0.013, no coupling
+trend). Root cause: the reported quality metric is the **unweighted top-k archive**
+(posterior_weight is all-zero / not persisted in raw_results), so it does **not** reflect AMIS
+reweighting at all — converging with internal §4.2. Rewrote param-bias §6 + Limitation (iv)
+honestly: dropped "AMIS weights cancel the over-representation"; the raw archive is robust at
+these levels rather than AMIS correcting it. **This pushes the *proper* concern-5 test into
+Tier 2:** (a) a weighted-posterior quality metric (internal II.4.2 — compute the reweighted
+posterior's mean/variance/tails, not the unweighted archive), and (b) a drain-after-deadline
+re-run (the current raw_results dropped post-deadline records, so the censoring test can't be
+done post-hoc — needs a no-deadline-filter runner variant).
+**REMAINING Tier 1 (writing follow-ups):** T1.5 (App B benchmark specs — priors gathered:
+gaussian μ~U(-5,5); g-and-k limits A(0,6) B(0.1,4) g/k ...; summaries+distances captured; LV/CPM
+priors still to transcribe) and T1.7 (related-work breadth — needs citation verification, no
+fabrication).
+---
+
 ## Framing note (why Tier 0 is cheap)
 
 The abstract, contribution 5 (tex:50), and conclusion (tex:353) **already** state the honest
