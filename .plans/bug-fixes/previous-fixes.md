@@ -1,5 +1,31 @@
 # Previous Bug Fixes
 
+## 2026-07-15 — parameter_bias sharded merge crash: missing finalizer-registry entries
+
+**Symptom:** the `parameter_bias` compute run (jobs 14107933-936) — its 4 shards' compute
+all finished, but the trailing auto-finalize (shard 0) crashed with
+`ValueError: No shard finalizer registered for experiment_name='parameter_bias'`
+(`shard_finalizers.py:568`), so no merged `parameter_bias/data` was produced.
+
+**Root cause:** review II.8.6 added `parameter_bias` to `EXPERIMENT_REGISTRY`
+(`run_all_paper_experiments.py`) so it could be *submitted*, but missed the two
+experiment-name-keyed registries the *sharded finalize* path consults:
+`_FINALIZER_REGISTRY` (`shard_finalizers.py`) and `_COMPLETED_REPLICATES_REGISTRY`
+(`sharding.py`). parameter_bias uses the `runtime_heterogeneity_runner` and produces the
+identical output structure, so it needs the same finalizer/completed-replicates functions
+as `runtime_heterogeneity`.
+
+**Fix:** register `"parameter_bias": finalize_runtime_heterogeneity_experiment` in
+`_FINALIZER_REGISTRY` and `"parameter_bias": _completed_replicates_runtime_heterogeneity`
+in `_COMPLETED_REPLICATES_REGISTRY`. Deployed byte-exact, then re-ran the merge with
+`finalize_shards.py --experiment parameter_bias --run-id run_20260715_075959 --num-shards 4
+--force` (36 s; the runtime_heterogeneity finalizer is small — no OOM). Shard compute was
+untouched, so no recompute was needed.
+
+**Lesson:** when adding an experiment to `EXPERIMENT_REGISTRY`, audit the *other*
+name-keyed registries (finalizer, completed-replicates, replot) — a submittable experiment
+whose finalizer is unregistered runs to completion and then dies at the merge.
+
 ## 2026-07-12 — CPM scaling crash: NaN-loss contract mismatch between two review fixes
 
 **Symptom:** `scaling_cpm` jobs (14102673-679) crash ~60% of combos 3-15 min in with
