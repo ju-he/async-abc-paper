@@ -552,6 +552,7 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "straggler": finalize_straggler_experiment,
     "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,
     "parameter_bias": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias_no_amis": finalize_runtime_heterogeneity_experiment,
     "sbc": finalize_sbc_experiment,
 }
 

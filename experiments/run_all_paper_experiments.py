@@ -95,6 +95,8 @@ EXPERIMENT_REGISTRY = {
     # Parameter-coupled runtime bias (paper Fig. fig_param_bias) reuses the
     # heterogeneity runner with its own config (review II.8.6).
     "parameter_bias": ("runtime_heterogeneity_runner.py", "parameter_bias.json"),
+    # No-AMIS arm of the coupling study (external review concern 5): amis_snapshots=0.
+    "parameter_bias_no_amis": ("runtime_heterogeneity_runner.py", "parameter_bias_no_amis.json"),
     "scaling": ("scaling_runner.py", "scaling.json"),
     "scaling_cpm": ("scaling_cpm_runner.py", "scaling_cpm.json"),
     "sensitivity": ("sensitivity_runner.py", "sensitivity.json"),
