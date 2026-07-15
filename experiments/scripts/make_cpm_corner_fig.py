@@ -1,48 +1,93 @@
 #!/usr/bin/env python3
 """Cellular Potts posterior corner (fig_cpm_corner.pdf).
 
-Dedicated replot so the CPM posterior corner follows the same house style as the other
-figures: async = blue, sync = red, rejection = green (the reporter default drew async in
-orange, which did not match the rest of the paper), with readable legend labels instead
-of the raw method keys. Reference values are drawn as dashed lines.
+Joint distribution of the two Cellular-Potts parameters (division rate, motility)
+for each method, plus their two marginals. The joint shows a broad, diagonal
+weak-identifiability ridge: motility is fairly well constrained near its truth
+while the division rate is only weakly identified for every method.
 
-Note on sample counts: the async posterior in this run is represented by only n=14 points
-against n=500 for the sync/rejection baselines (shown in the legend). The async cloud is
-therefore sparse but tightly concentrated on motility near its reference; the division
-rate is weakly identified for every method. Reads corner_data.csv; no re-derivation.
+Data (only touched with ``--refresh``):
+
+* ``cellular_potts/plots/corner_data.csv`` supplies the synchronous and rejection
+  posteriors (n=500 each).
+* ``cellular_potts/data/raw_results.csv`` supplies the asynchronous posterior:
+  ``corner_data.csv`` carries no async rows because the generic final-state
+  extractor hard-cuts on the tolerance and async drove the tolerance far below
+  the sync baseline (leaving only a handful of points). Instead we resample the
+  async posterior from its actual AMIS ``posterior_weight`` estimator over the
+  full history, drawing :data:`N_ASYNC_RESAMPLE` points to match the baselines.
+
+The vendored ``corner_samples.csv`` is exactly the plotted point cloud (method,
+division_rate, motility) for all three methods, so the default path redraws
+without touching the 57 MB raw file.
+
+Styling via async_abc.plotting.paper_style (Type-42, Okabe-Ito, print width).
+Review §5.2 (CVD): the synchronous (vermillion) and rejection (green) methods are
+a red/green pair, so they are additionally separated by marker shape (joint
+scatter), contour linestyle (joint density) and line style (marginals) — legible
+in grayscale and for colorblind readers.
 """
 from __future__ import annotations
+
+import argparse
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 from scipy.stats import gaussian_kde
 
-CSV = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "cellular_potts/plots/corner_data.csv")
-# Raw per-particle records, used to reconstruct the async posterior from its actual
-# reported estimator (AMIS posterior_weight) instead of the hard tolerance cut that the
-# generic final-state extractor applies (that cut leaves only n=14 async points because
-# async drove the tolerance far lower than the sync baseline).
-RAW = ("/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/"
-       "cellular_potts/data/raw_results.csv")
-N_ASYNC_RESAMPLE = 500          # match the sync/rejection final-population size
-RESAMPLE_SEED = 20260701
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_corner.pdf"
+import _figdata as fd
+from async_abc.plotting import paper_style as ps
+
+ORDER = ["async_propulate_abc", "abc_smc_baseline", "rejection_abc"]
+KEY = {
+    "async_propulate_abc": "async",
+    "abc_smc_baseline": "sync",
+    "rejection_abc": "rejection",
+}
+# contour() wants named linestyles, not the "-"/"--"/":" plot() aliases.
+_LS_NAME = {"-": "solid", "--": "dashed", ":": "dotted", "-.": "dashdot"}
 
 REF = {"division_rate": 0.049905, "motility": 0.2}
-STYLE = {
-    "async_propulate_abc": dict(label="Asynchronous (ours)", color="#1f77b4"),
-    "abc_smc_baseline":    dict(label="Synchronous baseline", color="#d62728"),
-    "rejection_abc":       dict(label="Rejection ABC",        color="#2ca02c"),
-}
-ORDER = ["async_propulate_abc", "abc_smc_baseline", "rejection_abc"]
-GRID = np.linspace(0.0, 1.0, 256)
+N_ASYNC_RESAMPLE = 500          # match the sync/rejection final-population size
+RESAMPLE_SEED = 20260701
+GRID = np.linspace(0.0, 1.0, 256)          # 1-D marginal grid
+_G2 = np.linspace(0.0, 1.0, 120)           # 2-D joint-density grid
 
 
-def _kde(x):
+def _async_amis_posterior(raw: pd.DataFrame) -> pd.DataFrame:
+    """Resample the async posterior from its AMIS posterior_weight over the full history."""
+    a = raw[raw["method"] == "async_propulate_abc"]
+    w = a["posterior_weight"].to_numpy(float)
+    ok = np.isfinite(w) & (w > 0)
+    a, w = a[ok], w[ok]
+    w = w / w.sum()
+    idx = np.random.default_rng(RESAMPLE_SEED).choice(len(a), size=N_ASYNC_RESAMPLE, p=w)
+    s = a.iloc[idx]
+    return pd.DataFrame({
+        "method": "async_propulate_abc",
+        "division_rate": s["param_division_rate"].to_numpy(),
+        "motility": s["param_motility"].to_numpy(),
+    })
+
+
+def aggregate(root: Path):
+    """Return the plotted point cloud: method, division_rate, motility (n=500 each)."""
+    cp = root / "cellular_potts"
+    df = pd.read_csv(cp / "plots" / "corner_data.csv")   # sync + rejection posteriors
+    df = df[df["method"] != "async_propulate_abc"]       # drop any hard-cut async points
+    raw = pd.read_csv(cp / "data" / "raw_results.csv")   # async lives only here
+    df = pd.concat([df, _async_amis_posterior(raw)], ignore_index=True)
+    df = df[["method", "division_rate", "motility"]]
+    df["method"] = pd.Categorical(df["method"], categories=ORDER, ordered=True)
+    return {"corner_samples": df.sort_values("method").reset_index(drop=True)}
+
+
+def _kde1(x):
     x = np.asarray(x, float)
     if len(x) < 2 or np.ptp(x) < 1e-9:
         return None
@@ -52,58 +97,63 @@ def _kde(x):
         return None
 
 
-def _async_amis_posterior():
-    """Resample the async posterior from its AMIS posterior_weight over the full history."""
-    raw = pd.read_csv(RAW)
-    a = raw[raw["method"] == "async_propulate_abc"].copy()
-    w = a["posterior_weight"].to_numpy(float)
-    ok = np.isfinite(w) & (w > 0)
-    a, w = a[ok], w[ok]
-    w = w / w.sum()
-    idx = np.random.default_rng(RESAMPLE_SEED).choice(len(a), size=N_ASYNC_RESAMPLE, p=w)
-    s = a.iloc[idx]
-    return pd.DataFrame({"method": "async_propulate_abc",
-                         "division_rate": s["param_division_rate"].to_numpy(),
-                         "motility": s["param_motility"].to_numpy()})
+def _kde2(x, y):
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    if len(x) < 5 or np.ptp(x) < 1e-9 or np.ptp(y) < 1e-9:
+        return None
+    try:
+        kde = gaussian_kde(np.vstack([x, y]))
+    except np.linalg.LinAlgError:
+        return None
+    xx, yy = np.meshgrid(_G2, _G2)
+    z = kde(np.vstack([xx.ravel(), yy.ravel()])).reshape(xx.shape)
+    return xx, yy, z
 
 
-def main() -> None:
-    df = pd.read_csv(CSV)
-    # Replace the hard-cut async points (n=14) with a draw from the AMIS posterior.
-    df = pd.concat([df[df["method"] != "async_propulate_abc"], _async_amis_posterior()],
-                   ignore_index=True)
+def draw(frames):
+    df = frames["corner_samples"]
     counts = {m: int((df["method"] == m).sum()) for m in ORDER}
 
-    plt.rcParams.update({"font.size": 11, "axes.labelsize": 12, "legend.fontsize": 10})
-    fig, axes = plt.subplots(2, 2, figsize=(6.6, 6.4),
+    fig, axes = plt.subplots(2, 2, figsize=ps.fig_size(0.62, aspect=0.9),
                              gridspec_kw={"wspace": 0.08, "hspace": 0.08})
     ax_d, ax_leg = axes[0]
     ax_j, ax_m = axes[1]
 
     for m in ORDER:
         sub = df[df["method"] == m]
-        c = STYLE[m]["color"]
-        # division-rate marginal (top-left)
-        k = _kde(sub["division_rate"])
-        if k is not None:
-            ax_d.plot(GRID, k, color=c, lw=1.6)
-            ax_d.fill_between(GRID, k, color=c, alpha=0.12, linewidth=0)
-        # motility marginal (bottom-right)
-        k = _kde(sub["motility"])
-        if k is not None:
-            ax_m.plot(GRID, k, color=c, lw=1.6)
-            ax_m.fill_between(GRID, k, color=c, alpha=0.12, linewidth=0)
-        # joint scatter (bottom-left). Async is sparse, so draw it last and larger.
-        big = m == "async_propulate_abc"
-        ax_j.scatter(sub["division_rate"], sub["motility"], s=26 if big else 9,
-                     color=c, alpha=0.85 if big else 0.35,
-                     edgecolor="white" if big else "none", linewidth=0.4, zorder=3 if big else 2)
+        k = KEY[m]
+        color = ps.COLORS[k]
+        ls = ps.LINESTYLES[k]
+        marker = ps.MARKERS[k]
 
-    # reference lines
-    ax_d.axvline(REF["division_rate"], color="0.35", ls="--", lw=1.0)
-    ax_m.axvline(REF["motility"], color="0.35", ls="--", lw=1.0)
-    ax_j.axvline(REF["division_rate"], color="0.35", ls="--", lw=1.0)
-    ax_j.axhline(REF["motility"], color="0.35", ls="--", lw=1.0)
+        # division-rate marginal (top-left) — distinct linestyle per method.
+        yk = _kde1(sub["division_rate"])
+        if yk is not None:
+            ax_d.plot(GRID, yk, color=color, ls=ls, lw=1.3)
+            ax_d.fill_between(GRID, yk, color=color, alpha=0.10, linewidth=0)
+        # motility marginal (bottom-right).
+        yk = _kde1(sub["motility"])
+        if yk is not None:
+            ax_m.plot(GRID, yk, color=color, ls=ls, lw=1.3)
+            ax_m.fill_between(GRID, yk, color=color, alpha=0.10, linewidth=0)
+
+        # joint (bottom-left): scatter with a distinct MARKER, then a KDE contour
+        # with a distinct LINESTYLE — two redundant, color-independent encodings.
+        ax_j.scatter(sub["division_rate"], sub["motility"], s=7, marker=marker,
+                     color=color, alpha=0.30, edgecolor="none", zorder=2)
+        kde2 = _kde2(sub["division_rate"], sub["motility"])
+        if kde2 is not None:
+            xx, yy, z = kde2
+            ax_j.contour(xx, yy, z, levels=np.array([0.35, 0.7]) * z.max(),
+                         colors=color, linestyles=_LS_NAME[ls], linewidths=1.1,
+                         alpha=0.95, zorder=4)
+
+    # reference values.
+    ref_kw = dict(color=ps.COLORS["reference"], ls=(0, (5, 3)), lw=0.8, alpha=0.7, zorder=1)
+    ax_d.axvline(REF["division_rate"], **ref_kw)
+    ax_m.axvline(REF["motility"], **ref_kw)
+    ax_j.axvline(REF["division_rate"], **ref_kw)
+    ax_j.axhline(REF["motility"], **ref_kw)
 
     for ax in (ax_d, ax_j, ax_m):
         ax.set_xlim(0, 1)
@@ -114,17 +164,45 @@ def main() -> None:
     ax_j.set_xlabel("division rate")
     ax_j.set_ylabel("motility")
     ax_m.set_xlabel("motility")
+    for ax in (ax_d, ax_j, ax_m):
+        ax.grid(True, ls=":", lw=0.4, alpha=0.5)
 
-    # legend (top-right cell), with honest per-method sample counts
+    # legend in the empty top-right cell; markers + linestyles carry the method
+    # identity in grayscale, honest per-method sample counts alongside.
     ax_leg.axis("off")
-    handles = [plt.Line2D([0], [0], color=STYLE[m]["color"], lw=2.4,
-                          label=f"{STYLE[m]['label']}  (n={counts[m]})") for m in ORDER]
-    handles.append(plt.Line2D([0], [0], color="0.35", ls="--", lw=1.0, label="reference value"))
-    ax_leg.legend(handles=handles, loc="center", frameon=False, borderaxespad=0.0)
+    handles = [
+        Line2D([0], [0], color=ps.COLORS[KEY[m]], marker=ps.MARKERS[KEY[m]],
+               ls=ps.LINESTYLES[KEY[m]], lw=1.3, markersize=5,
+               label=f"{ps.LABELS[KEY[m]]}\n(n={counts[m]})")
+        for m in ORDER
+    ]
+    handles.append(Line2D([0], [0], **{**ref_kw, "alpha": 1.0}, label="reference value"))
+    ax_leg.legend(handles=handles, loc="center", frameon=False,
+                  borderaxespad=0.0, handlelength=1.8, labelspacing=1.0)
 
-    fig.savefig(OUT, bbox_inches="tight")
-    print(f"wrote {OUT}")
-    print("sample counts:", counts)
+    return fig
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    fd.add_refresh_arg(parser)
+    args = parser.parse_args()
+    ps.apply()
+
+    if args.refresh is not None:
+        frames = aggregate(Path(args.refresh))
+        vendor = frames
+    else:
+        frames = fd.load_vendored("fig_cpm_corner")
+        vendor = None
+
+    fig = draw(frames)
+    saved = ps.save_paper_figure(fig, "fig_cpm_corner", data=vendor)
+    print(f"wrote {saved['pdf']}")
+    if vendor is not None:
+        for k, v in saved.items():
+            if k.startswith("csv:"):
+                print(f"  vendored {v}")
 
 
 if __name__ == "__main__":

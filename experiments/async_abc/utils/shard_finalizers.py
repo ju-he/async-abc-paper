@@ -551,6 +551,7 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "amis_snapshot_sweep": finalize_ablation_experiment,
     "straggler": finalize_straggler_experiment,
     "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias": finalize_runtime_heterogeneity_experiment,
     "sbc": finalize_sbc_experiment,
 }
 

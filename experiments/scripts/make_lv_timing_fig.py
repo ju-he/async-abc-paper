@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
-"""Decompose asynchronous worker time on Lotka--Volterra strong scaling (fig_lv_timing.pdf).
+"""Where asynchronous worker time goes on Lotka--Volterra scaling (fig_lv_timing.pdf).
 
 Backs the \\S7.2 claim that a near-instantaneous simulator leaves per-arrival
-coordination dominant: for each worker count we split aggregate worker wall-time into
-(i) simulation, (ii) per-arrival proposal/AMIS reconstruction, and (iii) the residual
-coordination + idle (MPI exchange, serialization, waiting). The split is measured, not
-inferred -- simulation time from the per-attempt event spans in raw_results, proposal
-time from the env-gated phase-timing log (ASYNC_ABC_PHASE_TIMING=1), and coordination
-as the residual wall - sim - proposal.
+coordination dominant: for each worker count the aggregate worker wall-time is
+split into (i) productive simulation and (ii) coordination + idle (MPI exchange,
+per-arrival proposal/AMIS reconstruction, serialization, waiting). The productive
+fraction is the measured ``worker_utilization`` (share of worker wall-clock spent
+inside the simulator); the remainder is coordination + idle.
 
-Data: dedicated instrumented async-only run scaling_timing_20260629 (k=100, 300 s,
-3 replicates), worker counts 16/48/128/256 = 1/1/3/6 nodes (48 cores/node). The
-productive (simulation) fraction collapses from ~9% to <1% as the job scales, and the
-coordination residual crosses 95% once the job spans multiple nodes -- a property of
-coordinating a near-instantaneous simulator, not of the algorithm.
+Data: the instrumented async-only Lotka--Volterra timing sweep
+(``_scaling_timing``; k=100, worker counts 16/48/128/256 = 1/1/3/6 nodes at
+48 cores/node). The productive fraction collapses from ~55% to ~2% as the job
+scales and coordination overwhelmingly dominates once the job spans multiple
+nodes -- a property of coordinating a near-instantaneous simulator, not of the
+algorithm.
+
+Note: this rerun's timing run did not emit the per-arrival phase-timing log, so
+the previous three-way (simulation / proposal / coordination) split is reduced to
+this two-way productive-vs-coordination split; the collapse of the productive
+fraction is unchanged. Default draws from the vendored CSV; ``--refresh``
+re-derives it. Styling via async_abc.plotting.paper_style.
 """
 from __future__ import annotations
 
-import glob
-import os
+import argparse
+from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
@@ -26,73 +32,80 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-DATA = "/home/juhe/remotes/scratch/herold2/async-abc/scaling_timing_20260629/scaling/data"
-OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_lv_timing.pdf"
+import _figdata as fd
+from async_abc.plotting import paper_style as ps
+
+FIG = "fig_lv_timing"
 WORKERS = [16, 48, 128, 256]
 NODES = {16: 1, 48: 1, 128: 3, 256: 6}  # 48 cores / node
 
 
-def _decompose(w: int):
-    """Aggregate (sim, proposal, coordination+idle) fractions of worker wall-time."""
-    pt = pd.concat(
-        [pd.read_csv(f) for f in glob.glob(f"{DATA}/phase_timing_w{w}_k100_rep*_rank*.csv")],
-        ignore_index=True,
-    )
-    rr = pd.read_csv(
-        f"{DATA}/raw_results_w{w}_k100.csv",
-        usecols=["sim_start_time", "sim_end_time"],
-    )
-    sim_s = float((rr["sim_end_time"] - rr["sim_start_time"]).sum())
-    prop_s = float(pt["proposal_s"].sum())
-    wall_s = float(pt["wall_s"].sum())
-    coord_s = wall_s - sim_s - prop_s
-    if coord_s < 0:
-        raise ValueError(f"w{w}: negative coordination residual ({coord_s:.1f}s)")
-    return np.array([sim_s, prop_s, coord_s]) / wall_s
+def aggregate(root: Path):
+    data = root / "_scaling_timing" / "scaling" / "data"
+    rows = []
+    for w in WORKERS:
+        df = pd.read_csv(data / f"throughput_summary_w{w}_k100.csv")
+        a = df[df["base_method"] == "async_propulate_abc"]
+        productive = float(a["worker_utilization"].mean())
+        rows.append(dict(n_workers=w, nodes=NODES[w],
+                         productive_fraction=productive,
+                         coordination_fraction=1.0 - productive))
+    return {"lv_timing": pd.DataFrame(rows)}
 
 
-def main() -> None:
-    frac = np.array([_decompose(w) for w in WORKERS])  # rows: sim, prop, coord
-
-    plt.rcParams.update({"font.size": 13, "axes.labelsize": 14, "legend.fontsize": 12})
-    fig, ax = plt.subplots(figsize=(6.4, 4.4))
-
+def draw(frames):
+    df = frames["lv_timing"].set_index("n_workers").reindex(WORKERS)
     x = np.arange(len(WORKERS))
-    labels = ["simulation", "proposal / AMIS reconstruction", "coordination + idle (MPI, wait)"]
-    colors = ["#2ca02c", "#1f77b4", "#bcbcbc"]
-    bottom = np.zeros(len(WORKERS))
-    for j, (lab, c) in enumerate(zip(labels, colors)):
-        ax.bar(x, 100 * frac[:, j], bottom=100 * bottom, width=0.62, color=c,
-               label=lab, edgecolor="white", linewidth=0.6)
-        bottom += frac[:, j]
+    prod = df["productive_fraction"].to_numpy() * 100
+    coord = df["coordination_fraction"].to_numpy() * 100
 
-    # annotate the productive (simulation) fraction on each bar
-    for i, f in enumerate(frac[:, 0]):
-        ax.annotate(f"{100 * f:.1f}%", xy=(x[i], 100 * f), xytext=(0, 3),
+    fig, ax = plt.subplots(figsize=ps.fig_size(0.66, aspect=0.72))
+    ax.bar(x, prod, width=0.62, color=ps.COLORS["async"], edgecolor="white",
+           linewidth=0.6, label="productive simulation")
+    ax.bar(x, coord, width=0.62, bottom=prod, color=ps.COLORS["neutral"],
+           edgecolor="white", linewidth=0.6, hatch="//",
+           label="coordination + idle (MPI, proposal, wait)")
+    for i, p in enumerate(prod):
+        ax.annotate(f"{p:.1f}%", xy=(x[i], p), xytext=(0, 2),
                     textcoords="offset points", ha="center", va="bottom",
-                    fontsize=10, color="#1a661a", fontweight="bold")
+                    fontsize=6, color=ps.COLORS["async"], fontweight="bold")
 
     # single-node -> multi-node boundary sits between 48 (1 node) and 128 (3 nodes)
-    ax.axvline(1.5, color="0.45", lw=1.0, ls="--", zorder=0)
-    ax.annotate("single node $\\to$ multi-node", xy=(1.5, 50), xytext=(1.62, 50),
-                fontsize=10, color="0.35", rotation=90, va="center", ha="left")
+    ax.axvline(1.5, color=ps.COLORS["reference"], lw=0.8, ls="--", zorder=5)
+    ax.annotate("single node $\\to$ multi-node", xy=(1.5, 52), xytext=(1.6, 52),
+                fontsize=6, color=ps.COLORS["reference"], rotation=90,
+                va="center", ha="left")
 
     ax.set_xticks(x)
     ax.set_xticklabels([f"{w}\n({NODES[w]} node{'s' if NODES[w] > 1 else ''})" for w in WORKERS])
     ax.set_xlabel("workers (48 cores / node)")
     ax.set_ylabel("share of worker wall-time (%)")
     ax.set_ylim(0, 100)
-    ax.set_title("Lotka--Volterra: where asynchronous worker time goes ($k{=}100$)")
-    ax.legend(frameon=True, facecolor="white", framealpha=0.92, edgecolor="0.8",
-              loc="upper left", bbox_to_anchor=(0.015, 0.985))
-    ax.margins(x=0.04)
-
+    ax.legend(frameon=True, facecolor="white", framealpha=0.9, edgecolor="0.8",
+              loc="upper right", fontsize=6)
     fig.tight_layout()
-    fig.savefig(OUT, bbox_inches="tight")
-    print(f"wrote {OUT}")
-    print(f"{'w':>4} {'nodes':>5} {'sim%':>6} {'prop%':>6} {'coord%':>7}")
-    for i, w in enumerate(WORKERS):
-        print(f"{w:>4} {NODES[w]:>5} {100*frac[i,0]:>5.1f} {100*frac[i,1]:>5.1f} {100*frac[i,2]:>6.1f}")
+    return fig
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    fd.add_refresh_arg(parser)
+    args = parser.parse_args()
+    ps.apply()
+
+    if args.refresh is not None:
+        frames = aggregate(Path(args.refresh))
+        vendor = frames
+    else:
+        frames = fd.load_vendored(FIG)
+        vendor = None
+
+    fig = draw(frames)
+    saved = ps.save_paper_figure(fig, FIG, data=vendor)
+    print(f"wrote {saved['pdf']}")
+    for _, r in frames["lv_timing"].iterrows():
+        print(f"  w={int(r['n_workers']):>3} ({int(r['nodes'])} node): "
+              f"productive {100*r['productive_fraction']:.1f}%")
 
 
 if __name__ == "__main__":
