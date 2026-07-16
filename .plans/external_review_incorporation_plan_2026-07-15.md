@@ -245,23 +245,48 @@ coupling). We have the infrastructure live (`parameter_bias` just ran).
    absolute wording ("exactly", "bit-identical" reason, "never dominates", "PMC lacks CLTs");
    claim re-check that the body now matches the abstract's honest framing.
 
-## Tier 2 / Tier 3 preview (separate plan after the positioning call)
+## TIER 2 — experiments that defend the core claims (compute approved)
 
-- **Tier 2 (moderate compute, defends the core causal claim):**
-  - **Barrierized twin (concern 4):** a batched version of *our* algorithm (identical proposals,
-    deterministic kernel weights, archive, estimator; updates only after batches of N) as the
-    principal systems control, so the systems delta is attributable to the barrier alone. Likely a
-    propagator/runner variant → frozen-commit change → re-validate + targeted reruns. Highest-value
-    new experiment; biggest cost.
-  - **Kill-and-resume experiment (concern 7):** actual crash mid-run + resume; show the reported
-    estimator matches. Backs the crash-recoverable claim empirically.
-  - **Multidim / multimodal SBC (concern 6):** at least one nonlinear multidimensional and one
-    multimodal target (top-k archive is vulnerable to mode loss); add ESS / max-normalized-weight
-    / weight-tail diagnostics.
-- **Tier 3 (hard / venue-dependent):**
-  - A complete theorem with explicit CLT rate and asymptotic variance for the *actual* algorithm,
-    formalized with the defensive prior mixture δπ+(1−δ)q_n (concern 1). Only if targeting a
-    theory venue; otherwise Tier 0's honest scoping stands.
+Recommended order: T2.1 (continues the concern-5 thread) → T2.2 → T2.3 → T2.4 (needs a
+design go/no-go). All except T2.4 leave the frozen propagator algorithm unchanged.
+
+**T2.1 — Proper concern-5 test: weighted-posterior metric + drain-after-deadline.**
+The Tier-1 ablation showed the *unweighted archive* mean is AMIS-insensitive; the proper test
+needs the reweighted posterior and the censoring measurement.
+- (a) Diagnose why `posterior_weight` is all-zero in the coupling runs' `raw_results` (computed
+  but not persisted? not computed for these configs?). Fix persistence if that's the gap.
+- (b) Weighted-posterior metric (internal II.4.2): resample the archive by `posterior_weight`,
+  compute posterior mean / variance / quantiles / a coverage proxy, per (method, σ), for AMIS vs
+  no-AMIS. Tests whether the reweighting changes the posterior (esp. tails) under coupling.
+- (c) Drain variant: add a runner flag that, at the deadline, lets in-flight simulations finish
+  and recomputes the posterior; re-run the coupling sweep. Posterior movement = deadline
+  censoring. Frozen propagator untouched (persistence + finalize + a drain flag + analysis).
+- Compute: small (coupling sweeps). Rewrite param-bias / Limitation (iv) from the result.
+
+**T2.2 — Kill-and-resume (concern 7).** Start a Gaussian run, kill it partway, resume, and show
+the reported estimator matches a clean run (or is a valid trajectory). First map the resume path
+(PROPULATE checkpoint vs history-replay; the campaign set `PROPULATE_DISABLE_CHECKPOINT=1` for
+scaling — check the non-scaling default). Report the estimator diff. Small compute; proves the
+crash-recoverable/stateless headline claim empirically.
+
+**T2.3 — Multidim / multimodal SBC (concern 6).** The top-k archive is vulnerable to mode loss.
+Add (i) a multimodal target with a known posterior (e.g. a Gaussian-mixture mean) and (ii) run
+SBC on an existing multidim target (g-and-k). SBC-1000 coverage + rank histogram + ESS /
+max-normalized-weight / weight-tail diagnostics. Moderate compute (SBC-1000 on new targets);
+new benchmark + SBC config.
+
+**T2.4 — Barrierized twin (concern 4) [DESIGN GO/NO-GO before building].** A batched version of
+*our* propagator: identical proposals, kernel weights, archive, and estimator, but updates held
+until batches of N arrivals (a barrier every N) on the same async infrastructure — so async vs
+twin differ *only* in the barrier, isolating synchronization. Biggest item: a frozen-propagator
+variant + reruns (straggler, heterogeneity, scaling) + re-validation. **Present the design +
+cost and get a go/no-go**; fallback if declined = weaken the "synchronization-only" causal
+language in §5/§7 (cheap text).
+
+## TIER 3 (hard / venue-dependent)
+A complete theorem with explicit CLT rate and asymptotic variance for the *actual* algorithm,
+formalized with the defensive prior mixture δπ+(1−δ)q_n (concern 1). Only if targeting a theory
+venue; otherwise Tier 0's honest scoping stands.
 
 ## Open decisions blocking Tier 2/3 (need author input)
 
