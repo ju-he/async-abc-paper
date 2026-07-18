@@ -24,6 +24,7 @@ from ..reporting import (
     compute_idle_fraction as _compute_idle_fraction,
     normalize_runtime_utilization_summary,
     write_gaussian_analytic_summary,
+    write_gaussian_weighted_posterior_summary,
 )
 from ..analysis import (
     benchmark_plot_audit,
@@ -3849,6 +3850,14 @@ def plot_benchmark_diagnostics(
         _write_lotka_tol_init_diagnostic(records, cfg=cfg, output_dir=output_dir)
     if benchmark_cfg.get("name") == "gaussian_mean":
         write_gaussian_analytic_summary(
+            records,
+            cfg=cfg,
+            output_dir=output_dir,
+            archive_size=archive_size,
+        )
+        # Reweighted-posterior metric (review concern 5, T2.1b): the AMIS-sensitive
+        # companion to the unweighted archive mean above.
+        write_gaussian_weighted_posterior_summary(
             records,
             cfg=cfg,
             output_dir=output_dir,

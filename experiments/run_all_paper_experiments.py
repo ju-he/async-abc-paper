@@ -97,6 +97,12 @@ EXPERIMENT_REGISTRY = {
     "parameter_bias": ("runtime_heterogeneity_runner.py", "parameter_bias.json"),
     # No-AMIS arm of the coupling study (external review concern 5): amis_snapshots=0.
     "parameter_bias_no_amis": ("runtime_heterogeneity_runner.py", "parameter_bias_no_amis.json"),
+    # T2.1 concern-5 completion: drain-after-deadline (censoring test) + a steeper
+    # runtime-coupling regime with its own AMIS-on/off + drain variants.
+    "parameter_bias_drain": ("runtime_heterogeneity_runner.py", "parameter_bias_drain.json"),
+    "parameter_bias_strong": ("runtime_heterogeneity_runner.py", "parameter_bias_strong.json"),
+    "parameter_bias_strong_no_amis": ("runtime_heterogeneity_runner.py", "parameter_bias_strong_no_amis.json"),
+    "parameter_bias_strong_drain": ("runtime_heterogeneity_runner.py", "parameter_bias_strong_drain.json"),
     "scaling": ("scaling_runner.py", "scaling.json"),
     "scaling_cpm": ("scaling_cpm_runner.py", "scaling_cpm.json"),
     "sensitivity": ("sensitivity_runner.py", "sensitivity.json"),

@@ -8,6 +8,7 @@ The ``heterogeneity`` config block accepts either a scalar ``sigma`` (single
 variance level) or a list ``sigma_levels`` (sweep over multiple levels).
 In test mode the sleep is skipped so the pipeline completes quickly.
 """
+import dataclasses
 import logging
 import multiprocessing
 import os
@@ -23,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from async_abc.io.config import get_run_mode, is_small_mode, is_test_mode, load_config
 from async_abc.io.paths import OutputDir
-from async_abc.io.records import ParticleRecord
 from async_abc.reporting import runtime_performance_summary
 from async_abc.utils.logging_utils import configure_logging
 from async_abc.utils.metadata import write_metadata
@@ -315,23 +315,12 @@ def main(argv: list[str] | None = None) -> None:
                             benchmark=bm,
                             extend=False,
                             replicate_indices=[replicate_idx],
-                            record_transform=lambda record, sigma=sigma: ParticleRecord(
-                                method=f"{record.method}__sigma{sigma}",
-                                replicate=record.replicate,
-                                seed=record.seed,
-                                step=record.step,
-                                params=record.params,
-                                loss=record.loss,
-                                weight=record.weight,
-                                tolerance=record.tolerance,
-                                wall_time=record.wall_time,
-                                worker_id=record.worker_id,
-                                sim_start_time=record.sim_start_time,
-                                sim_end_time=record.sim_end_time,
-                                generation=record.generation,
-                                record_kind=record.record_kind,
-                                time_semantics=record.time_semantics,
-                                attempt_count=record.attempt_count,
+                            # dataclasses.replace copies *every* field and only
+                            # overrides ``method`` — a hand-maintained field list
+                            # here previously dropped ``posterior_weight`` silently
+                            # (external review concern 5, T2.1a).
+                            record_transform=lambda record, sigma=sigma: dataclasses.replace(
+                                record, method=f"{record.method}__sigma{sigma}"
                             ),
                         )
                     )
@@ -405,23 +394,10 @@ def main(argv: list[str] | None = None) -> None:
                 benchmark=bm,
                 extend=args.extend,
                 replicate_indices=[replicate_idx],
-                record_transform=lambda record, sigma=sigma: ParticleRecord(
-                    method=f"{record.method}__sigma{sigma}",
-                    replicate=record.replicate,
-                    seed=record.seed,
-                    step=record.step,
-                    params=record.params,
-                    loss=record.loss,
-                    weight=record.weight,
-                    tolerance=record.tolerance,
-                    wall_time=record.wall_time,
-                    worker_id=record.worker_id,
-                    sim_start_time=record.sim_start_time,
-                    sim_end_time=record.sim_end_time,
-                    generation=record.generation,
-                    record_kind=record.record_kind,
-                    time_semantics=record.time_semantics,
-                    attempt_count=record.attempt_count,
+                # dataclasses.replace copies *every* field and only overrides
+                # ``method`` (see the shard-path note above).
+                record_transform=lambda record, sigma=sigma: dataclasses.replace(
+                    record, method=f"{record.method}__sigma{sigma}"
                 ),
             )
             all_records.extend(records)

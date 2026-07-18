@@ -1,6 +1,9 @@
 """Reporting helpers shared by runners and plotting."""
 
-from .benchmark_reports import write_gaussian_analytic_summary
+from .benchmark_reports import (
+    write_gaussian_analytic_summary,
+    write_gaussian_weighted_posterior_summary,
+)
 from .plot_metadata import benchmark_plot_metadata, load_run_metadata, nonbenchmark_plot_metadata
 from .runtime_summary import (
     compute_idle_fraction,
@@ -20,4 +23,5 @@ __all__ = [
     "runtime_utilization_rows",
     "straggler_performance_summary_row",
     "write_gaussian_analytic_summary",
+    "write_gaussian_weighted_posterior_summary",
 ]

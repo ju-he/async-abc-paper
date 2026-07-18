@@ -552,6 +552,15 @@ def run_propulate_abc(
     # ``posterior_weight`` (the throughput/scaling sweeps) set this False; the
     # weights remain recomputable offline from the saved history if ever needed.
     compute_posterior_weights = bool(inference_cfg.get("compute_posterior_weights", True))
+    # Drain-after-deadline (review concern 5, deadline censoring). When True the
+    # post-deadline population filter below is DISABLED: simulations that were
+    # in flight when the wall-clock deadline passed are allowed to count (each
+    # Propulate worker is synchronous per-arrival, so exactly the mid-flight
+    # simulation per worker completes and is retained). Comparing the posterior
+    # from a drained run against the default censored run isolates the
+    # deadline-censoring effect that the AMIS proposal-density correction does
+    # not address. Default False = the reported (censored) semantics.
+    drain_after_deadline = bool(inference_cfg.get("drain_after_deadline", False))
     # Pass extra scheduler kwargs if present. low_rate/expand_factor were
     # removed from AcceptanceRateScheduler (the rule never expands ε) and
     # must not be forwarded — doing so raises TypeError at construction
@@ -702,13 +711,26 @@ def run_propulate_abc(
     # posterior weighting or record building (review II.9.5): semantics
     # identical to a hard job abort, and the retroactive estimator must not
     # normalise over — nor build its mixture denominator from — particles
-    # that do not count.
-    if max_wall_time_s is not None:
+    # that do not count. The drain-after-deadline variant (concern 5) skips
+    # this filter so the in-flight completions are retained and the censoring
+    # effect can be measured against the default censored run.
+    if max_wall_time_s is not None and not drain_after_deadline:
         population = [
             ind for ind in population
             if getattr(ind, "evaltime", None) is None
             or (float(ind.evaltime) - run_start) <= max_wall_time_s
         ]
+    elif max_wall_time_s is not None and drain_after_deadline:
+        n_drained = sum(
+            1 for ind in population
+            if getattr(ind, "evaltime", None) is not None
+            and (float(ind.evaltime) - run_start) > max_wall_time_s
+        )
+        logger.info(
+            "drain_after_deadline=True: retaining %d in-flight completion(s) past "
+            "the %.1fs deadline (deadline-censoring measurement).",
+            n_drained, float(max_wall_time_s),
+        )
     # Retroactive AMIS posterior weights. This is the estimator the paper's
     # consistency + CLT are stated for: every particle reweighted against the
     # cumulative proposal mixture, reconstructed from history (off the timed

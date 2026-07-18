@@ -553,6 +553,10 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "runtime_heterogeneity": finalize_runtime_heterogeneity_experiment,
     "parameter_bias": finalize_runtime_heterogeneity_experiment,
     "parameter_bias_no_amis": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias_drain": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias_strong": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias_strong_no_amis": finalize_runtime_heterogeneity_experiment,
+    "parameter_bias_strong_drain": finalize_runtime_heterogeneity_experiment,
     "sbc": finalize_sbc_experiment,
 }
 
