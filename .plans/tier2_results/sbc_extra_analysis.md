@@ -58,6 +58,64 @@ param  n_trials  ess_frac_median  ess_frac_p05  max_w_median  max_w_p95  top1pct
     g      1000           0.8126        0.6841        0.0327     0.1555               0.0412
     k      1000           0.8126        0.6841        0.0327     0.1555               0.0412
 
+## sbc_gandk_2x
+
+### Coverage with binomial 95% CI (nominal_in_ci = calibrated at that level)
+
+             method param  coverage_level  empirical_coverage  ci_lo  ci_hi  nominal_in_ci
+   abc_smc_baseline     A           0.500               0.508  0.464  0.552           True
+   abc_smc_baseline     A           0.800               0.808  0.773  0.843           True
+   abc_smc_baseline     A           0.900               0.884  0.856  0.912           True
+   abc_smc_baseline     A           0.950               0.942  0.922  0.962           True
+   abc_smc_baseline     B           0.500               0.428  0.385  0.471          False
+   abc_smc_baseline     B           0.800               0.722  0.683  0.761          False
+   abc_smc_baseline     B           0.900               0.830  0.797  0.863          False
+   abc_smc_baseline     B           0.950               0.892  0.865  0.919          False
+   abc_smc_baseline     g           0.500               0.482  0.438  0.526           True
+   abc_smc_baseline     g           0.800               0.768  0.731  0.805           True
+   abc_smc_baseline     g           0.900               0.898  0.871  0.925           True
+   abc_smc_baseline     g           0.950               0.946  0.926  0.966           True
+   abc_smc_baseline     k           0.500               0.492  0.448  0.536           True
+   abc_smc_baseline     k           0.800               0.748  0.710  0.786          False
+   abc_smc_baseline     k           0.900               0.850  0.819  0.881          False
+   abc_smc_baseline     k           0.950               0.902  0.876  0.928          False
+async_propulate_abc     A           0.500               0.492  0.448  0.536           True
+async_propulate_abc     A           0.800               0.774  0.737  0.811           True
+async_propulate_abc     A           0.900               0.848  0.817  0.879          False
+async_propulate_abc     A           0.950               0.890  0.863  0.917          False
+async_propulate_abc     B           0.500               0.438  0.395  0.481          False
+async_propulate_abc     B           0.800               0.712  0.672  0.752          False
+async_propulate_abc     B           0.900               0.796  0.761  0.831          False
+async_propulate_abc     B           0.950               0.834  0.801  0.867          False
+async_propulate_abc     g           0.500               0.468  0.424  0.512           True
+async_propulate_abc     g           0.800               0.752  0.714  0.790          False
+async_propulate_abc     g           0.900               0.848  0.817  0.879          False
+async_propulate_abc     g           0.950               0.886  0.858  0.914          False
+async_propulate_abc     k           0.500               0.488  0.444  0.532           True
+async_propulate_abc     k           0.800               0.738  0.699  0.777          False
+async_propulate_abc     k           0.900               0.812  0.778  0.846          False
+async_propulate_abc     k           0.950               0.860  0.830  0.890          False
+
+### Rank uniformity (chi-square, 20 bins)
+
+             method param  n_trials      chi2  uniformity_p  uniform_ok
+   abc_smc_baseline     A       500   29.4400        0.0594        True
+   abc_smc_baseline     B       500   37.6000        0.0067       False
+   abc_smc_baseline     g       500   12.5600        0.8603        True
+   abc_smc_baseline     k       500   33.1200        0.0233       False
+async_propulate_abc     A       500  281.4400        0.0000       False
+async_propulate_abc     B       500  283.7600        0.0000       False
+async_propulate_abc     g       500  357.5200        0.0000       False
+async_propulate_abc     k       500  375.6000        0.0000       False
+
+### Async importance-weight health (per-trial, aggregated)
+
+param  n_trials  ess_frac_median  ess_frac_p05  max_w_median  max_w_p95  top1pct_mass_median
+    A       500           0.8118        0.6667        0.0372     0.1697               0.0425
+    B       500           0.8118        0.6667        0.0372     0.1697               0.0425
+    g       500           0.8118        0.6667        0.0372     0.1697               0.0425
+    k       500           0.8118        0.6667        0.0372     0.1697               0.0425
+
 ## sbc_bimodal
 
 ### Coverage with binomial 95% CI (nominal_in_ci = calibrated at that level)

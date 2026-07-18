@@ -125,7 +125,7 @@ def main() -> None:
         lines.append(s)
 
     emit("# SBC extra diagnostics (concern 6): multidim + multimodal\n")
-    for exp in ["sbc_gandk", "sbc_bimodal"]:
+    for exp in ["sbc_gandk", "sbc_gandk_2x", "sbc_bimodal"]:
         d = root / exp / "data"
         if not (d / "coverage.csv").exists():
             emit(f"## {exp}: MISSING\n")
