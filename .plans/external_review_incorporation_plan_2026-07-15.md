@@ -275,7 +275,7 @@ SBC on an existing multidim target (g-and-k). SBC-1000 coverage + rank histogram
 max-normalized-weight / weight-tail diagnostics. Moderate compute (SBC-1000 on new targets);
 new benchmark + SBC config.
 
-**T2.4 — Barrierized twin (concern 4) [DESIGN GO/NO-GO before building].** A batched version of
+**T2.4 — Barrierized twin (concern 4) [POSTPONED 2026-07-18 by user — do NOT build without a fresh go-ahead; if the causal claim needs shoring up before then, weaken the "synchronization-only" wording in §5/§7 instead].** A batched version of
 *our* propagator: identical proposals, kernel weights, archive, and estimator, but updates held
 until batches of N arrivals (a barrier every N) on the same async infrastructure — so async vs
 twin differ *only* in the barrier, isolating synchronization. Biggest item: a frozen-propagator
