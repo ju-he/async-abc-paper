@@ -286,7 +286,11 @@ def main() -> None:
             raise SystemExit(f"Unknown experiment: {experiment_name}")
         if experiment_name == "scaling":
             raise SystemExit("Scaling remains on submit_scaling.py and is not supported here.")
-        if args.add_replicates and experiment_name == "sbc":
+        # SBC-family experiments (sbc, sbc_gandk, sbc_bimodal, ...) shard by trial;
+        # all others shard by replicate. The sbc_runner itself always builds a
+        # trial-unit plan, so the family test only needs to match the runner.
+        is_sbc_family = experiment_name == "sbc" or experiment_name.startswith("sbc_")
+        if args.add_replicates and is_sbc_family:
             raise SystemExit("--add-replicates is only supported for replicate-based experiments, not sbc")
 
         runner_name, config_name = run_all.EXPERIMENT_REGISTRY[experiment_name]
@@ -296,7 +300,7 @@ def main() -> None:
         full_cfg = load_config(config_path, test_mode=False, small_mode=False)
         actual_cfg = load_config(config_path, test_mode=args.test, small_mode=args.small)
         run_mode = compose_run_mode("small" if args.small else "full", args.test)
-        unit_kind = "trial" if experiment_name == "sbc" else "replicate"
+        unit_kind = "trial" if is_sbc_family else "replicate"
         full_units = int(full_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(full_cfg["execution"]["n_replicates"])
         actual_units = int(actual_cfg["sbc"]["n_trials"]) if unit_kind == "trial" else int(actual_cfg["execution"]["n_replicates"])
         if extend_mode:

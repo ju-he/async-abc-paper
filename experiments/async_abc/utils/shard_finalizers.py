@@ -558,6 +558,8 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "parameter_bias_strong_no_amis": finalize_runtime_heterogeneity_experiment,
     "parameter_bias_strong_drain": finalize_runtime_heterogeneity_experiment,
     "sbc": finalize_sbc_experiment,
+    "sbc_gandk": finalize_sbc_experiment,
+    "sbc_bimodal": finalize_sbc_experiment,
 }
 
 

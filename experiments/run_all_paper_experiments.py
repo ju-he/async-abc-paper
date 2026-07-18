@@ -90,6 +90,9 @@ EXPERIMENT_REGISTRY = {
     "lotka_volterra": ("lotka_volterra_runner.py", "lotka_volterra.json"),
     "cellular_potts": ("cellular_potts_runner.py", "cellular_potts.json"),
     "sbc": ("sbc_runner.py", "sbc.json"),
+    # Multidim (g-and-k) + multimodal (bimodal) SBC for external-review concern 6.
+    "sbc_gandk": ("sbc_runner.py", "sbc_gandk.json"),
+    "sbc_bimodal": ("sbc_runner.py", "sbc_bimodal.json"),
     "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),
     # Parameter-coupled runtime bias (paper Fig. fig_param_bias) reuses the
