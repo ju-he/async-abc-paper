@@ -27,7 +27,7 @@ VALID_SCHEDULER_TYPES = {"quantile", "geometric_decay", "acceptance_rate"}
 # rejection; "gaussian" and "epanechnikov" are smooth-kernel variants.
 VALID_KERNELS = {"hard", "gaussian", "epanechnikov"}
 
-VALID_BENCHMARK_NAMES = {"gaussian_mean", "gandk", "lotka_volterra", "cellular_potts"}
+VALID_BENCHMARK_NAMES = {"gaussian_mean", "bimodal_mean", "gandk", "lotka_volterra", "cellular_potts"}
 
 # Extra required benchmark keys when name == "cellular_potts"
 CPM_REQUIRED_BENCHMARK_KEYS = [

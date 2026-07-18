@@ -1,11 +1,13 @@
 """Benchmark model registry."""
 from .gaussian_mean import GaussianMean
+from .bimodal_mean import BimodalMean
 from .gandk import GandK
 from .lotka_volterra import LotkaVolterra
 from .cellular_potts import CellularPotts
 
 _REGISTRY = {
     "gaussian_mean": GaussianMean,
+    "bimodal_mean": BimodalMean,
     "gandk": GandK,
     "lotka_volterra": LotkaVolterra,
     "cellular_potts": CellularPotts,
