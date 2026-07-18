@@ -1,0 +1,31 @@
+{
+  "config": "/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/configs/kill_resume_gaussian.json",
+  "ranks": 4,
+  "analytic_posterior_mean": -0.05026961148385782,
+  "analytic_posterior_std": 0.1,
+  "clean": {
+    "n_records": 120000,
+    "archive_size": 100,
+    "unweighted_mean": -0.05108657475498923,
+    "weighted_mean": -0.049523286369729545,
+    "weighted_var": 0.009974291553179094
+  },
+  "resumed": {
+    "n_records": 120000,
+    "archive_size": 100,
+    "unweighted_mean": -0.04369724244575455,
+    "weighted_mean": -0.04262433591013674,
+    "weighted_var": 0.00611397042476229
+  },
+  "interrupt": {
+    "checkpoints_before_kill": [
+      "/tmp/killresume/interrupted/kill_resume_gaussian/logs/propulate_rep0_seed1654615998/island_0_ckpt.pickle",
+      "/tmp/killresume/interrupted/kill_resume_gaussian/logs/propulate_rep0_seed1654615998/island_0_ckpt.bkp"
+    ],
+    "n_checkpoints_before_kill": 2,
+    "raw_results_existed_before_kill": false
+  },
+  "clean_mean_abs_error": 0.0007463251141282753,
+  "resumed_mean_abs_error": 0.007645275573721078,
+  "clean_vs_resumed_weighted_mean_diff": 0.006898950459592802
+}
