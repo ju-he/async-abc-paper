@@ -79,6 +79,7 @@ def _posterior_samples(
     *,
     archive_size: int | None = None,
     full_history: bool = False,
+    report_size: int | None = None,
     seed: int = 0,
     n_out: int = 2000,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -90,15 +91,19 @@ def _posterior_samples(
     legacy records that do not carry it.
 
     ``full_history=False`` (default) reports the top-$k$ archive. ``full_history=True``
-    instead reports the AMIS estimator over the \emph{entire} evaluated history:
-    it resamples ``n_out`` particles from all records by ``posterior_weight`` and
-    returns them equal-weighted, so the posterior's support includes the tail
-    particles the top-$k$ truncation drops. This tests whether the top-$k$
-    truncation (not the AMIS weighting) drives the higher-dimensional
-    under-coverage (external review concern 6 follow-up).
+    reports the AMIS estimator over a broader support: the ``report_size`` lowest-
+    discrepancy records (or the \emph{entire} evaluated history when ``report_size``
+    is ``None``), resampled to ``n_out`` particles by ``posterior_weight`` and
+    returned equal-weighted. Sweeping ``report_size`` from the archive size to the
+    full history sweeps the reported posterior's dispersion between the (over-
+    confident) top-$k$ core and the (over-dispersed) full smooth-ABC posterior,
+    isolating the truncation knob behind the higher-dimensional calibration
+    (external review concern 6 follow-up).
     """
     if full_history:
         param_records = [r for r in records if param_name in r.params]
+        if report_size is not None and len(param_records) > int(report_size):
+            param_records = sorted(param_records, key=lambda r: float(r.loss))[: int(report_size)]
         samples = np.asarray([r.params[param_name] for r in param_records], dtype=float)
         weights = np.asarray([_posterior_weight_of(r) for r in param_records], dtype=float)
         weights = np.where(np.isfinite(weights) & (weights >= 0.0), weights, 0.0)
@@ -187,21 +192,22 @@ def _extend_trial_records(
     records,
     archive_size: int | None,
     posterior_support: str = "archive",
+    posterior_report_size: int | None = None,
 ) -> bool:
     """Append per-param trial records to *target*.
 
     Returns True on success.  Returns False (dropout) if any parameter has no
     posterior samples — a warning is logged and nothing is appended.
     """
-    # The full-history posterior only applies to the async method (it is the one
-    # carrying the retroactive AMIS ``posterior_weight`` over an evaluated
+    # The full-history / top-M posterior only applies to the async method (it is
+    # the one carrying the retroactive AMIS ``posterior_weight`` over an evaluated
     # history); the synchronous baseline keeps its natural final-population posterior.
     use_full = posterior_support == "full_history" and method == "async_propulate_abc"
     param_data = []
     for param in param_names:
         samples, weights = _posterior_samples(
             records, param, archive_size=archive_size,
-            full_history=use_full, seed=int(trial_idx),
+            full_history=use_full, report_size=posterior_report_size, seed=int(trial_idx),
         )
         if samples.size == 0:
             logger.warning(
@@ -362,6 +368,9 @@ def main(argv: list[str] | None = None) -> None:
             # Reported-posterior support: "archive" (top-k, default) or
             # "full_history" (resample the whole evaluated history by AMIS weight).
             posterior_support = cfg.get("sbc", {}).get("posterior_support", "archive")
+            # Optional reporting truncation for full_history mode: report the top-M
+            # lowest-discrepancy records (None = the entire history).
+            posterior_report_size = cfg.get("sbc", {}).get("posterior_report_size")
             base_benchmark = make_benchmark(bench_cfg_entry)
             param_names = list(base_benchmark.limits.keys())
 
@@ -405,6 +414,7 @@ def main(argv: list[str] | None = None) -> None:
                         records=records,
                         archive_size=bench_archive_size,
                         posterior_support=posterior_support,
+                        posterior_report_size=posterior_report_size,
                     ):
                         trial_dropouts.setdefault(bench_name, {})
                         trial_dropouts[bench_name][method] = trial_dropouts[bench_name].get(method, 0) + 1
@@ -463,6 +473,7 @@ def main(argv: list[str] | None = None) -> None:
                                 records=records,
                                 archive_size=bench_archive_size,
                                 posterior_support=posterior_support,
+                                posterior_report_size=posterior_report_size,
                             ):
                                 my_dropout_counts.setdefault(bench_name, {})
                                 my_dropout_counts[bench_name][method] = my_dropout_counts[bench_name].get(method, 0) + 1
