@@ -98,6 +98,8 @@ EXPERIMENT_REGISTRY = {
     "sbc_gandk_fullhist": ("sbc_runner.py", "sbc_gandk_fullhist.json"),
     "sbc_gandk_topm500": ("sbc_runner.py", "sbc_gandk_topm500.json"),
     "sbc_gandk_topm1500": ("sbc_runner.py", "sbc_gandk_topm1500.json"),
+    "sbc_gaussian_fullhist": ("sbc_runner.py", "sbc_gaussian_fullhist.json"),
+    "sbc_bimodal_fullhist": ("sbc_runner.py", "sbc_bimodal_fullhist.json"),
     "sbc_bimodal": ("sbc_runner.py", "sbc_bimodal.json"),
     "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),

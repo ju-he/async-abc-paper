@@ -563,6 +563,8 @@ _FINALIZER_REGISTRY: Dict[str, Any] = {
     "sbc_gandk_fullhist": finalize_sbc_experiment,
     "sbc_gandk_topm500": finalize_sbc_experiment,
     "sbc_gandk_topm1500": finalize_sbc_experiment,
+    "sbc_gaussian_fullhist": finalize_sbc_experiment,
+    "sbc_bimodal_fullhist": finalize_sbc_experiment,
     "sbc_bimodal": finalize_sbc_experiment,
 }
 
