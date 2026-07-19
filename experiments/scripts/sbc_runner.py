@@ -78,14 +78,38 @@ def _posterior_samples(
     param_name: str,
     *,
     archive_size: int | None = None,
+    full_history: bool = False,
+    seed: int = 0,
+    n_out: int = 2000,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (samples, weights) arrays for the final archive of a single trial.
+    """Return (samples, weights) arrays for a single trial's reported posterior.
 
     Weights are the **retroactive AMIS** posterior weights (``posterior_weight``)
     when present — the estimator the consistency + CLT are stated for — falling
     back to the streaming ``weight`` and then to 1.0 for methods (e.g. pyABC) or
     legacy records that do not carry it.
+
+    ``full_history=False`` (default) reports the top-$k$ archive. ``full_history=True``
+    instead reports the AMIS estimator over the \emph{entire} evaluated history:
+    it resamples ``n_out`` particles from all records by ``posterior_weight`` and
+    returns them equal-weighted, so the posterior's support includes the tail
+    particles the top-$k$ truncation drops. This tests whether the top-$k$
+    truncation (not the AMIS weighting) drives the higher-dimensional
+    under-coverage (external review concern 6 follow-up).
     """
+    if full_history:
+        param_records = [r for r in records if param_name in r.params]
+        samples = np.asarray([r.params[param_name] for r in param_records], dtype=float)
+        weights = np.asarray([_posterior_weight_of(r) for r in param_records], dtype=float)
+        weights = np.where(np.isfinite(weights) & (weights >= 0.0), weights, 0.0)
+        if samples.size == 0 or weights.sum() <= 0.0:
+            return samples, weights
+        p = weights / weights.sum()
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(samples.size, size=int(n_out), replace=True, p=p)
+        # Equal-weighted resample: the AMIS reweighting is already folded in.
+        return samples[idx], np.ones(int(n_out), dtype=float)
+
     final = []
     for result in final_state_results(records, archive_size=archive_size):
         final.extend(result.records)
@@ -162,15 +186,23 @@ def _extend_trial_records(
     param_names: list[str],
     records,
     archive_size: int | None,
+    posterior_support: str = "archive",
 ) -> bool:
     """Append per-param trial records to *target*.
 
     Returns True on success.  Returns False (dropout) if any parameter has no
     posterior samples — a warning is logged and nothing is appended.
     """
+    # The full-history posterior only applies to the async method (it is the one
+    # carrying the retroactive AMIS ``posterior_weight`` over an evaluated
+    # history); the synchronous baseline keeps its natural final-population posterior.
+    use_full = posterior_support == "full_history" and method == "async_propulate_abc"
     param_data = []
     for param in param_names:
-        samples, weights = _posterior_samples(records, param, archive_size=archive_size)
+        samples, weights = _posterior_samples(
+            records, param, archive_size=archive_size,
+            full_history=use_full, seed=int(trial_idx),
+        )
         if samples.size == 0:
             logger.warning(
                 "[sbc] trial dropout: trial=%s method=%s benchmark=%s param=%s — no posterior samples",
@@ -327,6 +359,9 @@ def main(argv: list[str] | None = None) -> None:
             bench_inference_overrides = bench_cfg_entry.get("inference_overrides", {})
             bench_inference_cfg = {**cfg["inference"], **bench_inference_overrides}
             bench_archive_size = bench_inference_cfg.get("k")
+            # Reported-posterior support: "archive" (top-k, default) or
+            # "full_history" (resample the whole evaluated history by AMIS weight).
+            posterior_support = cfg.get("sbc", {}).get("posterior_support", "archive")
             base_benchmark = make_benchmark(bench_cfg_entry)
             param_names = list(base_benchmark.limits.keys())
 
@@ -369,6 +404,7 @@ def main(argv: list[str] | None = None) -> None:
                         param_names=param_names,
                         records=records,
                         archive_size=bench_archive_size,
+                        posterior_support=posterior_support,
                     ):
                         trial_dropouts.setdefault(bench_name, {})
                         trial_dropouts[bench_name][method] = trial_dropouts[bench_name].get(method, 0) + 1
@@ -426,6 +462,7 @@ def main(argv: list[str] | None = None) -> None:
                                 param_names=param_names,
                                 records=records,
                                 archive_size=bench_archive_size,
+                                posterior_support=posterior_support,
                             ):
                                 my_dropout_counts.setdefault(bench_name, {})
                                 my_dropout_counts[bench_name][method] = my_dropout_counts[bench_name].get(method, 0) + 1

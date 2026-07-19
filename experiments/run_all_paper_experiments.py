@@ -94,6 +94,8 @@ EXPERIMENT_REGISTRY = {
     "sbc_gandk": ("sbc_runner.py", "sbc_gandk.json"),
     # 2x-budget g-and-k SBC: budget-limitation probe for the 4-D under-coverage.
     "sbc_gandk_2x": ("sbc_runner.py", "sbc_gandk_2x.json"),
+    # Full-history vs top-k reporting probe for the 4-D under-coverage mechanism.
+    "sbc_gandk_fullhist": ("sbc_runner.py", "sbc_gandk_fullhist.json"),
     "sbc_bimodal": ("sbc_runner.py", "sbc_bimodal.json"),
     "straggler": ("straggler_runner.py", "straggler.json"),
     "runtime_heterogeneity": ("runtime_heterogeneity_runner.py", "runtime_heterogeneity.json"),
