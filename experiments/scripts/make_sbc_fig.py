@@ -4,12 +4,13 @@
 Left: empirical vs nominal coverage with the perfect-calibration diagonal.
 Right: rank histogram with the uniform expectation and a 99% binomial band.
 
-Data: the SBC-1000 campaign run (Gaussian-mean, mu, 1000 trials) —
+Data: the reported full-history AMIS SBC run (Gaussian-mean, mu, 500 trials) —
 ``sbc/data/{coverage,sbc_ranks}.csv``. Async is well calibrated; the synchronous
-baseline is over-confident (under-covers). The ranks live on {0,...,100} (101
-values), so the 10 equal-width bins carry 10 or 11 possible ranks each; the
-expected line and binomial band use per-bin proportions p_b = |bin_b|/101
-(review II.9.6b) rather than a flat 1/10.
+baseline is over-confident (under-covers). The two methods use different rank
+supports (the async full-history report resamples ``n_samples=2000`` draws, the
+baseline reports its final population), so the rank panel plots the *normalized*
+rank u = rank/n_samples on [0,1] and bins uniformly, with a flat expectation
+n_trials/10 and a flat 99% binomial band (per-bin proportion 1/10).
 
 Default draws from the vendored CSVs; ``--refresh`` re-derives them from the
 campaign output. Styling via async_abc.plotting.paper_style (Type-42, Okabe-Ito,
@@ -57,38 +58,36 @@ def coverage_fig(coverage):
     return fig
 
 
-def _per_bin_proportions():
-    """Fraction of the 101 integer rank values 0..100 landing in each of 10 bins."""
-    edges = np.linspace(0, 100, N_BINS + 1)
-    vals = np.arange(0, 101)
-    bin_of = np.clip(np.digitize(vals, edges) - 1, 0, N_BINS - 1)  # 100 -> last bin
-    per_bin = np.bincount(bin_of, minlength=N_BINS)
-    return edges, per_bin / per_bin.sum()
-
-
 def rank_fig(ranks):
-    edges, p_bin = _per_bin_proportions()
+    # Ranks live on {0,...,n_samples}; the two methods use different n_samples (the
+    # async full-history report resamples 2000 draws, the baseline reports its final
+    # population), so we plot the *normalized* rank u = rank/n_samples on [0,1] and bin
+    # uniformly. Under calibration u is ~uniform, giving a flat expectation
+    # n_trials/N_BINS and a flat 99% binomial band (per-bin proportion 1/N_BINS).
+    edges = np.linspace(0.0, 1.0, N_BINS + 1)
     n_trials = int((ranks["method"] == ORDER[0]).sum())
+    p_bin = 1.0 / N_BINS
     exp = n_trials * p_bin
-    lo = binom.ppf(0.005, n_trials, p_bin)
-    hi = binom.ppf(0.995, n_trials, p_bin)
+    lo = float(binom.ppf(0.005, n_trials, p_bin))
+    hi = float(binom.ppf(0.995, n_trials, p_bin))
 
     fig, ax = plt.subplots(figsize=ps.fig_size(0.48, aspect=0.92))
-    # per-bin 99% uniform band + expectation, drawn as step regions
-    ax.fill_between(edges, np.r_[lo, lo[-1]], np.r_[hi, hi[-1]], step="post",
+    # flat 99% uniform band + expectation across the normalized-rank axis
+    ax.fill_between(edges, np.full(edges.size, lo), np.full(edges.size, hi), step="post",
                     color="0.85", zorder=0, label="99% uniform band")
-    ax.step(edges, np.r_[exp, exp[-1]], where="post", color=ps.COLORS["reference"],
+    ax.step(edges, np.full(edges.size, exp), where="post", color=ps.COLORS["reference"],
             ls=":", lw=1.0)
 
     for m in ORDER:
-        r = ranks[ranks["method"] == m]["rank"].to_numpy()
-        counts, _ = np.histogram(r, bins=edges)
+        sub = ranks[ranks["method"] == m]
+        u = sub["rank"].to_numpy() / sub["n_samples"].to_numpy()
+        counts, _ = np.histogram(u, bins=edges)
         st = _style(m)
         ax.step(edges, np.r_[counts, counts[-1]], where="post",
                 color=st["color"], ls=st["ls"], lw=1.4, label=st["label"])
-    ax.set_xlabel("rank statistic")
+    ax.set_xlabel("normalized rank statistic")
     ax.set_ylabel(f"count ({n_trials} trials)")
-    ax.set_xlim(0, 100)
+    ax.set_xlim(0, 1)
     ax.set_ylim(bottom=0)
     ax.grid(True, axis="y", ls=":", lw=0.4, alpha=0.6)
     # Legend inside the axes so the tight bbox matches fig_sbc_coverage (review II.7.b.3).
