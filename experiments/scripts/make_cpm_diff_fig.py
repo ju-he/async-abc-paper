@@ -9,12 +9,11 @@ replicates. Each method's per-replicate trajectory is last-observation-carried-
 forward onto a shared time grid (the same alignment used for the recovery
 curves), then summarized; the difference is async-median minus sync-median.
 
-The grid is truncated at the shared *measured support* — the replicate-median last
-real checkpoint of the worse-covered method (asynchronous, ~1.0e3 s) — because
-quality checkpoints are recorded on an evaluation counter rather than on wall-clock,
-so the faster method exhausts its retained checkpoints first. Past that point the
-asynchronous curve would be a carried-forward constant differenced against a
-still-updating synchronous one.
+The grid spans the full budget: the asynchronous archive is reconstructed at
+checkpoints across the whole run (see the 2026-07-22 kernel-rule fix in
+``.plans/bug-fixes/previous-fixes.md``, which previously truncated it at ~28% of
+the budget), while the synchronous baseline's carried-forward population reflects
+a genuinely unchanged state between generation boundaries.
 
 Default draws from the vendored CSV; ``--refresh`` re-derives it from the
 campaign output (``<root>/cellular_potts/plots/quality_vs_wall_time_
@@ -39,21 +38,9 @@ from async_abc.plotting import paper_style as ps
 ASYNC, SYNC = "async_propulate_abc", "abc_smc_baseline"
 
 # Matched-budget wall-clock grid (identical to the recovery-curve alignment). The
-# upper end is derived from the data (see ``_support_cap``), not hardcoded: the
-# asynchronous checkpoints run out at ~1.0e3 s, so a fixed 1800 s grid would plot
-# ~45% carried-forward constant.
+# upper end is derived from the data rather than hardcoded, so this panel always
+# covers the same range as the Cellular Potts panel it differences.
 GRID_LO, N_GRID = 60.0, 80
-
-
-def _support_cap(df: pd.DataFrame) -> float:
-    """Last wall-clock time at which both methods still have real observations."""
-    caps = []
-    for m in (ASYNC, SYNC):
-        sub = df[df["method"] == m]
-        if sub.empty:
-            continue
-        caps.append(float(sub.groupby("replicate")["wall_time"].max().median()))
-    return min(caps)
 
 
 def _locf_curves(df: pd.DataFrame, method: str, grid: np.ndarray) -> np.ndarray:
@@ -78,7 +65,7 @@ def aggregate(root: Path):
     df["wall_time"] = pd.to_numeric(df["wall_time"], errors="coerce")
     df["wasserstein"] = pd.to_numeric(df["wasserstein"], errors="coerce")
     df = df.dropna(subset=["wall_time", "wasserstein"])
-    grid = np.linspace(GRID_LO, _support_cap(df), N_GRID)
+    grid = np.linspace(GRID_LO, float(df["wall_time"].max()), N_GRID)
 
     a = _locf_curves(df, ASYNC, grid)
     s = _locf_curves(df, SYNC, grid)

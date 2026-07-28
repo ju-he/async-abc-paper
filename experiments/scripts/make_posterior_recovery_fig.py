@@ -8,11 +8,11 @@ synchronous baseline. Per method, each replicate's quality-vs-time trace is
 last-observation-carried-forward onto a shared per-benchmark time grid, then
 summarised as median + inter-quartile range over the five replicates.
 
-Each panel is truncated at the shared *measured support* (see ``_support_cap``):
-quality checkpoints are recorded on an evaluation counter rather than on wall-clock,
-so the faster method runs out of retained checkpoints first, and plotting past that
-point would show a carried-forward constant rather than a measurement. On Cellular
-Potts this caps the panel at ~1.0e3 s of the 3.6e3 s budget.
+Curves span the full budget. The asynchronous archive is reconstructed at
+checkpoints across the whole run (see the 2026-07-22 kernel-rule fix in
+``.plans/bug-fixes/previous-fixes.md``); the synchronous baseline updates only at
+generation boundaries, so carrying its last completed population forward reflects
+a genuinely unchanged state rather than a stale measurement.
 
 Data: ``<bench>/plots/quality_vs_wall_time_diagnostic_data.csv`` (per-replicate
 checkpoints) from the campaign quality runs. Default draws from the vendored CSV;
@@ -40,34 +40,6 @@ KEY = {"async_propulate_abc": "async", "abc_smc_baseline": "sync"}
 N_GRID = 80
 
 
-# Panels whose two methods have materially asymmetric checkpoint coverage, where
-# carrying the last observation forward would compare a stale curve against a still-
-# updating one. On Cellular Potts the asynchronous traces cover only ~28% of the
-# budget against the synchronous ~71%; on g-and-k and Lotka--Volterra both methods
-# cover ~86-100%, so those panels stay on the full budget.
-TRUNCATE_TO_SUPPORT = {"cellular_potts"}
-
-
-def _support_cap(df: pd.DataFrame) -> float:
-    """Last wall-clock time at which *both* methods still have real observations.
-
-    Quality checkpoints are recorded on an evaluation counter, not on wall-clock, so
-    the faster method exhausts its retained checkpoints earlier: on Cellular Potts the
-    asynchronous traces stop at ${\\approx}1.0\\times10^3$ s while the synchronous ones
-    run past $3.3\\times10^3$ s. Carrying the last observation forward beyond that
-    point would compare a *stale* asynchronous value against a still-updating
-    synchronous one, so we cap the shared grid where either method's replicate-median
-    support ends. Everything plotted is therefore backed by real checkpoints.
-    """
-    caps = []
-    for m in METHODS:
-        sub = df[df["method"] == m]
-        if sub.empty:
-            continue
-        caps.append(float(sub.groupby("replicate")["wall_time"].max().median()))
-    return min(caps)
-
-
 def _locf_curve(sub: pd.DataFrame, grid: np.ndarray):
     reps = []
     for _rep, g in sub.groupby("replicate"):
@@ -91,8 +63,7 @@ def aggregate(root: Path):
         df["replicate"] = pd.to_numeric(df["replicate"], errors="coerce")
         df = df.dropna(subset=["wall_time", "wasserstein", "replicate"])
         pos = df["wall_time"] > 0
-        hi = _support_cap(df) if key in TRUNCATE_TO_SUPPORT else float(df["wall_time"].max())
-        lo = float(df.loc[pos, "wall_time"].min())
+        lo, hi = float(df.loc[pos, "wall_time"].min()), float(df["wall_time"].max())
         grid = np.linspace(lo, hi, N_GRID)
         for m in METHODS:
             med, q1, q3 = _locf_curve(df[df["method"] == m], grid)
