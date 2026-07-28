@@ -391,6 +391,7 @@ def _quality_curve_by_wall_time(
     *,
     true_params: Dict[str, float],
     archive_size: int | None,
+    kernel: str = "gaussian",
 ):
     if not true_params:
         return None
@@ -400,6 +401,9 @@ def _quality_curve_by_wall_time(
         axis_kind="wall_time",
         checkpoint_strategy="all",
         archive_size=archive_size,
+        # Every scaling config uses a smooth kernel; the archive-reconstruction
+        # rule depends on it (see convergence._async_archive_rows).
+        kernel=kernel,
     )
     if quality_df.empty:
         return None

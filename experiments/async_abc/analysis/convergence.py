@@ -161,11 +161,20 @@ def posterior_quality_curve(
     archive_size: int | None = None,
     n_projections: int = 50,
     max_eval_points: int | None = 500,
+    kernel: str = "gaussian",
 ) -> pd.DataFrame:
     """Compute posterior quality over observable states for a chosen axis.
 
     Parameters
     ----------
+    kernel:
+        The ABC kernel the run used (``inference.kernel``). This selects the
+        archive-reconstruction rule for the asynchronous method and must mirror
+        the propagator: ``"hard"`` gates archive membership on ``loss < eps``,
+        every other (smooth) kernel makes all evaluated particles eligible and
+        takes the top-k by loss. Defaulting to a smooth kernel matches the method
+        as described in the paper; passing the wrong value silently truncates the
+        quality curve (see :func:`_async_archive_rows`).
     max_eval_points:
         Cap the number of evaluation indices in ``_async_archive_rows`` to
         avoid O(n^2) blow-up when the record count is large (e.g. 48 k records
@@ -191,6 +200,7 @@ def posterior_quality_curve(
                 archive_size=archive_size,
                 n_projections=n_projections,
                 max_eval_points=max_eval_points,
+                kernel=kernel,
             )
         )
 
@@ -364,6 +374,7 @@ def _observable_quality_rows(
     archive_size: int | None,
     n_projections: int,
     max_eval_points: int | None = 500,
+    kernel: str = "gaussian",
 ) -> list[dict[str, object]]:
     method = base_method_name(str(group["method"].iloc[0]))
     if method == "async_propulate_abc":
@@ -374,6 +385,7 @@ def _observable_quality_rows(
             archive_size=archive_size,
             n_projections=n_projections,
             max_eval_points=max_eval_points,
+            kernel=kernel,
         )
     if method in _SYNC_METHODS:
         return _sync_generation_rows(
@@ -405,12 +417,27 @@ def _async_archive_rows(
     archive_size: int | None,
     n_projections: int,
     max_eval_points: int | None = 500,
+    kernel: str = "gaussian",
 ) -> list[dict[str, object]]:
     """Reconstruct the archive at each simulation event for an async method.
 
-    After each event the archive is built from all accepted particles whose
-    loss is below the running (minimum) tolerance at that point.  The archive
-    is optionally truncated to *archive_size* lowest-loss particles.
+    The reconstruction mirrors ``ABCPMC._reconstruct_archive`` in the propagator,
+    which is *kernel-dependent*: under a **hard** kernel only particles with
+    ``loss < eps`` are archive-eligible, whereas under a **smooth** kernel
+    (``gaussian``, the default and the one every benchmark in the paper uses)
+    *every* evaluated particle is eligible and the archive is simply the top-k by
+    loss over the whole prefix -- the bandwidth sets the kernel *weights*, not
+    archive membership. This matches the paper's definition
+    :math:`A_n = \\mathrm{Top}_k(\\{\\theta_i\\}, \\text{order by } \\rho_i)`.
+
+    Applying the hard rule to a smooth-kernel run silently truncates the curve:
+    ``eps`` decreases monotonically, so once it falls below the best loss achieved
+    no particle satisfies ``loss < eps``, every later checkpoint is skipped, and
+    the series just stops (on Cellular Potts this cut the asynchronous curve at
+    ~28% of the budget). It also shrinks the archive below *k* just before that,
+    biasing the late-run quality values.
+
+    The archive is optionally truncated to *archive_size* lowest-loss particles.
 
     Each checkpoint row has ``state_kind='archive_reconstruction'``.
 
@@ -451,6 +478,9 @@ def _async_archive_rows(
 
     param_names = list(true_params.keys())
     param_values = ordered[param_names].to_numpy(dtype=float)
+    # Smooth kernels make every evaluated particle archive-eligible; only the hard
+    # kernel gates membership on the running bandwidth (see docstring).
+    smooth_kernel = str(kernel).lower() != "hard"
 
     n_records = len(ordered)
     if max_eval_points is not None and n_records > max_eval_points > 0:
@@ -468,7 +498,10 @@ def _async_archive_rows(
         epsilon = cum_tol_min[idx]
         if np.isnan(epsilon):
             continue
-        archive_mask = tol_notna[: idx + 1] & (loss_values[: idx + 1] < epsilon)
+        if smooth_kernel:
+            archive_mask = tol_notna[: idx + 1]
+        else:
+            archive_mask = tol_notna[: idx + 1] & (loss_values[: idx + 1] < epsilon)
         if not archive_mask.any():
             continue
         archive_idx = np.flatnonzero(archive_mask)

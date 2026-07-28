@@ -715,3 +715,43 @@ to memory `reference_asyncabc_cluster_deploy.md`.
 `PROPULATE_SKIP_DISCONNECT=1`, 1 node / 48 ranks) COMPLETED, exit 0:0, **MaxRSS 28.8 GB** (was 49–54 GB →
 OOM), 16 plots produced. async recovers the analytic posterior mean to 0.002–0.013 abs err (≈ sync baseline,
 ≪ rejection). `quality_vs_wall_time.pdf` wired into the paper as Fig. `gaussian-recovery`. OOM closed.
+
+## 2026-07-22 — quality curves reconstructed the WRONG archive (hard-kernel rule on smooth-kernel runs) FIXED
+
+**Symptom (user-spotted on Fig. 8):** the Cellular Potts posterior-quality panel showed the asynchronous
+curve dead flat at 0.4880 (band [0.4874, 0.4898]) across the whole right-hand side, ending *worse* than the
+synchronous baseline. ~70% of the plotted async range was last-observation-carried-forward, so the endpoint
+comparison was a stale async value against a still-updating sync one.
+
+**Not a run failure:** raw records span the full 3600 s for both methods (async 33,748 records to t=3599.9 s
+vs sync 17,356 — async has ~2× the evaluations, as expected). Quality checkpoints are *reconstructed
+post-hoc* from `raw_results.csv`, so the truncation was entirely in analysis.
+
+**Root cause:** `analysis/convergence.py::_async_archive_rows` built the archive as
+`tol_notna & (loss < epsilon)` — the **hard-kernel** rule — unconditionally. The propagator
+(`abcpmc.py::_reconstruct_archive`) is kernel-dependent: hard keeps `loss < eps`, **smooth kernels keep the
+top-k by loss over the whole prefix** (the bandwidth sets kernel *weights*, not archive membership). Every
+benchmark config uses `kernel: "gaussian"`, and the paper itself defines the archive as
+`A_n = Top_k({θ_i}, order by ρ_i)` — so the analysis disagreed with both the code and the paper.
+Because `eps` decreases monotonically, once it fell below the best achieved loss the mask went empty and
+every later checkpoint hit `continue`. On CPM async: eps ended at 0.0866 vs best loss 0.0900, emptying at
+index 9525 = **t=1017.8 s of 3600 s (28.2%)**. It also biased late-run values by shrinking the archive below
+k just before emptying. Worst for whichever method tightens eps fastest — async on CPM, sync on g-and-k/LV.
+
+**Fix:** thread the run's kernel into the reconstruction. `posterior_quality_curve(..., kernel=...)` →
+`_observable_quality_rows` → `_async_archive_rows`, which now uses `tol_notna` alone for smooth kernels and
+the `loss < eps` gate only for `kernel == "hard"`. Threaded from config at all 13 reporter call sites via
+`_cfg_kernel(cfg)` (resolving `inference.kernel` exactly as the inference layer does, default `"hard"` when
+a cfg is present), plus `runtime_summary._final_quality_wasserstein` and
+`scaling_runner._quality_curve_by_wall_time`. The ablation's AMIS-isolation plot resolves the kernel
+**per variant** (`hard_kernel_baseline` overrides it), not from the experiment config.
+
+**Validated** on the staged CPM raw data: `kernel="hard"` reproduces the bug exactly (141 checkpoints,
+t=[3,1012]); `kernel="gaussian"` gives 500 checkpoints spanning t=[3,3600] — the full budget.
+Regression test `test_smooth_kernel_quality_curve_spans_full_run_when_eps_drops_below_all_losses` in
+`tests/test_analysis.py` asserts the smooth curve reaches the last record while the hard rule truncates on
+the same records. Suite green (686 passed, 10 skipped).
+
+**Blast radius:** every quality-vs-time artifact — Figs. 8 (all panels), 9, 10, plus straggler and
+runtime-heterogeneity final-quality numbers and the scaling `final_quality` column. All must be regenerated
+from existing raw records; **no simulation re-run needed**.

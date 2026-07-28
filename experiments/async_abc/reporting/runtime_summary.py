@@ -138,7 +138,12 @@ def runtime_performance_summary(records: List[ParticleRecord], cfg: Dict[str, An
                     "total_attempts": int(len(attempts)),
                     "final_posterior_size": int(_final_posterior_size(subset, archive_size=archive_size)),
                     "final_quality_wasserstein": float(
-                        _final_quality_wasserstein(subset, true_params=true_params, archive_size=archive_size)
+                        _final_quality_wasserstein(
+                            subset,
+                            true_params=true_params,
+                            archive_size=archive_size,
+                            kernel=_cfg_kernel(cfg),
+                        )
                     ),
                     "final_quality_wasserstein_weighted": float(
                         _final_quality_wasserstein_weighted(
@@ -181,6 +186,7 @@ def straggler_performance_summary_row(
                 records,
                 true_params=_true_params_from_benchmark_cfg(cfg.get("benchmark", {})),
                 archive_size=archive_size,
+                kernel=_cfg_kernel(cfg),
             )
         ),
         "final_quality_wasserstein_weighted": float(
@@ -343,11 +349,23 @@ def _final_quality_wasserstein_analytic(
     return float(wasserstein_distance(frame["mu"].to_numpy(dtype=float), analytic))
 
 
+def _cfg_kernel(cfg: Dict[str, Any] | None) -> str:
+    """Resolve ``inference.kernel`` as the inference layer does.
+
+    The quality curve's archive reconstruction is kernel-dependent; passing the
+    wrong kernel silently truncates it (see ``convergence._async_archive_rows``).
+    """
+    if not cfg:
+        return "gaussian"
+    return str((cfg.get("inference") or {}).get("kernel", "hard"))
+
+
 def _final_quality_wasserstein(
     records: List[ParticleRecord],
     *,
     true_params: Dict[str, float],
     archive_size: int | None,
+    kernel: str = "gaussian",
 ) -> float:
     if not true_params:
         return float("nan")
@@ -360,6 +378,7 @@ def _final_quality_wasserstein(
         checkpoint_strategy="quantile",
         checkpoint_count=8,
         archive_size=archive_size,
+        kernel=kernel,
     )
     if quality_df.empty:
         return float("nan")

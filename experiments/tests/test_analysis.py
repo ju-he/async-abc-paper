@@ -692,3 +692,70 @@ def test_ess_vs_n_at_fixed_S_filters_by_method():
     ]
     df = ess_vs_n_at_fixed_S(records, window=10, method_label="async_propulate_abc")
     assert set(df["method"].unique()) == {"async_propulate_abc"}
+
+
+def _tightening_tolerance_records(n: int = 60):
+    """Async records whose bandwidth tightens below every achieved loss.
+
+    Mirrors a real smooth-kernel run: the scheduler drives ``tolerance`` down
+    monotonically past the best loss ever achieved. Under the *hard*-kernel
+    archive rule no particle then satisfies ``loss < eps``, so the quality curve
+    silently stops; under a smooth kernel every particle stays archive-eligible.
+    """
+    records = []
+    for i in range(n):
+        # loss floors at 0.5; tolerance decays past it and ends well below.
+        loss = 0.5 + 1.0 / (i + 1)
+        tolerance = 2.0 * (0.9**i)
+        records.append(
+            ParticleRecord(
+                method="async_propulate_abc",
+                replicate=0,
+                seed=1,
+                step=i + 1,
+                params={"mu": loss},
+                loss=loss,
+                weight=1.0,
+                tolerance=tolerance,
+                wall_time=float(i),
+                record_kind="simulation_attempt",
+                time_semantics="event_end",
+                attempt_count=i + 1,
+            )
+        )
+    return records
+
+
+def test_smooth_kernel_quality_curve_spans_full_run_when_eps_drops_below_all_losses():
+    """Regression: a smooth-kernel curve must not truncate when eps < min(loss).
+
+    The archive-reconstruction rule is kernel-dependent (it mirrors
+    ``ABCPMC._reconstruct_archive``). Applying the hard rule to a smooth-kernel
+    run silently dropped every checkpoint after eps fell below the best loss,
+    which truncated the Cellular Potts curve at ~28% of its budget.
+    """
+    records = _tightening_tolerance_records()
+    last_wall_time = max(r.wall_time for r in records)
+
+    smooth = posterior_quality_curve(
+        records,
+        true_params={"mu": 0.5},
+        axis_kind="wall_time",
+        checkpoint_strategy="all",
+        archive_size=10,
+        kernel="gaussian",
+    )
+    hard = posterior_quality_curve(
+        records,
+        true_params={"mu": 0.5},
+        axis_kind="wall_time",
+        checkpoint_strategy="all",
+        archive_size=10,
+        kernel="hard",
+    )
+
+    # The smooth curve reaches the end of the run...
+    assert smooth["axis_value"].max() == pytest.approx(last_wall_time)
+    # ...while the hard rule stops early on the very same records.
+    assert hard["axis_value"].max() < last_wall_time
+    assert len(smooth) > len(hard)

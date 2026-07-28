@@ -54,6 +54,21 @@ from .common import (
 from .export import save_figure, write_plot_metadata
 
 
+def _cfg_kernel(cfg: Dict[str, Any] | None) -> str:
+    """Resolve ``inference.kernel`` the way the inference layer does.
+
+    The archive-reconstruction rule behind every quality curve is kernel-dependent
+    (a hard kernel gates membership on ``loss < eps``; smooth kernels take the
+    top-k by loss over the whole history), so a curve must be reconstructed with
+    the kernel its run actually used -- otherwise the curve is silently truncated
+    at the point ``eps`` drops below the best loss. See
+    ``async_abc.analysis.convergence._async_archive_rows``.
+    """
+    if not cfg:
+        return "gaussian"
+    return str((cfg.get("inference") or {}).get("kernel", "hard"))
+
+
 def _param_names(records: List[ParticleRecord]) -> List[str]:
     for r in records:
         if r.params:
@@ -1148,6 +1163,7 @@ def plot_quality_by_sigma(
             checkpoint_strategy="time_uniform",
             checkpoint_count=8,
             archive_size=archive_size,
+            kernel=_cfg_kernel(cfg),
         )
         if quality_df.empty:
             ax.set_title(f"σ={sigma:g} — no quality data")
@@ -1241,6 +1257,7 @@ def plot_quality_vs_wall_time_diagnostic(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1340,6 +1357,7 @@ def plot_quality_vs_wall_time(
         checkpoint_strategy="time_uniform",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1449,6 +1467,7 @@ def plot_progress_summary(
             checkpoint_strategy="quantile",
             checkpoint_count=checkpoint_count,
             archive_size=archive_size,
+            kernel=_cfg_kernel(cfg),
         )
         if quality_df.empty:
             quality_skip_reason = "missing_true_params_or_quality_rows"
@@ -1610,6 +1629,7 @@ def plot_quality_vs_posterior_samples(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1673,6 +1693,7 @@ def plot_quality_vs_posterior_samples_diagnostic(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1757,6 +1778,7 @@ def plot_quality_vs_attempt_budget(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1820,6 +1842,7 @@ def plot_quality_vs_attempt_budget_diagnostic(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if quality_df.empty:
         write_plot_metadata(
@@ -1885,6 +1908,7 @@ def plot_progress_diagnostic(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if tolerance_df.empty and quality_df.empty:
         write_plot_metadata(
@@ -2369,6 +2393,7 @@ def plot_tolerance_trajectory(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if trajectory_df.empty and quality_df.empty:
         return
@@ -2492,6 +2517,7 @@ def plot_tolerance_trajectory_diagnostic(
         checkpoint_strategy="quantile",
         checkpoint_count=checkpoint_count,
         archive_size=archive_size,
+        kernel=_cfg_kernel(cfg),
     )
     if trajectory_df.empty and quality_df.empty:
         return
@@ -3611,7 +3637,8 @@ def plot_ablation_amis_isolation(
     ):
         records = load_records(csv_path)
         true_params = _true_params_from_cfg(records, benchmark_cfg)
-        archive_size = variant_cfg_by_name.get(variant_label, {}).get("k")
+        variant_cfg = variant_cfg_by_name.get(variant_label, {})
+        archive_size = variant_cfg.get("k")
         if not records or not true_params:
             continue
         quality_df = posterior_quality_curve(
@@ -3621,6 +3648,11 @@ def plot_ablation_amis_isolation(
             checkpoint_strategy="time_uniform",
             checkpoint_count=24,
             archive_size=archive_size,
+            # Ablation variants may override the kernel (``hard_kernel_baseline``),
+            # and the archive-reconstruction rule depends on it, so resolve per
+            # variant. The ablation's own inference kernel is smooth, which is the
+            # fallback when a variant does not override it.
+            kernel=str(variant_cfg.get("kernel") or "gaussian"),
         )
         if quality_df.empty:
             continue
