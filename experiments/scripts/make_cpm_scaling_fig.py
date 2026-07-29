@@ -19,16 +19,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-FILL = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_fillin_20260628/scaling_cpm/data"
-EXIST = "/home/juhe/remotes/scratch/herold2/async-abc/run_cpm_20260626_1906/scaling_cpm/data"
-EXT = "/home/juhe/remotes/scratch/herold2/async-abc/cpm_scaling_ext_20260630/scaling_cpm/data"
+# SUPERSEDED by make_scaling_combined_fig.py, whose right panel is this figure and
+# whose data is vendored under experiments/data/paper_figures/fig_scaling_combined/.
+# The paper includes fig_scaling_combined.pdf, not fig_cpm_scaling.pdf. Kept for the
+# single-benchmark view; not part of the reproducibility path.
+#
+# NOTE the synchronous line here is the k=100 baseline at every worker count, NOT the
+# FAIR baseline (population = worker count) the paper reports. That is the main reason
+# this script was superseded: it prints async/sync = 15.6x at 384 workers, where the
+# paper's ~5x compares against the fair k=W baseline that can occupy every core. Read
+# the ratio from fig_scaling_combined, not from here.
+#
+# The campaign run. This used to stitch three pre-rerun roots together
+# (run_cpm_fillin_20260628 for 1/4/16, run_cpm_20260626_1906 for 48/96,
+# cpm_scaling_ext_20260630 for 192/384); the propagator changed in the rerun, so
+# those roots disagree with every number the paper quotes -- e.g. 9.45 sims/s at 48
+# workers against the 9.33 of the campaign run, and a 384-worker replicate spread
+# (32-74 sims/s) that the current run does not have (71.3-73.3, CV 1.3%).
+DATA = "/home/juhe/remotes/scratch/herold2/async-abc/rerun_20260707/scaling_cpm/data"
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_cpm_scaling.pdf"
 
-# 1/4/16 from the fill-in run; 48/96 from the original CPM scaling run; 192/384 from
-# the node-scaling extension (cpm_scaling_ext_20260630, k=100). Medians over the
-# available replicates (the single slow 384-worker replicate is robustly handled by
-# the median).
-POINTS = [(1, FILL), (4, FILL), (16, FILL), (48, EXIST), (96, EXIST), (192, EXT), (384, EXT)]
+# One root covers every worker count; medians over the five replicates.
+POINTS = [(w, DATA) for w in (1, 4, 16, 48, 96, 192, 384)]
 ASYNC, SYNC = "async_propulate_abc", "abc_smc_baseline"
 
 

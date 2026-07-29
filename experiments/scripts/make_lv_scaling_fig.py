@@ -17,16 +17,28 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-DATA = "/home/juhe/remotes/scratch/herold2/async-abc/run_full_20260626_1816/scaling/data"
-PACKED = "/home/juhe/remotes/scratch/herold2/async-abc/lv_scaling_packed_20260630/scaling/data"
+# SUPERSEDED by make_scaling_combined_fig.py, whose left panel is this figure and
+# whose data is vendored under experiments/data/paper_figures/fig_scaling_combined/.
+# The paper includes fig_scaling_combined.pdf, not fig_scaling_throughput.pdf. Kept
+# for the single-benchmark view; not part of the reproducibility path.
+#
+# NOTE the synchronous line here is the k=100 baseline at every worker count, NOT the
+# FAIR baseline (population = worker count) the paper reports at 144-288 workers. The
+# crossover the paper describes is against the fair baseline; this figure's sync line
+# plateaus near 3400 sims/s instead. Read the comparison from fig_scaling_combined.
+#
+# The campaign run. This used to point at run_full_20260626_1816 (pre-rerun) plus
+# lv_scaling_packed_20260630, which return 595 sims/s for k=100 async at 48 workers
+# against the 6240 the paper reports -- the propagator changed in the rerun, so those
+# roots answer a different question and silently disagree with every quoted number.
+DATA = "/home/juhe/remotes/scratch/herold2/async-abc/rerun_20260707/scaling/data"
 OUT = "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/fig_scaling_throughput.pdf"
-# Sub-node and single-node points (1/4/16/48) from the original run; the multi-node
-# points use FULLY-PACKED nodes that are exact multiples of 48 (144=3, 192=4, 240=5,
-# 288=6 nodes), so every node runs 48 ranks with no idle cores -- unlike the earlier
-# 128/256 points (3/6 nodes with 16/32 idle cores) that under-packed the trailing node.
+# Multi-node points are FULLY-PACKED nodes, exact multiples of 48 (144=3, 192=4,
+# 240=5, 288=6 nodes), so every node runs 48 ranks with no idle cores -- unlike the
+# earlier 128/256 points (3/6 nodes with 16/32 idle cores) that under-packed the
+# trailing node. One root now covers every worker count.
 WORKERS = [1, 4, 16, 48, 144, 192, 240, 288]
-DIR_FOR = {1: DATA, 4: DATA, 16: DATA, 48: DATA,
-           144: PACKED, 192: PACKED, 240: PACKED, 288: PACKED}
+DIR_FOR = {w: DATA for w in WORKERS}
 ASYNC, SYNC = "async_propulate_abc", "abc_smc_baseline"
 
 
