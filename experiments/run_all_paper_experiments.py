@@ -109,6 +109,7 @@ EXPERIMENT_REGISTRY = {
     "hetero_twinprobe_s2p0": ("runtime_heterogeneity_runner.py", "hetero_twinprobe_s2p0.json"),
     "hetero_async_sim": ("runtime_heterogeneity_runner.py", "hetero_async_sim.json"),
     "hetero_twin": ("runtime_heterogeneity_runner.py", "hetero_twin.json"),
+    "scaling_kfrontier": ("scaling_runner.py", "scaling_kfrontier.json"),
     "scaling_cpm_twin": ("scaling_runner.py", "scaling_cpm_twin.json"),
     "sbc": ("sbc_runner.py", "sbc.json"),
     # Multidim (g-and-k) + multimodal (bimodal) SBC for external-review concern 6.
