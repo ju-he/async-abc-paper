@@ -1,0 +1,75 @@
+{
+  "experiment_name": "sbc_nd_d16_k100_s0",
+  "benchmark": {
+    "name": "gaussian_mean_nd",
+    "dim": 16,
+    "n_obs": 100,
+    "sigma_obs": 1.0,
+    "true_mu": 0.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 20000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 5.0,
+    "n_generations": 1000,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 0
+  },
+  "execution": {
+    "n_replicates": 1,
+    "base_seed": 0,
+    "trial_offset": 0
+  },
+  "sbc": {
+    "n_trials": 1000,
+    "coverage_levels": [
+      0.5,
+      0.8,
+      0.9,
+      0.95
+    ],
+    "posterior_support": "full_history",
+    "benchmarks": [
+      {
+        "name": "gaussian_mean_nd",
+        "dim": 16,
+        "n_obs": 100,
+        "sigma_obs": 1.0,
+        "true_mu": 0.0,
+        "prior_low": -5.0,
+        "prior_high": 5.0,
+        "enabled": true,
+        "inference_overrides": {
+          "max_simulations": 20000,
+          "k": 100,
+          "amis_snapshots": 0
+        }
+      }
+    ]
+  },
+  "plots": {
+    "rank_histogram": true,
+    "coverage_table": true
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method"
+    },
+    "sweep": {
+      "family": "kS_dimension",
+      "dim": 16,
+      "k": 100,
+      "amis_snapshots": 0
+    }
+  }
+}

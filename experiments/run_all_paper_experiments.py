@@ -130,6 +130,28 @@ def _resolve_experiments(requested: list[str]) -> list[str]:
     return requested
 
 
+
+def resolve_experiment(name: str):
+    """Resolve an experiment name to its ``(runner, config)`` pair.
+
+    The SBC family is open-ended: parameter sweeps (e.g. the archive-size /
+    snapshot-buffer dimension study) generate one experiment name per grid cell,
+    and every one of them runs ``sbc_runner.py`` against ``<name>.json``. Rather
+    than require a registry line per sweep cell, ``sbc_``-prefixed names fall
+    back to that convention. Explicit entries still win, so a family member can
+    override it.
+    """
+    if name in EXPERIMENT_REGISTRY:
+        return EXPERIMENT_REGISTRY[name]
+    if name.startswith("sbc_"):
+        return ("sbc_runner.py", f"{name}.json")
+    raise KeyError(name)
+
+
+def is_known_experiment(name: str) -> bool:
+    return name in EXPERIMENT_REGISTRY or name.startswith("sbc_")
+
+
 def _run_experiment(
     name: str,
     runner: str,
@@ -225,7 +247,7 @@ def main(argv: list[str] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Validate requested experiment names up front
-    unknown = [n for n in args.experiments if n not in EXPERIMENT_REGISTRY]
+    unknown = [n for n in args.experiments if not is_known_experiment(n)]
     if unknown:
         parser.error(f"Unknown experiment(s): {', '.join(unknown)}. "
                      f"Valid names: {', '.join(EXPERIMENT_REGISTRY)}")
@@ -236,7 +258,7 @@ def main(argv: list[str] | None = None) -> None:
     run_mode = compose_run_mode("small" if args.small else "full", args.test)
 
     for name in args.experiments:
-        runner, config = EXPERIMENT_REGISTRY[name]
+        runner, config = resolve_experiment(name)
         rc, elapsed = _run_experiment(
             name,
             runner,

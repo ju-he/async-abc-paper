@@ -579,6 +579,11 @@ def finalize_experiment_by_name(
     """Dispatch to the appropriate shard finalizer for *cfg*."""
     name = cfg["experiment_name"]
     fn = _FINALIZER_REGISTRY.get(name)
+    if fn is None and name.startswith("sbc_"):
+        # Open-ended family: every SBC experiment merges trial shards the same
+        # way, and sweeps generate one name per grid cell (see
+        # run_all_paper_experiments.resolve_experiment).
+        fn = finalize_sbc_experiment
     if fn is None:
         raise ValueError(f"No shard finalizer registered for experiment_name={name!r}")
     return fn(cfg, layout, shard_dirs, statuses)

@@ -282,7 +282,7 @@ def main() -> None:
     jobs_root.mkdir(parents=True, exist_ok=True)
 
     for experiment_name in experiment_names:
-        if experiment_name not in run_all.EXPERIMENT_REGISTRY:
+        if not run_all.is_known_experiment(experiment_name):
             raise SystemExit(f"Unknown experiment: {experiment_name}")
         if experiment_name == "scaling":
             raise SystemExit("Scaling remains on submit_scaling.py and is not supported here.")
@@ -293,7 +293,7 @@ def main() -> None:
         if args.add_replicates and is_sbc_family:
             raise SystemExit("--add-replicates is only supported for replicate-based experiments, not sbc")
 
-        runner_name, config_name = run_all.EXPERIMENT_REGISTRY[experiment_name]
+        runner_name, config_name = run_all.resolve_experiment(experiment_name)
         runner_path = EXPERIMENTS_DIR / "scripts" / runner_name
         config_path = EXPERIMENTS_DIR / "configs" / config_name
 
