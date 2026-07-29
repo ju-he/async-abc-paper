@@ -863,3 +863,53 @@ class TestMakeBenchmark:
         assert hasattr(bm, "simulate")
         assert hasattr(bm, "limits")
         assert callable(bm.simulate)
+
+
+class TestGaussianMeanND:
+    """gaussian_mean_nd: the d-dimensional target behind the k/S sweep."""
+
+    def test_per_coordinate_truth_injection_is_honoured(self):
+        """SBC injects true_mu1..true_mud, not a single true_mu.
+
+        Regression: reading only ``true_mu`` made every SBC trial generate its
+        observed data from the same default truth while the ranks were scored
+        against a freshly drawn theta, which silently destroyed calibration
+        (empirical coverage 0.08 at the 0.5 level).
+        """
+        from async_abc.benchmarks import make_benchmark
+
+        cfg = {
+            "name": "gaussian_mean_nd", "dim": 3, "n_obs": 400,
+            "sigma_obs": 1.0, "observed_data_seed": 7,
+            "true_mu1": 2.0, "true_mu2": -1.5, "true_mu3": 0.5,
+        }
+        b = make_benchmark(cfg)
+        assert list(b.true_mu) == [2.0, -1.5, 0.5]
+        # Observed data must actually follow that truth, not the default zero.
+        assert np.allclose(b.observed_mean, [2.0, -1.5, 0.5], atol=0.25)
+
+    def test_scalar_true_mu_still_broadcasts(self):
+        from async_abc.benchmarks import make_benchmark
+
+        b = make_benchmark({"name": "gaussian_mean_nd", "dim": 4, "true_mu": 1.25})
+        assert list(b.true_mu) == [1.25] * 4
+
+    def test_dim1_matches_legacy_gaussian_mean(self):
+        from async_abc.benchmarks import make_benchmark, GaussianMean
+
+        shared = {"n_obs": 100, "sigma_obs": 1.0, "prior_low": -5.0,
+                  "prior_high": 5.0, "observed_data_seed": 42}
+        nd = make_benchmark({"name": "gaussian_mean_nd", "dim": 1, **shared})
+        legacy = GaussianMean(dict(shared))
+        assert np.isclose(nd.observed_mean[0], legacy.observed_mean)
+
+    def test_discrepancy_is_smaller_at_the_truth(self):
+        from async_abc.benchmarks import make_benchmark
+
+        b = make_benchmark({"name": "gaussian_mean_nd", "dim": 4, "n_obs": 100,
+                            "observed_data_seed": 1, "true_mu": 0.0})
+        at_truth = np.median([b.simulate({f"mu{j+1}": 0.0 for j in range(4)}, s)
+                              for s in range(30)])
+        far = np.median([b.simulate({f"mu{j+1}": 3.0 for j in range(4)}, s)
+                         for s in range(30)])
+        assert at_truth < far

@@ -54,10 +54,23 @@ class GaussianMeanND:
         self.prior_low = float(config.get("prior_low", -5.0))
         self.prior_high = float(config.get("prior_high", 5.0))
 
-        true_mu = config.get("true_mu", 0.0)
-        self.true_mu = np.broadcast_to(
-            np.asarray(true_mu, dtype=float), (self.dim,)
+        self.param_names = [f"mu{j + 1}" for j in range(self.dim)]
+
+        # Ground truth may arrive either as a single ``true_mu`` (scalar or
+        # length-d list, for a fixed-truth run) or as per-coordinate
+        # ``true_mu1 ... true_mud`` keys. SBC uses the latter: it redraws the
+        # truth every trial and injects one ``true_<param>`` key per parameter
+        # name (sbc_runner._true_param_config). Reading only ``true_mu`` would
+        # silently ignore that injection and generate every trial's observed
+        # data from the same default truth, making the SBC ranks meaningless.
+        default = np.broadcast_to(
+            np.asarray(config.get("true_mu", 0.0), dtype=float), (self.dim,)
         ).astype(float)
+        self.true_mu = np.asarray(
+            [float(config.get(f"true_{name}", default[j]))
+             for j, name in enumerate(self.param_names)],
+            dtype=float,
+        )
 
         rng = np.random.default_rng(config.get("observed_data_seed", 42))
         self.observed_data = rng.normal(
@@ -65,7 +78,6 @@ class GaussianMeanND:
         )
         self.observed_mean = np.mean(self.observed_data, axis=0)
 
-        self.param_names = [f"mu{j + 1}" for j in range(self.dim)]
         self.limits: Dict[str, Tuple[float, float]] = {
             name: (self.prior_low, self.prior_high) for name in self.param_names
         }
