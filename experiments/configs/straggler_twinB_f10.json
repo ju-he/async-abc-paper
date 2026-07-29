@@ -1,0 +1,52 @@
+{
+  "experiment_name": "straggler_twinB_f10",
+  "benchmark": {
+    "name": "gaussian_mean",
+    "observed_data_seed": 42,
+    "n_obs": 100,
+    "true_mu": 0.0,
+    "sigma_obs": 1.0,
+    "prior_low": -5.0,
+    "prior_high": 5.0
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 6300,
+    "n_workers": 16,
+    "k": 100,
+    "tol_init": 5.0,
+    "n_generations": 1000,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20,
+    "barrier": true,
+    "barrier_every": 7
+  },
+  "execution": {
+    "n_replicates": 5,
+    "base_seed": 0
+  },
+  "straggler": {
+    "straggler_rank": 0,
+    "base_sleep_s": 0.1,
+    "slowdown_factor": [
+      10.0
+    ]
+  },
+  "plots": {
+    "throughput_vs_slowdown": true,
+    "gantt": true
+  },
+  "paper": {
+    "experiment_role": "barrier_twin",
+    "stop_policy": "fixed_walltime",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  }
+}
