@@ -124,6 +124,63 @@ def test_regen_summaries_preserves_the_original_once(regen_module, tmp_path):
     assert pd.read_csv(path)["final_quality_wasserstein"].tolist() == first
 
 
+def test_regen_summaries_matches_the_producers_checkpoint_strategy(
+    regen_module, tmp_path, monkeypatch
+):
+    """The two producers disagree, and using the wrong one fakes a correction.
+
+    ``runtime_summary`` builds its final value with ``checkpoint_strategy="quantile"``
+    (8 checkpoints); ``scaling_runner`` uses ``"all"``. Recomputing a scaling
+    summary with "quantile" moved CPM values by up to 0.115 -- a resampling
+    artifact indistinguishable from a kernel correction.
+    """
+    seen: list[str] = []
+    real = regen_module.posterior_quality_curve
+
+    def _spy(*args, **kwargs):
+        seen.append(kwargs.get("checkpoint_strategy"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(regen_module, "posterior_quality_curve", _spy)
+
+    # method_variant -> a scaling summary -> "all"
+    _write_experiment(tmp_path, "scaling_exp",
+                      summary_name="throughput_summary_w48_k100.csv",
+                      method_col="method_variant")
+    regen_module.regen_summaries(tmp_path, "scaling_exp")
+    assert seen and set(seen) == {"all"}, seen
+
+    # method -> a runtime_summary summary -> "quantile"
+    seen.clear()
+    _write_experiment(tmp_path, "straggler_exp",
+                      summary_name="throughput_vs_slowdown_summary.csv",
+                      method_col="method")
+    regen_module.regen_summaries(tmp_path, "straggler_exp")
+    assert seen and set(seen) == {"quantile"}, seen
+
+
+def test_regen_summaries_leaves_deferred_nan_placeholders_alone(regen_module, tmp_path):
+    """NaN in a scaling shard is a deferred marker, not a stale value.
+
+    The scaling runners write per-combination shards with the metric NaN and let
+    ``_backfill_quality_metrics`` fill it at finalize. Populating those here
+    would make a later finalize skip its own backfill and inherit these values.
+    """
+    path = _write_experiment(tmp_path, "exp",
+                            summary_name="throughput_summary_w48_k100.csv",
+                            method_col="method_variant")
+    table = pd.read_csv(path)
+    table["final_quality_wasserstein"] = float("nan")
+    table.to_csv(path, index=False)
+
+    regen_module.regen_summaries(tmp_path, "exp")
+
+    after = pd.read_csv(path)
+    assert after["final_quality_wasserstein"].isna().all()
+    # An all-placeholder file is not worth a backup either.
+    assert not path.with_suffix(".prekernelfix.csv").exists()
+
+
 def test_regen_summaries_skips_when_no_such_column(regen_module, tmp_path, capsys):
     data = tmp_path / "exp" / "data"
     data.mkdir(parents=True)

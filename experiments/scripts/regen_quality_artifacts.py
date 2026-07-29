@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -185,6 +186,19 @@ def regen_summaries(root: Path, name: str) -> None:
 
     Recomputes per (method, replicate) from the raw records with the run's own
     kernel, preserving the original as ``*.prekernelfix.csv``.
+
+    Two things this has to get right, both learned the hard way:
+
+    * **Match the producer's checkpoint strategy.** The two producers disagree:
+      ``runtime_summary`` uses ``quantile`` with 8 checkpoints, ``scaling_runner``
+      uses ``all``. Recomputing with the wrong one produces a difference that
+      looks like a kernel correction but is a resampling artifact -- on CPM it
+      moved values by up to 0.115 with the strategy mismatch alone.
+    * **Do not fill NaN placeholders.** The scaling runners write per-combination
+      shards with ``final_quality_wasserstein`` deliberately NaN and defer the
+      metric to ``_backfill_quality_metrics`` at finalize time. Populating those
+      would make a later finalize skip its own backfill and inherit these values
+      instead, so this pass only rewrites rows that already carry a number.
     """
     exp = root / name
     raw_csv = exp / "data" / "raw_results.csv"
@@ -212,10 +226,10 @@ def regen_summaries(root: Path, name: str) -> None:
 
     # The archive size varies per row on the scaling runs (k is swept), so the
     # curve is computed per (method, replicate) with that row's own k.
-    cache: dict[tuple[str, int, int], float] = {}
+    cache: dict[tuple[str, int, int, str], float] = {}
 
-    def _final(method: str, replicate: int, archive_size: int) -> float:
-        key = (method, replicate, archive_size)
+    def _final(method: str, replicate: int, archive_size: int, strategy: str) -> float:
+        key = (method, replicate, archive_size, strategy)
         if key in cache:
             return cache[key]
         subset = records[
@@ -228,7 +242,8 @@ def regen_summaries(root: Path, name: str) -> None:
                 subset,
                 true_params=true_params,
                 axis_kind="wall_time",
-                checkpoint_strategy="quantile",
+                checkpoint_strategy=strategy,
+                # checkpoint_count is ignored by the "all" strategy.
                 checkpoint_count=8,
                 archive_size=archive_size,
                 kernel=kernel,
@@ -250,13 +265,29 @@ def regen_summaries(root: Path, name: str) -> None:
         if method_col is None or "replicate" not in table.columns:
             print(f"[{path.name}] SKIP: no method/replicate columns to key on")
             continue
+        # ``method_variant`` identifies a scaling summary, whose value came from
+        # scaling_runner._quality_curve_by_wall_time ("all"); ``method`` identifies
+        # a runtime_summary one ("quantile", 8).
+        strategy = "all" if method_col == "method_variant" else "quantile"
         old = table["final_quality_wasserstein"].astype(float).copy()
         updated = []
         for _, row in table.iterrows():
+            existing = float(row["final_quality_wasserstein"]) \
+                if pd.notna(row["final_quality_wasserstein"]) else float("nan")
+            if math.isnan(existing):
+                # A deferred placeholder, not a stale value -- leave it for the
+                # runner's own backfill.
+                updated.append(existing)
+                continue
             archive_size = int(row["k"]) if "k" in table.columns and pd.notna(row["k"]) \
                 else inference.get("k")
-            updated.append(_final(str(row[method_col]), int(row["replicate"]), archive_size))
+            updated.append(
+                _final(str(row[method_col]), int(row["replicate"]), archive_size, strategy)
+            )
         table["final_quality_wasserstein"] = updated
+        if old.notna().sum() == 0:
+            print(f"[{path.name}] SKIP: all {len(table)} rows are deferred placeholders")
+            continue
 
         backup = path.with_suffix(".prekernelfix.csv")
         if not backup.exists():
