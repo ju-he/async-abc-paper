@@ -637,6 +637,16 @@ _COMPLETED_REPLICATES_REGISTRY: Dict[str, Callable[[OutputDir, Dict[str, Any]], 
     "hetero_twinprobe_s2p0": _completed_replicates_runtime_heterogeneity,
     "hetero_async_sim": _completed_replicates_runtime_heterogeneity,
     "hetero_twin": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin_s0p0": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin_s0p5": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin_s1p0": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin_s1p5": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin_s2p0": _completed_replicates_runtime_heterogeneity,
+    "hetero_twinB_s0p0": _completed_replicates_runtime_heterogeneity,
+    "hetero_twinB_s0p5": _completed_replicates_runtime_heterogeneity,
+    "hetero_twinB_s1p0": _completed_replicates_runtime_heterogeneity,
+    "hetero_twinB_s1p5": _completed_replicates_runtime_heterogeneity,
+    "hetero_twinB_s2p0": _completed_replicates_runtime_heterogeneity,
 }
 
 
