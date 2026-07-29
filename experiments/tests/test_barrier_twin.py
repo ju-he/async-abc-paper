@@ -76,3 +76,24 @@ def test_twin_delegates_breeding_to_the_base_propagator():
     prop.attach_comm(_FakeComm())
     assert prop([]) == "child-1"
     assert prop([]) == "child-2"
+
+
+def test_barrier_every_coarsens_the_generation():
+    """barrier_every=N barriers once per N breeds (generation of N*... evals).
+
+    A barrier on every call is a generation of exactly W evaluations, which is
+    finer-grained than a synchronous baseline whose population exceeds W.
+    """
+    cls = make_barrier_propagator_class(_FakeBase)
+    prop = cls(barrier=True, barrier_every=4)
+    comm = _FakeComm()
+    prop.attach_comm(comm)
+    for _ in range(12):
+        prop([])
+    assert comm.barriers == 3  # calls 0, 4, 8
+
+
+def test_barrier_every_must_be_positive():
+    cls = make_barrier_propagator_class(_FakeBase)
+    with pytest.raises(ValueError, match="barrier_every"):
+        cls(barrier=True, barrier_every=0)

@@ -13,7 +13,7 @@
     "async_propulate_abc"
   ],
   "inference": {
-    "max_simulations": 500000,
+    "max_simulations": 1000000,
     "n_workers": 48,
     "k": 100,
     "tol_init": 5.0,

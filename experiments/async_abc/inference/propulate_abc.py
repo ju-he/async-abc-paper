@@ -600,7 +600,9 @@ def run_propulate_abc(
 
         assert_barrier_safe(inference_cfg)
         propagator = make_barrier_propagator_class(ABCPMC)(
-            **abcpmc_kwargs, barrier=True
+            **abcpmc_kwargs,
+            barrier=True,
+            barrier_every=int(inference_cfg.get("barrier_every", 1)),
         )
     else:
         propagator = ABCPMC(**abcpmc_kwargs)

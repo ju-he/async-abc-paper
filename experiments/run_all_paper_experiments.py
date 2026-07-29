@@ -89,6 +89,10 @@ EXPERIMENT_REGISTRY = {
     "gandk": ("gandk_runner.py", "gandk.json"),
     "lotka_volterra": ("lotka_volterra_runner.py", "lotka_volterra.json"),
     "cellular_potts": ("cellular_potts_runner.py", "cellular_potts.json"),
+    "straggler_async_sim": ("straggler_runner.py", "straggler_async_sim.json"),
+    "straggler_twin": ("straggler_runner.py", "straggler_twin.json"),
+    "hetero_async_sim": ("runtime_heterogeneity_runner.py", "hetero_async_sim.json"),
+    "hetero_twin": ("runtime_heterogeneity_runner.py", "hetero_twin.json"),
     "sbc": ("sbc_runner.py", "sbc.json"),
     # Multidim (g-and-k) + multimodal (bimodal) SBC for external-review concern 6.
     "sbc_gandk": ("sbc_runner.py", "sbc_gandk.json"),

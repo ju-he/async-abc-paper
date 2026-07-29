@@ -617,6 +617,10 @@ _COMPLETED_REPLICATES_REGISTRY: Dict[str, Callable[[OutputDir, Dict[str, Any]], 
     "sensitivity": _completed_replicates_sensitivity,
     "ablation": _completed_replicates_ablation,
     "straggler": _completed_replicates_straggler,
+    "straggler_async_sim": _completed_replicates_straggler,
+    "straggler_twin": _completed_replicates_straggler,
+    "hetero_async_sim": _completed_replicates_runtime_heterogeneity,
+    "hetero_twin": _completed_replicates_runtime_heterogeneity,
 }
 
 

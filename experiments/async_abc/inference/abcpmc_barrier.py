@@ -78,11 +78,28 @@ def make_barrier_propagator_class(base_cls: type) -> type:
     class ABCPMCBarrier(base_cls):  # type: ignore[valid-type,misc]
         """``ABCPMC`` plus a collective barrier before each breed."""
 
-        def __init__(self, *args: Any, barrier: bool = False, **kwargs: Any) -> None:
+        def __init__(
+            self,
+            *args: Any,
+            barrier: bool = False,
+            barrier_every: int = 1,
+            **kwargs: Any,
+        ) -> None:
             super().__init__(*args, **kwargs)
             self._barrier_enabled = bool(barrier)
             self._barrier_comm: Optional[Any] = None
             self._barrier_calls = 0
+            self._call_count = 0
+            # A barrier on every call means a generation of exactly W evaluations
+            # (one per worker). The synchronous pyABC baseline uses a population
+            # of 100, i.e. a coarser generation, so it barriers less often than
+            # the twin does at W<100. ``barrier_every = ceil(N / W)`` recovers a
+            # generation of N evaluations, which keeps the twin comparable to a
+            # baseline whose population is not the worker count. Uniform across
+            # ranks, so the collective stays matched.
+            if int(barrier_every) < 1:
+                raise ValueError(f"barrier_every must be >= 1, got {barrier_every}")
+            self._barrier_every = int(barrier_every)
 
         def attach_comm(self, comm: Any) -> None:
             """Attach the communicator the barrier synchronises over.
@@ -107,8 +124,12 @@ def make_barrier_propagator_class(base_cls: type) -> type:
                         "communicator; call attach_comm(propulator.propulate_comm) "
                         "after constructing the Propulator."
                     )
-                self._barrier_comm.Barrier()
-                self._barrier_calls += 1
+                # Every rank increments identically, so the modulus fires on the
+                # same calls everywhere and the collective stays matched.
+                if self._call_count % self._barrier_every == 0:
+                    self._barrier_comm.Barrier()
+                    self._barrier_calls += 1
+                self._call_count += 1
             return super().__call__(inds)
 
     return ABCPMCBarrier
