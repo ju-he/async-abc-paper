@@ -761,24 +761,36 @@ def rebuild_scaling_outputs(
     fallback_rows: list[dict] | None = None,
     fallback_budget_rows: list[dict] | None = None,
     fallback_records: list[ParticleRecord] | None = None,
+    include_records: bool = True,
 ) -> list[dict]:
-    """Rebuild aggregate scaling CSVs/plots/metadata from per-combination shards."""
+    """Rebuild aggregate scaling CSVs/plots/metadata from per-combination shards.
+
+    ``include_records=False`` rebuilds the summary CSVs, metadata and plots from
+    the per-combination summary shards alone, skipping the raw-record pass. The
+    record pass loads every ``raw_results_w*_k*.csv`` shard into memory and
+    rewrites their concatenation, which is intractable on high-throughput grids
+    (the k-frontier grid produces ~150M records / >10 GB) — it timed out four
+    of six jobs there *after* every simulation had finished. The cost is that
+    NaN quality metrics are not backfilled and the aggregate ``raw_results.csv``
+    is left untouched, so only use it when the summary shards carry the
+    quantities you need.
+    """
     aggregate_rows = _load_scaling_rows(output_dir)
     budget_rows = _load_budget_rows(output_dir)
-    aggregate_records = _load_scaling_records(output_dir)
+    aggregate_records = _load_scaling_records(output_dir) if include_records else []
 
     if not aggregate_rows and fallback_rows:
         aggregate_rows = list(fallback_rows)
     if not budget_rows and fallback_budget_rows:
         budget_rows = list(fallback_budget_rows)
-    if not aggregate_records and fallback_records:
+    if not aggregate_records and fallback_records and include_records:
         aggregate_records = list(fallback_records)
 
     aggregate_rows = _sort_throughput_rows(aggregate_rows)
     budget_rows = _sort_budget_rows(budget_rows)
-    aggregate_records = _sort_records(aggregate_records)
-
-    _backfill_quality_metrics(aggregate_rows, budget_rows, aggregate_records, cfg)
+    if include_records:
+        aggregate_records = _sort_records(aggregate_records)
+        _backfill_quality_metrics(aggregate_rows, budget_rows, aggregate_records, cfg)
 
     if aggregate_rows:
         _write_rows_atomic(
@@ -792,7 +804,7 @@ def rebuild_scaling_outputs(
             budget_rows,
             _BUDGET_FIELDNAMES,
         )
-    if aggregate_records:
+    if include_records and aggregate_records:
         write_records(output_dir.data / "raw_results.csv", aggregate_records)
 
     quality_thresholds = [
@@ -897,6 +909,18 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
         help="Write per-combination shards only; skip aggregate CSV/plot rebuild.",
     )
     parser.add_argument(
+        "--finalize-skip-records",
+        action="store_true",
+        dest="finalize_skip_records",
+        help=(
+            "During finalization, rebuild the summary CSVs/metadata/plots from the "
+            "per-combination summary shards only, without loading or rewriting the "
+            "raw_results shards. Needed on high-throughput grids where the record "
+            "pass alone exceeds the job walltime; NaN quality metrics are then left "
+            "unbackfilled and aggregate raw_results.csv is left untouched."
+        ),
+    )
+    parser.add_argument(
         "--estimate",
         action="store_true",
         help="After the run, print an estimated full-run wall time extrapolated from measured elapsed times.",
@@ -938,7 +962,9 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
 
     if args.finalize_only:
         if is_root_rank():
-            rebuild_scaling_outputs(output_dir, cfg)
+            rebuild_scaling_outputs(
+                output_dir, cfg, include_records=not args.finalize_skip_records
+            )
         return
 
     benchmark = make_benchmark(cfg["benchmark"])
@@ -1287,6 +1313,7 @@ def main(argv: list[str] | None = None, *, prepare_runtime_cfg=None) -> None:
             fallback_rows=aggregate_throughput_rows,
             fallback_budget_rows=aggregate_budget_rows,
             fallback_records=aggregate_records,
+            include_records=not args.finalize_skip_records,
         )
 
 

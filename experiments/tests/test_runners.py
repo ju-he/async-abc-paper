@@ -534,6 +534,63 @@ class TestScalingRunner:
         assert [int(row["n_workers"]) for row in aggregate_rows] == [1, 4]
         assert captured["worker_counts"] == [1, 4]
 
+    def test_rebuild_scaling_outputs_include_records_false_skips_record_pass(
+        self, tmp_path, monkeypatch
+    ):
+        """``include_records=False`` must not touch the raw_results shards.
+
+        The record pass is what timed out four of six k-frontier jobs *after*
+        every simulation had completed, so the records-free path has to rebuild
+        the summary CSVs without loading or rewriting any raw records.
+        """
+        module = test_helpers.import_runner_module("scaling_runner.py")
+        output_dir = module.OutputDir(tmp_path, "scaling").ensure()
+        monkeypatch.setattr(module, "write_metadata", lambda *_a, **_k: None)
+
+        def _boom(*_args, **_kwargs):
+            raise AssertionError("record pass must not run when include_records=False")
+
+        monkeypatch.setattr(module, "_load_scaling_records", _boom)
+        monkeypatch.setattr(module, "write_records", _boom)
+        monkeypatch.setattr(module, "_backfill_quality_metrics", _boom)
+
+        throughput_row = {
+            "base_method": "async_propulate_abc",
+            "method_variant": "async_propulate_abc__k10__w1",
+            "stop_policy": "wall_time_exact",
+            "k": 10,
+            "n_workers": 1,
+            "replicate": 0,
+            "seed": 1,
+            "requested_max_simulations": 80,
+            "max_wall_time_s": 0.1,
+            "elapsed_wall_time_s": 2.0,
+            "n_simulations": 10,
+            "throughput_sims_per_s": 5.0,
+            "final_quality_wasserstein": float("nan"),
+            "final_n_particles": 5,
+            "final_tolerance": 1.0,
+            "state_kind": "accepted_prefix",
+            "test_mode": False,
+        }
+        module._write_rows_atomic(
+            module._throughput_shard_path(output_dir.data, 1, 10),
+            [throughput_row],
+            module._THROUGHPUT_FIELDNAMES,
+        )
+
+        aggregate_rows = module.rebuild_scaling_outputs(
+            output_dir,
+            {"plots": {}, "experiment_name": "scaling", "scaling": {"wall_time_budgets_s": [0.1]}},
+            fallback_records=[object()],
+            include_records=False,
+        )
+
+        assert [int(row["n_workers"]) for row in aggregate_rows] == [1]
+        csv_rows = _rows(output_dir.data / "throughput_summary.csv")
+        assert [int(row["k"]) for row in csv_rows] == [10]
+        assert not (output_dir.data / "raw_results.csv").exists()
+
     def test_rebuild_scaling_metadata_includes_stop_policy_mapping(self, tmp_path, monkeypatch):
         module = test_helpers.import_runner_module("scaling_runner.py")
         output_dir = module.OutputDir(tmp_path, "scaling").ensure()
