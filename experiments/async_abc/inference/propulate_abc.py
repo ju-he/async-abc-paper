@@ -590,7 +590,20 @@ def run_propulate_abc(
     # (make_matched_epsilon) read the same ESS-retention target (review II.1).
     if "ess_retention" in inference_cfg:
         abcpmc_kwargs["ess_target"] = float(inference_cfg["ess_retention"])
-    propagator = ABCPMC(**abcpmc_kwargs)
+    # Barrierized twin (external review concern 4): identical proposals,
+    # weights, archive and estimator, with a collective barrier before each
+    # breed so the asynchronous arm and the twin differ only in synchronization.
+    # Lives in the paper repo -- Propulate itself is untouched.
+    barrier_mode = bool(inference_cfg.get("barrier", False))
+    if barrier_mode:
+        from .abcpmc_barrier import assert_barrier_safe, make_barrier_propagator_class
+
+        assert_barrier_safe(inference_cfg)
+        propagator = make_barrier_propagator_class(ABCPMC)(
+            **abcpmc_kwargs, barrier=True
+        )
+    else:
+        propagator = ABCPMC(**abcpmc_kwargs)
 
     run_start = time.time()
     eval_count = 0
@@ -646,6 +659,18 @@ def run_propulate_abc(
         checkpoint_path=checkpoint_dir,
         **propulator_kwargs,
     )
+
+    if barrier_mode:
+        # The propagator is only *invoked* inside propulate(), so attaching the
+        # communicator here needs no Propulate change. propulate_comm is exactly
+        # the set of ranks that breed, hence the correct collective scope.
+        _barrier_comm = getattr(propulator, "propulate_comm", None)
+        if _barrier_comm is None:
+            raise RuntimeError(
+                "barrier=True but propulator.propulate_comm is None; the twin "
+                "cannot synchronise without the breeding communicator."
+            )
+        propagator.attach_comm(_barrier_comm)
 
     logging_interval = max(1, generation_budget + 1)
     try:

@@ -100,7 +100,9 @@ def _apply_test_mode(cfg: dict) -> dict:
     """Return a deep-copied config with test-mode overrides applied."""
     cfg = copy.deepcopy(cfg)
     test_mode_overrides = get_test_mode_overrides()
-    # Clamp: use min(current, limit)
+    # Clamp: use min(current, limit). Note this *injects* the limit when the key
+    # is absent, which is deliberate -- it keeps every test-mode run bounded so a
+    # smoke test cannot hang (see TestWallTimeClamping).
     for section, overrides in test_mode_overrides.get("clamp", {}).items():
         if section not in cfg:
             continue
@@ -113,6 +115,15 @@ def _apply_test_mode(cfg: dict) -> dict:
             continue
         for key, val in overrides.items():
             cfg[section][key] = val
+    # Sole exception to the wall-time injection above: a barrierized-twin run
+    # must stay simulation-limited. Its collective barrier needs identical
+    # per-rank call counts, but a wall-clock deadline stops ranks independently
+    # (first-rank-hit semantics), so an injected deadline would deadlock the run
+    # rather than bound it. The run stays bounded via the max_simulations /
+    # n_generations clamps instead, so the safety property is preserved.
+    if cfg.get("inference", {}).get("barrier"):
+        cfg["inference"].pop("max_wall_time_s", None)
+
     # CPM runs are substantially heavier than the toy benchmarks. Shrink the
     # test budget further so cluster smoke tests stay cheap even under MPI.
     if cfg.get("benchmark", {}).get("name") == "cellular_potts":

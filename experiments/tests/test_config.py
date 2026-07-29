@@ -338,6 +338,21 @@ class TestWallTimeClamping:
         cfg = load_config(p, test_mode=True)
         assert cfg["inference"]["max_wall_time_s"] == 30
 
+    def test_barrier_runs_are_exempt_from_wall_time_injection(self, tmp_path, minimal_config):
+        """A barrierized twin must stay simulation-limited or it deadlocks.
+
+        The injection above keeps test runs bounded, but a collective barrier
+        needs identical per-rank call counts and a wall-clock deadline stops
+        ranks independently (first-rank-hit). Injecting one would hang the run
+        instead of bounding it; max_simulations/n_generations still bound it.
+        """
+        minimal_config["inference"]["barrier"] = True
+        p = tmp_path / "cfg.json"
+        p.write_text(json.dumps(minimal_config))
+        cfg = load_config(p, test_mode=True)
+        assert "max_wall_time_s" not in cfg["inference"]
+        assert cfg["inference"]["max_simulations"] <= 100
+
     @pytest.mark.parametrize("config_name", [
         "gaussian_mean.json",
         "gandk.json",
