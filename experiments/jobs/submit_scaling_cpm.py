@@ -144,6 +144,7 @@ def _render_packed_script(
     test_mode: bool,
     small_mode: bool,
     extend: bool,
+    step_timeout_min: int | None,
     account: str,
     partition: str,
     time_limit: str,
@@ -173,7 +174,12 @@ def _render_packed_script(
         f"\n"
         f"export EXPERIMENTS_DIR={experiments_dir}\n"
         f"export NASTJAPY_PATH={nastjapy_path}\n"
-        f"\n"
+        + (
+            f"export SCALING_CPM_STEP_TIMEOUT_MIN={step_timeout_min}\n"
+            if step_timeout_min is not None
+            else ""
+        )
+        + f"\n"
         f"exec {packed_script} {output_dir} --workers {workers_csv}"
         f" --config {config_path}"
         f"{' ' + flag_str if flag_str else ''}\n"
@@ -190,6 +196,7 @@ def _render_standalone_script(
     test_mode: bool,
     small_mode: bool,
     extend: bool,
+    step_timeout_min: int | None,
     account: str,
     partition: str,
     time_limit: str,
@@ -220,7 +227,12 @@ def _render_standalone_script(
         f"\n"
         f"export EXPERIMENTS_DIR={experiments_dir}\n"
         f"export NASTJAPY_PATH={nastjapy_path}\n"
-        f"\n"
+        + (
+            f"export SCALING_CPM_STEP_TIMEOUT_MIN={step_timeout_min}\n"
+            if step_timeout_min is not None
+            else ""
+        )
+        + f"\n"
         f"exec {scaling_script} {output_dir}"
         f" --config {config_path}"
         f"{' ' + flag_str if flag_str else ''}\n"
@@ -299,6 +311,20 @@ def main() -> None:
         "--extend",
         action="store_true",
         help="Pass --extend to skip already-completed worker counts.",
+    )
+    parser.add_argument(
+        "--step-timeout-min",
+        type=int,
+        default=None,
+        dest="step_timeout_min",
+        metavar="MINUTES",
+        help=(
+            "Per-srun step wall cap (SCALING_CPM_STEP_TIMEOUT_MIN in "
+            "scaling_cpm_single.sh, default 120 there). A hung combo burns "
+            "nodes x this cap before the loop advances, so size it just above "
+            "the slowest healthy combo: the barrier twin hung twice at >=192 "
+            "ranks and each hang cost the full 120 min on 4-8 nodes."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -450,6 +476,7 @@ def main() -> None:
                 test_mode=args.test,
                 small_mode=args.small,
                 extend=args.extend,
+                step_timeout_min=args.step_timeout_min,
                 account=args.account,
                 partition=args.partition,
                 time_limit=time_str,
@@ -495,6 +522,7 @@ def main() -> None:
                 test_mode=args.test,
                 small_mode=args.small,
                 extend=args.extend,
+                step_timeout_min=args.step_timeout_min,
                 account=args.account,
                 partition=args.partition,
                 time_limit=time_str,

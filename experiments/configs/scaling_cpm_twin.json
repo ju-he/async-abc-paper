@@ -32,7 +32,7 @@
     "barrier": true
   },
   "execution": {
-    "n_replicates": 3,
+    "n_replicates": 5,
     "base_seed": 0
   },
   "scaling": {
