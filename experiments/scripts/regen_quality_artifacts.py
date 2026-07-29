@@ -145,13 +145,157 @@ def regen_experiment(root: Path, name: str) -> None:
                   f"{span:.0f}s, median archive {npu:.0f}", flush=True)
 
 
+def _summary_paths(exp: Path) -> list[Path]:
+    """Summary CSVs under ``exp`` carrying a ``final_quality_wasserstein`` column.
+
+    Covers both shapes the runners emit: the straggler/heterogeneity single
+    summary and the scaling runs' per-combination ``throughput_summary_w*_k*``
+    shards plus their aggregate.
+    """
+    data = exp / "data"
+    if not data.is_dir():
+        return []
+    found = []
+    for path in sorted(data.glob("*.csv")):
+        if path.name.endswith(".prekernelfix.csv"):
+            continue
+        try:
+            header = pd.read_csv(path, nrows=0).columns.tolist()
+        except Exception:  # noqa: BLE001 - a malformed CSV is not this pass's business
+            continue
+        if "final_quality_wasserstein" in header:
+            found.append(path)
+    return found
+
+
+def regen_summaries(root: Path, name: str) -> None:
+    """Rewrite ``final_quality_wasserstein`` in an experiment's summary CSVs.
+
+    ``regen_experiment`` above rebuilt the quality *curves*, but the summary
+    CSVs carry their own copy of the curve's final value, computed by
+    ``runtime_summary._final_quality_wasserstein`` /
+    ``scaling_runner._quality_curve_by_wall_time`` at run time -- i.e. with the
+    hard-kernel archive rule on any run that predates f62f143. Those columns are
+    therefore still pre-fix on disk even where the curves have been corrected.
+
+    Only the unweighted metric is affected. ``final_quality_wasserstein_weighted``
+    and ``_analytic`` resample the reported posterior via
+    ``runtime_summary._weighted_final_frame``, which never touches the
+    kernel-dependent archive reconstruction, so they are left alone.
+
+    Recomputes per (method, replicate) from the raw records with the run's own
+    kernel, preserving the original as ``*.prekernelfix.csv``.
+    """
+    exp = root / name
+    raw_csv = exp / "data" / "raw_results.csv"
+    meta_path = exp / "data" / "metadata.json"
+    if not raw_csv.exists() or not meta_path.exists():
+        print(f"[{name}] summaries SKIP: missing raw_results.csv or metadata.json")
+        return
+    summaries = _summary_paths(exp)
+    if not summaries:
+        print(f"[{name}] summaries SKIP: no final_quality_wasserstein column on disk")
+        return
+
+    cfg = json.loads(meta_path.read_text()).get("config", {})
+    inference = cfg.get("inference", {})
+    kernel = str(inference.get("kernel", "hard"))
+    true_params = _true_params(cfg.get("benchmark", {}))
+    if not true_params:
+        print(f"[{name}] summaries SKIP: no true_* params in benchmark config")
+        return
+
+    print(f"[{name}] summaries: loading {raw_csv} "
+          f"({raw_csv.stat().st_size / 1e9:.1f} GB) ...", flush=True)
+    records = _load_records(raw_csv)
+    print(f"[{name}] summaries: {len(records):,} records; kernel={kernel}", flush=True)
+
+    # The archive size varies per row on the scaling runs (k is swept), so the
+    # curve is computed per (method, replicate) with that row's own k.
+    cache: dict[tuple[str, int, int], float] = {}
+
+    def _final(method: str, replicate: int, archive_size: int) -> float:
+        key = (method, replicate, archive_size)
+        if key in cache:
+            return cache[key]
+        subset = records[
+            (records["method"].astype(str) == method)
+            & (records["replicate"].astype(int) == int(replicate))
+        ]
+        value = float("nan")
+        if not subset.empty:
+            quality = posterior_quality_curve(
+                subset,
+                true_params=true_params,
+                axis_kind="wall_time",
+                checkpoint_strategy="quantile",
+                checkpoint_count=8,
+                archive_size=archive_size,
+                kernel=kernel,
+            )
+            if not quality.empty:
+                value = float(quality.sort_values("axis_value").iloc[-1]["wasserstein"])
+        cache[key] = value
+        return value
+
+    for path in summaries:
+        table = pd.read_csv(path)
+        # The straggler/heterogeneity summaries name the tagged run ``method``;
+        # the scaling summaries call the same thing ``method_variant`` and reserve
+        # ``method``-less ``base_method`` for the family. Either way the value is
+        # what the raw records' ``method`` column holds.
+        method_col = next(
+            (c for c in ("method", "method_variant") if c in table.columns), None
+        )
+        if method_col is None or "replicate" not in table.columns:
+            print(f"[{path.name}] SKIP: no method/replicate columns to key on")
+            continue
+        old = table["final_quality_wasserstein"].astype(float).copy()
+        updated = []
+        for _, row in table.iterrows():
+            archive_size = int(row["k"]) if "k" in table.columns and pd.notna(row["k"]) \
+                else inference.get("k")
+            updated.append(_final(str(row[method_col]), int(row["replicate"]), archive_size))
+        table["final_quality_wasserstein"] = updated
+
+        backup = path.with_suffix(".prekernelfix.csv")
+        if not backup.exists():
+            pd.read_csv(path).to_csv(backup, index=False)
+        table.to_csv(path, index=False)
+
+        new = table["final_quality_wasserstein"].astype(float)
+        both = old.notna() & new.notna()
+        shift = (new[both] - old[both]).abs()
+        print(f"[{path.name}] {len(table)} rows rewritten; "
+              f"median |change| {shift.median() if len(shift) else float('nan'):.4f}, "
+              f"max {shift.max() if len(shift) else float('nan'):.4f}", flush=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--experiments", nargs="+", required=True)
+    parser.add_argument(
+        "--summaries",
+        action="store_true",
+        help=(
+            "Also rewrite the stale final_quality_wasserstein column in the "
+            "experiment's summary CSVs (see regen_summaries). Independent of the "
+            "curve rebuild -- pass --summaries-only to skip the curves."
+        ),
+    )
+    parser.add_argument(
+        "--summaries-only",
+        action="store_true",
+        dest="summaries_only",
+        help="Rewrite only the summary CSVs; leave the quality curves untouched.",
+    )
     args = parser.parse_args()
     for name in args.experiments:
-        regen_experiment(args.root, name)
+        if not args.summaries_only:
+            regen_experiment(args.root, name)
+        if args.summaries or args.summaries_only:
+            regen_summaries(args.root, name)
 
 
 if __name__ == "__main__":
