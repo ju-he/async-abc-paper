@@ -191,9 +191,13 @@ def regen_summaries(root: Path, name: str) -> None:
 
     * **Match the producer's checkpoint strategy.** The two producers disagree:
       ``runtime_summary`` uses ``quantile`` with 8 checkpoints, ``scaling_runner``
-      uses ``all``. Recomputing with the wrong one produces a difference that
-      looks like a kernel correction but is a resampling artifact -- on CPM it
-      moved values by up to 0.115 with the strategy mismatch alone.
+      uses ``all``. For *this* metric the two happen to agree, because both
+      strategies place their last checkpoint at the maximum ``axis_value`` and
+      the metric is the last checkpoint's value (verified directly: 0.520199
+      from both on CPM w48/k100/rep0, 8 vs 500 checkpoints). The pass still
+      selects per producer, so it stays correct if the metric ever stops being
+      "the final checkpoint" -- but do not attribute a difference to the
+      strategy without checking, as I initially did.
     * **Do not fill NaN placeholders.** The scaling runners write per-combination
       shards with ``final_quality_wasserstein`` deliberately NaN and defer the
       metric to ``_backfill_quality_metrics`` at finalize time. Populating those
