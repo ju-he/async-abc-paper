@@ -186,14 +186,14 @@ $\alpha_{s,n}$ being the fraction of the $n$ draws that snapshot $s$ stands in f
 \begin{assumption}[kernel]\label{ass:kernel} $K_\epsilon:[0,\infty)\to[0,1]$ is measurable with $K_\epsilon(0)=1$ (unit \emph{peak}, not unit integral, as is standard for a probabilistic-acceptance ABC kernel), and there is $L_K<\infty$ with $|K_\epsilon(\rho)-K_{\epsilon'}(\rho)|\le L_K|\epsilon-\epsilon'|$ for all $\rho\ge0$ and all $\epsilon,\epsilon'\in[\epsilon_\infty,\epsilon_0]$. The limiting target is non-degenerate: $Z_{\epsilon_\infty}=\int_\Theta\pi L_{\epsilon_\infty}>0$.\end{assumption}
 \begin{assumption}[proposal class]\label{ass:class} $\Theta\subset\mathbb{R}^d$ is a non-degenerate axis-aligned box (the prior support of the implementation) and the prior density satisfies $0<\pi_-\le\pi\le\pi_+<\infty$ on $\Theta$. Every proposal $q_i$ is a $\Theta$-truncated Gaussian mixture with at most $k$ components, component means in $\Theta$, component weights in the simplex, and covariance $\Sigma_i$ obeying $\sigma_-^2 I\preceq\Sigma_i\preceq\sigma_+^2 I$ for fixed $0<\sigma_-\le\sigma_+<\infty$.\end{assumption}
 \begin{assumption}[defensive floor]\label{ass:defensive} $\delta\in(0,1/2]$ is fixed, and the same $\delta$ appears in the sampler \eqref{eq:defensive-proposal} and in the denominator \eqref{eq:snapshot-denominator}.\end{assumption}
-\begin{assumption}[stabilization]\label{ass:stab} $\epsilon_n\downarrow\epsilon_\infty>0$ and
+\begin{assumption}[stabilization]\label{ass:stab} \emph{(i, consistency)} $\epsilon_n\downarrow\epsilon_\infty>0$ and
 \begin{equation}
 \bigl\|\bar q^\star_n/\bar q_n-1\bigr\|_\infty\to0\quad\text{a.s.},
 \qquad
 \bar q^\star_n:=\tfrac1n\textstyle\sum_{i\le n}q^\delta_i,
 \label{eq:stab-consistency}
 \end{equation}
-$\bar q^\star_n$ being the mixture the pooled sample was actually drawn from. For the central limit theorem we require in addition that $\epsilon_\infty$ be \emph{deterministic}, that a (possibly random) limiting proposal $q_\infty$ exist, with $\bar q_\infty=\delta\pi+(1-\delta)q_\infty$, and that, almost surely,
+$\bar q^\star_n$ being the mixture the pooled sample was actually drawn from. \emph{(ii, central limit theorem)} In addition, $\epsilon_\infty$ is \emph{deterministic}, a (possibly random) limiting proposal $q_\infty$ exists, with $\bar q_\infty=\delta\pi+(1-\delta)q_\infty$, and, almost surely,
 \begin{equation}
 \begin{aligned}
 &\sqrt n\,\bigl(|\epsilon_n-\epsilon_\infty|+\|\bar q_n-\bar q_\infty\|_\infty\bigr)\to0,\\
@@ -207,12 +207,12 @@ where $\epsilon_{i-1}$ is the bandwidth in force at the $i$-th proposal and $\ba
 Assumption~\ref{ass:kernel} holds for the Gaussian kernel with $L_K=2/(e\,\epsilon_\infty)$ and for Epanechnikov with $L_K=2/\epsilon_\infty$; it excludes the hard indicator, which is not Lipschitz in $\epsilon$ --- one concrete reason the method uses smooth kernels. Assumption~\ref{ass:class} holds by construction in the implementation apart from one detail --- each mixture component's truncation constant is evaluated as a product of per-axis in-box masses rather than the exact box probability (Appendix~\ref{app:theory}, Table~\ref{tab:assumption-status}). Assumption~\ref{ass:stab} is the only genuinely restrictive one; it is where the adaptive nature of the scheme is quarantined. It is stated as exactly what the proofs consume, which is weaker than proposal convergence: \eqref{eq:stab-consistency} asks only that the reported denominator track the mixture actually sampled from, and does not require $q_n$ itself to converge. A single sufficient condition for both parts is $\|q_n-q_\infty\|_\infty+\|\bar q_n-\bar q_\infty\|_\infty+|\epsilon_n-\epsilon_\infty|=O(n^{-1/2-a})$ for some $a>0$; \eqref{eq:rate} is the explicit rate the CLT needs, and a bandwidth schedule as slow as $\epsilon_n-\epsilon_\infty\sim1/\log n$ violates it, as does a proposal that keeps drifting at scale $n^{-1/2}$.
 
 \begin{theorem}[consistency]\label{thm:consistency}
-Let Assumptions~\ref{ass:kernel}--\ref{ass:stab} hold for $\mathcal{A}_\delta$. Then for every bounded measurable $f:\Theta\to\mathbb{R}$,
+Let Assumptions~\ref{ass:kernel}--\ref{ass:defensive} and \ref{ass:stab}(i) hold for $\mathcal{A}_\delta$. Then for every bounded measurable $f:\Theta\to\mathbb{R}$,
 $\widehat\pi_n(f)\to\pi_{\epsilon_\infty}(f)$ almost surely.
 \end{theorem}
 
 \begin{theorem}[central limit theorem]\label{thm:clt}
-Let Assumptions~\ref{ass:kernel}--\ref{ass:stab} hold for $\mathcal{A}_\delta$, including the rates \eqref{eq:rate}. Then for every bounded measurable $f$,
+Let Assumptions~\ref{ass:kernel}--\ref{ass:defensive} and \ref{ass:stab}(i)--(ii) hold for $\mathcal{A}_\delta$. Then for every bounded measurable $f$,
 \begin{equation}
 \sqrt{n}\bigl(\widehat\pi_n(f)-\pi_{\epsilon_\infty}(f)\bigr)\;\longrightarrow\;\sigma_f\,\mathcal{Z}
 \quad\text{stably},\qquad \mathcal{Z}\sim\mathcal{N}(0,1)\ \text{independent of }\mathcal{F}_\infty,
@@ -236,7 +236,7 @@ we have $\widehat\sigma^2_n\to\sigma^2_f$ a.s.\ and $\sqrt n(\widehat\pi_n(f)-\p
 \paragraph{What the reported estimator targets.} The runs reported in this paper predate this analysis and use $\delta=0$ in the sampler: prior draws occur only in the bootstrap phase, so their share $\nu_n$ of the history decays to zero, while the denominator's prior mass is held at $w_n=\max(\nu_n,\delta)$ with $\delta=0.5/(m{+}1)$ (Appendix~\ref{app:implementation}). A defensive component in the denominator that the sampler does not use is weight \emph{clipping}, not defensive importance sampling, and it tilts the target:
 
 \begin{proposition}[the floored-denominator estimator]\label{prop:tilt}
-Let $\mathcal{A}_0$ denote the algorithm with $\theta_i\sim q_i$ outside the bootstrap phase and denominator $\bar q^{\mathrm{fl}}_n=w_n\pi+(1-w_n)\sum_s\alpha_{s,n}q_{\tau_s}$, $w_n=\max(\nu_n,\delta)$. Under Assumptions~\ref{ass:kernel}, \ref{ass:class}, \ref{ass:stab} and $\nu_n\to\nu_\infty$, the estimator \eqref{eq:posterior-estimator} converges a.s.\ to the \emph{tilted} target
+Let $\mathcal{A}_0$ denote the algorithm with $\theta_i\sim q_i$ outside the bootstrap phase and denominator $\bar q^{\mathrm{fl}}_n=w_n\pi+(1-w_n)\sum_s\alpha_{s,n}q_{\tau_s}$, $w_n=\max(\nu_n,\delta)$. Under Assumptions~\ref{ass:kernel}, \ref{ass:class}, \ref{ass:stab}(i) and $\nu_n\to\nu_\infty$, the estimator \eqref{eq:posterior-estimator} converges a.s.\ to the \emph{tilted} target
 \begin{equation}
 \widetilde\pi_{\epsilon_\infty}(f)=\frac{\int f\,\pi L_{\epsilon_\infty}\,r_\infty}{\int \pi L_{\epsilon_\infty}\,r_\infty},
 \qquad
