@@ -41,7 +41,7 @@ _NASTJAPY_AVAILABLE = _nastjapy_available()
 def cpm_config(tmp_path):
     """Minimal CellularPotts config using real template files (nastjapy must be available)."""
     if not _NASTJAPY_AVAILABLE:
-        pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+        pytest.skip("nastjapy not available — run with the repo-root .venv")
     return {
         "name": "cellular_potts",
         "nastja_config_template": str(_CPM_TEMPLATE_DIR / "sim_config.json"),
@@ -471,7 +471,7 @@ class TestCellularPottsImport:
         from async_abc.benchmarks.cellular_potts import CellularPotts
 
         if not _NASTJAPY_AVAILABLE:
-            pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+            pytest.skip("nastjapy not available — run with the repo-root .venv")
 
         mock_sim, mock_dist = cpm_mocks
         monkeypatch.chdir(tmp_path)
@@ -495,7 +495,7 @@ class TestCellularPottsImport:
         import async_abc.benchmarks.cellular_potts as cellular_potts
 
         if not _NASTJAPY_AVAILABLE:
-            pytest.skip("nastjapy not available — run with nastjapy_copy/.venv")
+            pytest.skip("nastjapy not available — run with the repo-root .venv")
 
         cellular_potts._ensure_nastjapy_on_path()
         inference_distance = importlib.import_module("inference.distance")

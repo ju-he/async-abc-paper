@@ -12,7 +12,7 @@ Paper experiments for asynchronous ABC with Propulate.
 - `nastjapy` plus a working `nastja` build for the `cellular_potts` benchmark
 
 The `cellular_potts` benchmark first tries the active Python environment and
-then falls back to a repo-local `nastjapy_copy/.venv` if it exists.
+then falls back to a repo-local `.venv` if it exists.
 
 Cluster helper scripts under `experiments/jobs/` assume SLURM plus an MPI
 environment.

@@ -1,7 +1,7 @@
 """Cellular Potts model benchmark backed by nastjapy's simulation machinery.
 
 Requires nastjapy to run simulations. The active environment is preferred; the
-repo-local ``nastjapy_copy/.venv`` is used only as a fallback.
+repo-local ``.venv`` is used only as a fallback.
 """
 from __future__ import annotations
 
@@ -18,7 +18,13 @@ from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-_NASTJAPY_VENV = Path(__file__).resolve().parents[3] / "nastjapy_copy" / ".venv"
+# Repo-local fallback venv. Was ``nastjapy_copy/.venv`` (a symlink into
+# Code/mirrors/) until that directory disappeared from the sync share on
+# 2026-07-30; the venv now lives at the repo root. Only consulted when the
+# ACTIVE environment cannot import nastja, so it is inert whenever the run
+# already uses .venv, and absent on the cluster checkout (deploys exclude
+# dotfiles), where nastjapy comes from the module-loaded venv instead.
+_NASTJAPY_VENV = Path(__file__).resolve().parents[3] / ".venv"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _OUTPUT_CSV_RE = re.compile(r"^output_cells-\d{5}\.csv$")
 # x86/x86-64 fenv.h constants. These values are architecture-specific (ARM
@@ -91,7 +97,7 @@ def _ensure_nastjapy_on_path() -> None:
     Raises
     ------
     ImportError
-        If neither the active environment nor ``nastjapy_copy/.venv`` is usable.
+        If neither the active environment nor the repo-local ``.venv`` is usable.
     """
     try:
         import nastja.parameter_space_config  # noqa: F401
@@ -102,7 +108,7 @@ def _ensure_nastjapy_on_path() -> None:
             raise ImportError(
                 "The cellular_potts benchmark requires a working nastjapy/nastja "
                 "installation in the active environment, or a repo-local "
-                f"'nastjapy_copy/.venv' fallback with site-packages at {site_packages}."
+                f"'.venv' fallback with site-packages at {site_packages}."
             ) from env_exc
 
     site_packages_str = str(site_packages)
