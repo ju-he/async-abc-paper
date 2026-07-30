@@ -39,11 +39,27 @@ passes="${CPM_TWIN_RETRY_PASSES:-3}"
 # Bound a hung combo. Slowest healthy twin combo observed: 2241 s at 384 ranks.
 export SCALING_CPM_STEP_TIMEOUT_MIN="${SCALING_CPM_STEP_TIMEOUT_MIN:-45}"
 
-# Per-rank Python traceback snapshots. Written from inside the process, so no
-# ptrace is needed (compute nodes block it). Costs one small file per rank.
-export SCALING_FAULTHANDLER_S="${SCALING_FAULTHANDLER_S:-15}"
-export SCALING_FAULTHANDLER_DIR="$output_dir/pytraces_w${SLURM_NTASKS}_job${SLURM_JOB_ID}"
-mkdir -p "$SCALING_FAULTHANDLER_DIR"
+# Per-rank Python traceback snapshots, OFF BY DEFAULT -- opt in with
+# SCALING_FAULTHANDLER_S=<seconds>.
+#
+# It is off because enabling it made things worse, measurably. The first retry
+# run had it on at 15 s and produced 9 segfaults at 384 ranks and 2 at 192,
+# against ZERO segfaults across all four earlier runs of the same combos (which
+# failed by hanging instead). faulthandler.dump_traceback_later(repeat=True)
+# walks every thread's stack from a watchdog thread, and doing that repeatedly
+# inside an MPI process with C extensions live is evidently not safe here at
+# these rank counts: it converted hangs into crashes. So it changes the failure
+# mode it is supposed to observe, and any run using it is not measuring the
+# same thing as a run without it.
+#
+# If you do turn it on, treat the resulting run as a diagnostic only and do NOT
+# keep its throughput numbers.
+if [ -n "${SCALING_FAULTHANDLER_S:-}" ]; then
+    export SCALING_FAULTHANDLER_S
+    export SCALING_FAULTHANDLER_DIR="$output_dir/pytraces_w${SLURM_NTASKS}_job${SLURM_JOB_ID}"
+    mkdir -p "$SCALING_FAULTHANDLER_DIR"
+    echo "[retry] WARNING: faulthandler on (${SCALING_FAULTHANDLER_S}s) -- diagnostic run, discard its throughput"
+fi
 
 echo "[retry] ntasks=$SLURM_NTASKS passes=$passes step_cap=${SCALING_CPM_STEP_TIMEOUT_MIN}min"
 echo "[retry] traces -> $SCALING_FAULTHANDLER_DIR"
@@ -56,6 +72,11 @@ for pass in $(seq 1 "$passes"); do
     "$experiments_dir/jobs/scaling_cpm_single.sh" "$output_dir" "$@" --extend || true
 done
 
-echo "[retry] done; surviving traces:"
-# Only report traces that show a rank stuck: >1 snapshot with an identical tail.
-find "$SCALING_FAULTHANDLER_DIR" -name 'rank_*.txt' -size +0 | head -20
+# Traces exist only when the faulthandler was explicitly enabled above; the
+# script runs under `set -u`, so guard on the variable being set at all.
+if [ -n "${SCALING_FAULTHANDLER_DIR:-}" ]; then
+    echo "[retry] done; traces:"
+    find "$SCALING_FAULTHANDLER_DIR" -name 'rank_*.txt' -size +0 | head -20
+else
+    echo "[retry] done (no faulthandler traces requested)"
+fi
