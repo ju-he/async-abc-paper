@@ -62,7 +62,7 @@ if [ -n "${SCALING_FAULTHANDLER_S:-}" ]; then
 fi
 
 echo "[retry] ntasks=$SLURM_NTASKS passes=$passes step_cap=${SCALING_CPM_STEP_TIMEOUT_MIN}min"
-echo "[retry] traces -> $SCALING_FAULTHANDLER_DIR"
+echo "[retry] traces -> ${SCALING_FAULTHANDLER_DIR:-(disabled)}"
 
 for pass in $(seq 1 "$passes"); do
     echo "[retry] ===== pass $pass/$passes ====="
