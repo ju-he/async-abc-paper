@@ -39,7 +39,27 @@ class ParticleRecord:
         methods that do not produce it (e.g. pyABC, which carries its own
         posterior weight in ``weight``).
     tolerance:
-        Effective tolerance at the time of proposal (None during prior phase).
+        Running-minimum tolerance trajectory: the tightest bandwidth reached up
+        to and including this record. Monotone by construction and intended for
+        the tolerance-over-time plots. It is *not* the per-call stamped value --
+        during the prior phase it carries the initial tolerance rather than
+        ``None`` -- so it cannot be fed back into ``extract_posterior``. Use
+        ``proposal_tolerance`` for that.
+    proposal_tolerance:
+        The bandwidth the propagator actually stamped on this candidate at
+        proposal time, verbatim: ``None`` for a bootstrap (uniform-prior) draw
+        and the effective tolerance for an archive-phase draw. This is the field
+        ``ABCPMC.extract_posterior`` reconstructs each past proposal from, and
+        the ``None`` marks exactly the draws it must treat as prior draws.
+
+        It exists because ``tolerance`` alone is not sufficient to rebuild the
+        reported posterior from a stored run: collapsing the prior phase into
+        the initial tolerance moves the replayed weights by a correlation of
+        about 0.967 against the run's own output, since the bootstrap draws are
+        then wrongly given archive-phase proposals in the mixture denominator.
+        The boundary cannot be recovered after the fact either -- it falls at
+        roughly ``k + O(W)`` draws, not at ``k``, because the ranks in flight
+        when the archive fills are also prior draws.
     wall_time:
         Wall-clock seconds elapsed since the start of the run.
     record_kind:
@@ -61,6 +81,7 @@ class ParticleRecord:
     weight: Optional[float] = None
     posterior_weight: Optional[float] = None
     tolerance: Optional[float] = None
+    proposal_tolerance: Optional[float] = None
     wall_time: float = 0.0
     worker_id: Optional[str] = None
     sim_start_time: Optional[float] = None
@@ -83,6 +104,9 @@ class ParticleRecord:
         row["weight"] = "" if self.weight is None else self.weight
         row["posterior_weight"] = "" if self.posterior_weight is None else self.posterior_weight
         row["tolerance"] = "" if self.tolerance is None else self.tolerance
+        row["proposal_tolerance"] = (
+            "" if self.proposal_tolerance is None else self.proposal_tolerance
+        )
         row["wall_time"] = self.wall_time
         row["worker_id"] = "" if self.worker_id is None else self.worker_id
         row["sim_start_time"] = "" if self.sim_start_time is None else self.sim_start_time
@@ -110,6 +134,7 @@ class ParticleRecord:
             weight=_parse_optional_float(row.get("weight")),
             posterior_weight=_parse_optional_float(row.get("posterior_weight")),
             tolerance=_parse_optional_float(row.get("tolerance")),
+            proposal_tolerance=_parse_optional_float(row.get("proposal_tolerance")),
             wall_time=float(row.get("wall_time", 0.0) or 0.0),
             worker_id=_parse_optional_str(row.get("worker_id")),
             sim_start_time=_parse_optional_float(row.get("sim_start_time")),
@@ -128,6 +153,7 @@ _SUFFIX_COLS = [
     "weight",
     "posterior_weight",
     "tolerance",
+    "proposal_tolerance",
     "wall_time",
     "worker_id",
     "sim_start_time",

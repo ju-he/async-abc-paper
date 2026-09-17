@@ -815,6 +815,15 @@ def run_propulate_abc(
         params = _individual_params(ind, limits)
         weight = float(ind.weight) if ind.weight is not None else None
         posterior_weight = posterior_weights[step - 1]
+        # Two different quantities, and they must not be conflated. `tolerance`
+        # is the running-minimum trajectory the tolerance plots want. But
+        # extract_posterior needs the value the propagator actually STAMPED --
+        # `None` for a bootstrap draw, the effective tolerance otherwise -- and
+        # collapsing the prior phase into tol_init loses the only marker of
+        # where that phase ended. It cannot be recovered afterwards: the
+        # boundary falls at k + O(W) draws, not k, because the ranks in flight
+        # when the archive fills are prior draws too. So record both.
+        proposal_tolerance = None if ind.tolerance is None else float(ind.tolerance)
         if ind.tolerance is not None:
             current_tolerance = min(current_tolerance, float(ind.tolerance))
             tolerance = current_tolerance
@@ -841,6 +850,7 @@ def run_propulate_abc(
             weight=weight,
             posterior_weight=posterior_weight,
             tolerance=tolerance,
+            proposal_tolerance=proposal_tolerance,
             wall_time=sim_end_time if sim_end_time is not None else 0.0,
             worker_id=str(ind.rank) if getattr(ind, "rank", None) is not None else None,
             sim_start_time=sim_start_time,
