@@ -8,8 +8,12 @@ Observed data are generated once from ``true_mu`` using ``observed_data_seed``.
 The ABC summary statistic is the sample mean.  Distance is |mean(sim) - mean(obs)|.
 
 Analytic posterior under the Uniform prior:
-    The posterior mean is the MLE (observed_mean) clipped to the prior bounds,
-    since the uniform prior is flat over its support.
+    The flat prior makes the posterior the likelihood in the sufficient
+    statistic, truncated to the prior box:
+    N(observed_mean, sigma_obs^2 / n_obs) restricted to [prior_low, prior_high].
+    Its mean is the truncated-normal mean.  Clipping observed_mean to the bounds
+    is only an approximation of that, and a poor one whenever a bound sits within
+    a few posterior standard deviations of observed_mean.
 """
 from typing import Dict, Tuple
 
@@ -71,14 +75,27 @@ class GaussianMean:
         """Posterior mean of theta under the Uniform(prior_low, prior_high) prior.
 
         For a flat prior the posterior is proportional to the likelihood, which
-        is Gaussian in the sufficient statistic (sample mean).  The posterior
-        mean is therefore the MLE (observed_mean) clipped to the prior bounds.
+        is Gaussian in the sufficient statistic (sample mean), truncated to the
+        prior box.  The posterior mean is therefore the mean of that truncated
+        normal -- the same law :meth:`analytic_posterior_samples` draws from.
+
+        This previously returned ``observed_mean`` clipped to the bounds, which
+        disagrees with the sampler near a boundary (e.g. observed_mean=10 with
+        bounds [-5, 5] and scale 0.1: truncated mean 4.998, clipped 5.0).  Far
+        from the bounds -- the regime of every configuration in
+        ``experiments/configs`` -- the two agree to machine precision.
 
         Returns
         -------
         float
         """
-        return float(np.clip(self.observed_mean, self.prior_low, self.prior_high))
+        from scipy.stats import truncnorm
+
+        loc = self.observed_mean
+        scale = float(self.sigma_obs) / float(np.sqrt(self.n_obs))
+        a = (self.prior_low - loc) / scale
+        b = (self.prior_high - loc) / scale
+        return float(truncnorm.mean(a, b, loc=loc, scale=scale))
 
     def analytic_posterior_samples(self, n: int, seed: int) -> np.ndarray:
         """Draw *n* samples from the exact posterior (review II.3.b).

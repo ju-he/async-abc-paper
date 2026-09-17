@@ -29,6 +29,8 @@ last-observation-carried-forward (LOCF).
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 import warnings
 
 import numpy as np
@@ -184,14 +186,11 @@ def posterior_quality_curve(
     """
     if not true_params:
         return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
-    frame = _prepare_quality_frame(records, true_params)
-    if frame.empty:
-        return pd.DataFrame(columns=QUALITY_CURVE_COLUMNS)
     if axis_kind not in {"wall_time", "posterior_samples", "attempt_budget"}:
         raise ValueError(f"Unsupported axis_kind: {axis_kind}")
 
     rows: list[dict[str, object]] = []
-    for (method, replicate), group in frame.groupby(["method", "replicate"], sort=True):
+    for group in _quality_frame_groups(records, true_params):
         rows.extend(
             _observable_quality_rows(
                 group,
@@ -329,6 +328,39 @@ def time_to_threshold(
             }
         )
     return pd.DataFrame(rows, columns=THRESHOLD_COLUMNS)
+
+
+def _quality_frame_groups(records, true_params: dict[str, float]):
+    """Yield one prepared per-(method, replicate) frame at a time.
+
+    The previous code materialised the whole multi-method, multi-replicate
+    history as a single frame -- plus a ``.copy()`` inside
+    :func:`_prepare_quality_frame`, so 2x peak -- and only then grouped it. That
+    is what drove the 49 GB finalize OOM of 2026-06-28, whose mitigation was to
+    thin the history fed to the plots and silently corrupt this curve. Splitting
+    first bounds peak memory to the largest single group, so the curve can be
+    computed on the full history and needs no thinning.
+
+    Both input forms :func:`records_to_frame` accepts are supported. A DataFrame
+    is already materialised by the caller, so there is nothing to save by
+    splitting it first -- it keeps the original group-then-prepare order. Row
+    order is identical either way.
+    """
+    if isinstance(records, pd.DataFrame):
+        prepared = _prepare_quality_frame(records, true_params)
+        if prepared.empty:
+            return
+        for _, group in prepared.groupby(["method", "replicate"], sort=True):
+            yield group
+        return
+
+    grouped: dict[tuple, list] = defaultdict(list)
+    for record in records:
+        grouped[(record.method, int(record.replicate))].append(record)
+    for key in sorted(grouped, key=lambda k: (str(k[0]), k[1])):
+        group = _prepare_quality_frame(grouped.pop(key), true_params)
+        if not group.empty:
+            yield group
 
 
 def _prepare_quality_frame(records, true_params: dict[str, float]) -> pd.DataFrame:

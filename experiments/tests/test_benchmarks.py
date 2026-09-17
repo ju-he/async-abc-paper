@@ -142,14 +142,38 @@ class TestGaussianMean:
         pm_sym = bm_sym.analytic_posterior_mean()
         assert abs(pm_sym - bm_sym.observed_mean) < 1e-9
 
-        # Asymmetric prior that clips: observed mean outside bounds
+        # Asymmetric prior that truncates: observed mean outside the bounds.
         bm_asym = GaussianMean(_bm_config(
             "gaussian_mean", true_mu=10.0, n_obs=100,
             prior_low=-5.0, prior_high=5.0,
         ))
         pm_asym = bm_asym.analytic_posterior_mean()
-        # observed_mean ≈ 10, but prior caps at 5
-        assert pm_asym == pytest.approx(5.0)
+        # observed_mean ≈ 10 is 50 posterior sds above the upper bound, so the
+        # truncated posterior piles up just *inside* it: the mean sits strictly
+        # below 5.0 by ~scale^2/(observed_mean - 5), not exactly at 5.0.
+        assert pm_asym < 5.0
+        assert pm_asym == pytest.approx(4.998, abs=1e-3)
+
+    def test_analytic_posterior_mean_matches_its_own_sampler(self):
+        """The two analytic references must describe the same distribution.
+
+        ``analytic_posterior_mean`` used to clip ``observed_mean`` to the prior
+        bounds while ``analytic_posterior_samples`` drew from the truncated
+        normal; the two disagreed near a boundary.
+        """
+        for prior_low, prior_high, true_mu in [
+            (-5.0, 5.0, 0.0),     # far from both bounds
+            (-5.0, 5.0, 10.0),    # hard against the upper bound
+            (-5.0, 5.0, -10.0),   # hard against the lower bound
+        ]:
+            bm = GaussianMean(_bm_config(
+                "gaussian_mean", true_mu=true_mu, n_obs=100,
+                prior_low=prior_low, prior_high=prior_high,
+            ))
+            draws = bm.analytic_posterior_samples(200_000, seed=0)
+            assert bm.analytic_posterior_mean() == pytest.approx(
+                float(draws.mean()), abs=5e-4
+            )
 
     def test_different_observed_seeds_give_different_data(self):
         bm1 = GaussianMean(_bm_config("gaussian_mean", observed_data_seed=0))

@@ -1648,3 +1648,89 @@ class TestSensitivityHeatmapUncertainty:
         assert metas, "No metadata JSON found"
         meta = json.loads(metas[0].read_text())
         assert "n_replicates_min" in meta.get("extra", {}), f"n_replicates_min missing: {meta}"
+
+
+class TestHistoryThinningDoesNotReachReportedNumbers:
+    """The plot-thinning must never change a reported number.
+
+    ``_subsample_history_for_plots`` used to be applied at the top of
+    ``plot_benchmark_diagnostics``, rebinding ``records`` before the gaussian
+    summaries, the benchmark audit and every quality curve, while its docstring
+    promised "posterior/quality use the full history". It does not preserve
+    them: the retained set is the top-k by loss over the *whole* group, which is
+    not the top-k of each *prefix*.
+    """
+
+    @staticmethod
+    def _history(n=4000, k=20, seed=0):
+        rng = np.random.default_rng(seed)
+        out = []
+        for i in range(n):
+            # Loss deliberately not monotone in time, so an early-prefix top-k
+            # member need not survive the global top-k retention rule.
+            loss = float(rng.gamma(2.0, 0.5)) * (1.0 - 0.5 * i / n)
+            out.append(ParticleRecord(
+                method="async_propulate_abc", replicate=0, seed=1, step=i + 1,
+                params={"mu": float(rng.normal(0.0, 1.0) * (0.2 + loss))},
+                loss=loss, weight=1.0, posterior_weight=float(rng.gamma(1.0, 1.0)),
+                tolerance=max(loss, 0.05), wall_time=0.01 * (i + 1),
+            ))
+        return out, k
+
+    def test_thinning_would_change_the_curve(self):
+        """Guards the premise: if this ever stops being true the split below is
+        no longer load-bearing and the thinning could be simplified away."""
+        from async_abc.plotting.reporters import _subsample_history_for_plots
+
+        records, k = self._history()
+        thinned = _subsample_history_for_plots(
+            records, {"plots": {"max_history_records_for_plots": 500}}, k
+        )
+        assert len(thinned) < len(records)
+        kw = dict(true_params={"mu": 0.0}, axis_kind="wall_time", archive_size=k,
+                  checkpoint_strategy="quantile", checkpoint_count=8)
+        full = posterior_quality_curve(records, **kw)
+        thin = posterior_quality_curve(thinned, **kw)
+        assert (full["wasserstein"].to_numpy()
+                != pytest.approx(thin["wasserstein"].to_numpy(), abs=1e-6))
+
+    def test_reported_artifacts_are_identical_with_and_without_thinning(self, tmp_path):
+        records, k = self._history()
+        cfg_base = {
+            "benchmark": {"name": "gaussian_mean", "true_mu": 0.0, "n_obs": 100,
+                          "prior_low": -5.0, "prior_high": 5.0},
+            "inference": {"k": k},
+            "analysis": {"ci_level": 0.95},
+            "plots": {"quality_vs_time": True, "posterior": True,
+                      "archive_evolution": True, "emit_diagnostics": False},
+        }
+
+        def run(cap, name):
+            cfg = json.loads(json.dumps(cfg_base))
+            cfg["plots"]["max_history_records_for_plots"] = cap
+            out = OutputDir(tmp_path / name, "plots").ensure()
+            plot_benchmark_diagnostics(list(records), cfg, out)
+            return out
+
+        thinned_out = run(500, "thinned")     # thinning active
+        full_out = run(None, "full")          # thinning disabled
+
+        # The audit and every quality-curve CSV must be byte-identical: they are
+        # reported numbers and must not know the density plots were thinned.
+        for rel in ("data/plot_audit.csv",
+                    "plots/quality_vs_wall_time_data.csv",
+                    "plots/quality_vs_posterior_samples_data.csv",
+                    "plots/quality_vs_attempt_budget_data.csv"):
+            a, b = thinned_out.root / rel, full_out.root / rel
+            assert a.exists() and b.exists(), rel
+            assert a.read_text() == b.read_text(), f"{rel} differs under thinning"
+
+        # ...and the run must say so, so a thinned directory is self-identifying.
+        summary = json.loads((thinned_out.data / "plot_audit_summary.json").read_text())
+        assert summary["audit_uses_full_history"] is True
+        assert summary["history_thinned_for_density_plots"] is True
+        assert summary["n_records_full"] == len(records)
+        assert summary["n_records_density_plots"] < len(records)
+
+        summary_full = json.loads((full_out.data / "plot_audit_summary.json").read_text())
+        assert summary_full["history_thinned_for_density_plots"] is False

@@ -308,8 +308,16 @@ def _write_benchmark_audit(
     output_dir: OutputDir,
     archive_size: int | None,
     min_particles_for_threshold: int,
+    history_thinned_for_density_plots: bool = False,
+    n_records_full: int | None = None,
+    n_records_density_plots: int | None = None,
 ) -> pd.DataFrame:
-    """Write benchmark audit CSV/JSON and return the dataframe."""
+    """Write benchmark audit CSV/JSON and return the dataframe.
+
+    ``records`` must be the FULL evaluated history. The thinning flags are
+    recorded in the summary JSON so a reader can tell at a glance whether any
+    artifact in this directory was built from a down-sampled view.
+    """
     import json
 
     audit_df = benchmark_plot_audit(
@@ -325,6 +333,10 @@ def _write_benchmark_audit(
         "invalid_quality_rows": int((~audit_df["paper_quality_plots_allowed"]).sum()) if not audit_df.empty else 0,
         "invalid_threshold_rows": int((~audit_df["paper_threshold_plots_allowed"]).sum()) if not audit_df.empty else 0,
         "source_raw_files": [str(output_dir.data / "raw_results.csv")],
+        "audit_uses_full_history": True,
+        "history_thinned_for_density_plots": bool(history_thinned_for_density_plots),
+        "n_records_full": n_records_full,
+        "n_records_density_plots": n_records_density_plots,
     }
     with open(output_dir.data / "plot_audit_summary.json", "w") as f:
         json.dump(summary, f, indent=2)
@@ -3816,14 +3828,28 @@ def plot_amis_snapshot_ess_stability(
 
 
 def _subsample_history_for_plots(records, cfg, archive_size):
-    """Bound the per-(method,replicate) evaluated history fed to the benchmark
-    plots so a fast simulator's multi-million-record history cannot OOM the
-    finalize. The ``archive_size`` lowest-loss records per group are ALWAYS kept
-    (final-state / posterior reconstruction stays exact); the remaining dense
-    attempt stream is uniformly down-sampled in time order to a cap. Convergence
-    curves already collapse to <=500 checkpoints, so figures are unchanged in
-    shape and the reported posterior/quality (computed on the full history) are
-    unaffected. Disable by setting plots.max_history_records_for_plots to null.
+    """Bound the evaluated history fed to the DENSE per-record density plots.
+
+    The ``archive_size`` lowest-loss records per (method, replicate) are always
+    kept, and the remaining attempt stream is uniformly down-sampled in time
+    order to ``plots.max_history_records_for_plots``. Disable with ``null``.
+
+    This is a **lossy** view and is only for plots whose cost is per record and
+    whose content is a density. It must NEVER reach a reported number.
+
+    History: this used to be applied at the top of
+    :func:`plot_benchmark_diagnostics`, rebinding ``records`` before the
+    gaussian summaries, the benchmark audit and every quality curve -- despite a
+    docstring promising "posterior/quality use the full history". It does not
+    preserve them: the retained set is the top-k by loss over the *whole* group,
+    which is not the top-k of each *prefix*, so early checkpoints reconstruct a
+    different archive, and the attempt-budget axis counts thinned records. On a
+    4000 -> 500 synthetic history that moved the quality curve's Wasserstein by
+    up to 0.27 (reported values are ~0.07) and the audit's attempt span by 3500.
+    The OOM this was introduced for (2026-06-28, 49 GB finalize) is now handled
+    at its source: :func:`posterior_quality_curve` prepares one
+    (method, replicate) group at a time instead of materialising the whole
+    multi-method history as a single frame.
     """
     import logging
     cap = cfg.get("plots", {}).get("max_history_records_for_plots", 200_000)
@@ -3853,9 +3879,9 @@ def _subsample_history_for_plots(records, cfg, archive_size):
         out.extend(kept)
     if dropped:
         logging.getLogger(__name__).warning(
-            "plot_benchmark_diagnostics: down-sampled evaluated history for plotting "
-            "(%d -> %d records, dropped %d; cap=%d). Posterior/quality use the full "
-            "history; only dense convergence curves are thinned.",
+            "plot_benchmark_diagnostics: down-sampled evaluated history for the dense "
+            "density plots (%d -> %d records, dropped %d; cap=%d). Reported numbers "
+            "(posterior, audit, quality curves) use the full history.",
             len(records), len(out), dropped, int(cap),
         )
     return out
@@ -3873,7 +3899,11 @@ def plot_benchmark_diagnostics(
     analysis_cfg = cfg.get("analysis", {})
     true_params = _true_params_from_cfg(records, benchmark_cfg)
     archive_size = inference_cfg.get("k")
-    records = _subsample_history_for_plots(records, cfg, archive_size)
+    # `records` stays the FULL history for everything that produces a number.
+    # Only the dense per-record density plots get the thinned view (see
+    # _subsample_history_for_plots for why this separation is not optional).
+    plot_records = _subsample_history_for_plots(records, cfg, archive_size)
+    history_thinned = len(plot_records) != len(records)
     emit_paper = bool(plots_cfg.get("emit_paper_summaries", True))
     emit_diagnostics = bool(plots_cfg.get("emit_diagnostics", True))
     ci_level = float(analysis_cfg.get("ci_level", 0.95))
@@ -3901,14 +3931,17 @@ def plot_benchmark_diagnostics(
         output_dir=output_dir,
         archive_size=archive_size,
         min_particles_for_threshold=min_particles_for_threshold,
+        history_thinned_for_density_plots=history_thinned,
+        n_records_full=len(records),
+        n_records_density_plots=len(plot_records),
     )
 
     if plots_cfg.get("posterior"):
         plot_posterior(records, output_dir, cfg=cfg, archive_size=archive_size)
     if plots_cfg.get("archive_evolution") and emit_paper:
-        plot_archive_evolution(records, output_dir, cfg=cfg)
+        plot_archive_evolution(plot_records, output_dir, cfg=cfg)
     if plots_cfg.get("archive_evolution") and emit_diagnostics:
-        plot_archive_evolution_diagnostic(records, output_dir, cfg=cfg)
+        plot_archive_evolution_diagnostic(plot_records, output_dir, cfg=cfg)
     if plots_cfg.get("corner"):
         plot_corner(
             records,
