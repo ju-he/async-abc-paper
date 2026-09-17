@@ -122,8 +122,10 @@ def _panel_lv(ax, df: pd.DataFrame) -> None:
     ax.axvline(i48 + 0.5, color=ps.COLORS["neutral"], lw=0.8, ls=":", zorder=0)
     ax.annotate("single node $\\to$ multi-node", xy=(i48 + 0.5, 0), xytext=(i48 + 0.4, 30),
                 fontsize=6, color=ps.COLORS["neutral"], rotation=90, va="bottom", ha="center")
+    hi_all = []
     for method in ("async", "sync"):
         _, med, lo, hi = _series(df, "lv", method)
+        hi_all.extend([np.nanmax(med), np.nanmax(hi)])
         st = _style(method)
         ax.fill_between(x, lo, hi, color=st["color"], alpha=0.15, zorder=1)
         ax.plot(x, med, marker=st["marker"], color=st["color"], ls=st["ls"],
@@ -132,7 +134,10 @@ def _panel_lv(ax, df: pd.DataFrame) -> None:
     ax.set_xticklabels([f"{w}" if w < 48 else f"{w}\n({w // 48}n)" for w in workers])
     ax.set_xlabel("workers (n = 48-core nodes)")
     ax.set_ylabel("throughput (sims / s)")
-    ax.set_ylim(bottom=0)
+    # Headroom for the single-node peak (the panel's largest value) and for the
+    # panel tag: with a bare bottom=0 the peak marker sat on the top spine and
+    # was cut in half by it.
+    ax.set_ylim(0, float(np.nanmax(hi_all)) * 1.16)
     ax.grid(True, axis="y", ls=":", lw=0.4, alpha=0.6)
 
 
@@ -140,8 +145,13 @@ def _panel_cpm(ax, df: pd.DataFrame) -> None:
     """Cellular Potts: log-log throughput with an ideal-linear reference."""
     workers, a_med, _, _ = _series(df, "cpm", "async")
     ideal = a_med[0] * (workers / workers[0])
-    ax.plot(workers, ideal, ls=":", color=ps.COLORS["neutral"], lw=1.0,
-            label="ideal linear", zorder=1)
+    ax.plot(workers, ideal, ls=":", color=ps.COLORS["neutral"], lw=1.0, zorder=1)
+    # Labelled in-panel rather than in the shared legend: panel (a)'s only dotted
+    # line is the single-node divider, so a shared "ideal linear" key invited the
+    # reader to attach this meaning to it.
+    ax.annotate("ideal linear", xy=(workers[-3], ideal[-3]), xytext=(-2, 4),
+                textcoords="offset points", fontsize=6,
+                color=ps.COLORS["neutral"], ha="right", va="bottom")
     for method in ("async", "sync"):
         _, med, _, _ = _series(df, "cpm", method)
         st = _style(method)
@@ -172,7 +182,7 @@ def draw(frames):
     ps.panel_tag(axR, PANELS["cpm"]["tag"])
     # Single shared legend beneath both panels (async, sync, ideal-linear).
     handles, labels = axR.get_legend_handles_labels()
-    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=3,
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=2,
                bbox_to_anchor=(0.5, -0.02), handlelength=1.8)
     fig.tight_layout(rect=(0, 0.08, 1, 1))
     return fig

@@ -88,11 +88,47 @@ def straggler() -> pd.DataFrame:
     for arm in ("twin_fine", "twin_coarse"):
         print(f"  {arm:12}", "  ".join(
             f"{f}x={thr.loc[f, 'async'] / thr.loc[f, arm]:.0f}" for f in thr.index))
-    qual = _median_by(frame, "slowdown_factor", "arm", "final_quality_wasserstein")
-    print("\nmedian final Wasserstein (all arms, all factors):")
-    print(qual.round(4).to_string())
-    print(f"  range {qual.min().min():.4f} - {qual.max().max():.4f}")
+    _print_quality(frame, "slowdown_factor")
     return frame
+
+
+# The three quality columns are NOT interchangeable, and reporting only the first
+# is how "unchanged posterior quality throughout" got into the paper:
+#
+#   final_quality_wasserstein           unweighted top-k ARCHIVE vs a point mass at
+#                                       the truth. Floored at the posterior's own
+#                                       spread -- for this benchmark the analytic
+#                                       posterior has sd sigma_obs/sqrt(n_obs)=0.1,
+#                                       so a PERFECT posterior still scores
+#                                       0.1*sqrt(2/pi) = 0.080. Every arm sits at
+#                                       0.07-0.08 because the metric cannot resolve
+#                                       anything finer, not because they agree.
+#   final_quality_wasserstein_weighted  the estimator the paper actually reports
+#                                       (full-history AMIS weights), vs the truth.
+#   final_quality_wasserstein_analytic  that same estimator vs the ANALYTIC
+#                                       posterior. Goes to ~0 when the posterior is
+#                                       right, so it is the one with resolution.
+#
+# All three are printed, always. Anything quoted in the paper must name which.
+_QUALITY_COLUMNS = [
+    ("final_quality_wasserstein", "unweighted top-k archive vs truth (point mass)"),
+    ("final_quality_wasserstein_weighted", "REPORTED weighted posterior vs truth"),
+    ("final_quality_wasserstein_analytic", "REPORTED weighted posterior vs analytic"),
+]
+
+
+def _print_quality(frame: pd.DataFrame, index: str) -> None:
+    for column, label in _QUALITY_COLUMNS:
+        if column not in frame.columns or frame[column].isna().all():
+            print(f"\nmedian {column}: NOT PRESENT in this table's source data")
+            continue
+        table = _median_by(frame, index, "arm", column)
+        print(f"\nmedian {column}\n  ({label}):")
+        print(table.round(4).to_string())
+    if "n_simulations" in frame.columns:
+        sims = _median_by(frame, index, "arm", "n_simulations")
+        print("\nmedian n_simulations (the arms are NOT at a matched budget):")
+        print(sims.round(0).to_string())
 
 
 def _hetero_rates(root: Path, pattern: str) -> list[dict]:

@@ -73,7 +73,12 @@ RC = {
     "legend.edgecolor": "0.8",
     "figure.dpi": 150,
     "savefig.bbox": "tight",
-    "savefig.pad_inches": 0.02,
+    # The tight bbox is measured with Agg font metrics but written with the
+    # embedded PDF font, and the two disagree by a fraction of a glyph. At the
+    # old 0.02 in (1.4 pt) that slop pushed the last character of any label
+    # reaching the figure edge outside the saved page box, where it silently
+    # vanished ("... 0.1 s delay" for "... 0.1 s delay)"). 0.05 in covers it.
+    "savefig.pad_inches": 0.05,
 }
 
 # Repository-anchored output locations.
@@ -108,6 +113,8 @@ def panel_tag(ax, text: str) -> None:
         ha="left",
         va="top",
         fontweight="bold",
+        bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=1.0),
+        zorder=5,
     )
 
 
@@ -158,7 +165,10 @@ def save_paper_figure(
         FIGURES_DIR / name,
         metadata={
             "figure": name,
-            "vendored_data_dir": str(data_dir) if data else None,
+            # The directory is this figure's provenance whether this run wrote
+            # it (--refresh) or read it (default path); recording null on the
+            # read path made a regenerated figure look like it had no data.
+            "vendored_data_dir": str(data_dir) if data_dir.is_dir() else None,
             **(metadata or {}),
         },
     )

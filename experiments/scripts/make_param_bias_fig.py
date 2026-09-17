@@ -68,7 +68,7 @@ def aggregate(root: Path):
 
 def draw(frames):
     thr, err = frames["throughput"], frames["error"]
-    fig, (axT, axE) = plt.subplots(1, 2, figsize=ps.fig_size(0.92, aspect=0.46))
+    fig, (axT, axE) = plt.subplots(1, 2, figsize=ps.fig_size(0.92, aspect=0.54))
     for m in ORDER:
         k = KEY[m]
         t = thr[thr["base_method"] == m].set_index("sigma").reindex(SIGMAS)
@@ -79,21 +79,28 @@ def draw(frames):
         axE.fill_between(SIGMAS, e["q1"], e["q3"], color=ps.COLORS[k], alpha=0.18, lw=0)
         axE.plot(SIGMAS, e["median"], marker=ps.MARKERS[k], color=ps.COLORS[k],
                  ls=ps.LINESTYLES[k], label=ps.LABELS[k])
-    axT.set_xlabel(r"runtime$\to$parameter coupling strength")
+    axT.set_xlabel(r"runtime$\to$parameter coupling")
     axT.set_ylabel("throughput (simulations / s)")
-    axT.set_ylim(bottom=0)
+    # The asynchronous maximum is at coupling 0.5, not 0.0, so a bare bottom=0
+    # put the panel's highest point under the in-panel legend that used to sit
+    # here -- the rise before the fall was invisible. Headroom plus a shared
+    # legend below both panels leaves the whole curve exposed.
+    axT.set_ylim(0, float(thr["q3"].max()) * 1.12)
     axT.grid(True, ls=":", lw=0.4, alpha=0.6)
     ps.panel_tag(axT, "(a)")
-    axT.legend(frameon=True, facecolor="white", framealpha=0.9, edgecolor="0.8",
-               loc="upper right", fontsize=6)
-    axE.set_xlabel(r"runtime$\to$parameter coupling strength")
+    axE.set_xlabel(r"runtime$\to$parameter coupling")
     axE.set_ylabel("posterior-mean error")
-    axE.set_ylim(bottom=0)
+    # The baseline's inter-quartile band at coupling 0 ran off the top of the
+    # axes; scale to the band rather than to the medians.
+    axE.set_ylim(0, float(err["q3"].max()) * 1.08)
     axE.grid(True, ls=":", lw=0.4, alpha=0.6)
     ps.panel_tag(axE, "(b)")
     for ax in (axT, axE):
         ax.set_xticks(SIGMAS)
-    fig.tight_layout()
+    handles, labels = axT.get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=2,
+               bbox_to_anchor=(0.5, -0.02))
+    fig.tight_layout(rect=(0, 0.10, 1, 1))
     return fig
 
 

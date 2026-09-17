@@ -63,10 +63,14 @@ def draw(frames):
     ax.set_yscale("log")
     ax.set_xticks(x)
     ax.set_xticklabels(["0\n(control)", "1", "5", "10", "20"])
-    ax.set_xlabel("straggler slowdown factor (x base 0.1 s delay)")
+    # The "x base 0.1 s delay" gloss lives in the caption; spelled out here the
+    # label overruns the 0.6-linewidth figure and its tail is cropped away.
+    ax.set_xlabel("straggler slowdown factor")
     ax.set_ylabel("throughput (simulations / s)")
     ax.grid(True, which="both", ls=":", lw=0.4, alpha=0.6)
-    ax.legend(frameon=False, loc="center left")
+    # Lower left is the only quadrant both curves leave clear: the baseline
+    # falls across the middle of the panel, which "center left" sat on top of.
+    ax.legend(frameon=False, loc="lower left")
     fig.tight_layout()
     return fig
 

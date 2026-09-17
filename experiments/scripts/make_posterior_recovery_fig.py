@@ -75,8 +75,11 @@ def aggregate(root: Path):
 
 def draw(frames):
     rec = frames["posterior_recovery"]
-    fig, axes = plt.subplots(1, 3, figsize=ps.fig_size(1.0, aspect=0.34))
-    tags = ["(a) g-and-k", "(b) Lotka–Volterra", "(c) Cellular Potts"]
+    fig, axes = plt.subplots(1, 3, figsize=ps.fig_size(1.0, aspect=0.40))
+    # Bare letters: at three panels across the text width the benchmark names
+    # overran their panels and spilled into the neighbouring axes. The caption
+    # already maps (a)/(b)/(c) to the benchmarks.
+    tags = ["(a)", "(b)", "(c)"]
     for ax, (key, _label), tag in zip(axes, BENCHES, tags):
         sub = rec[rec["benchmark"] == key]
         for m in METHODS:
