@@ -1,0 +1,30 @@
+{
+  "blocksize": 50,
+  "timesteps": 501,
+  "write_every": 100,
+  "extract_from": 300,
+  "bins": [
+    8,
+    16,
+    32
+  ],
+  "n_ranks": 48,
+  "candidates": {
+    "division_rate": {
+      "path": "define_functions.division_cond_cancer[1]",
+      "lo": 0.001,
+      "hi": 0.2,
+      "scale": "log",
+      "centre": 0.009,
+      "integer": false
+    },
+    "motility": {
+      "path": "CellsInSilico.orientation.motilityamount[9]",
+      "lo": 100,
+      "hi": 4000,
+      "scale": "log",
+      "centre": 1400,
+      "integer": true
+    }
+  }
+}

@@ -1,0 +1,176 @@
+{
+  "protocol": {
+    "blocksize": 50,
+    "timesteps": 501,
+    "write_every": 100,
+    "extract_from": 300,
+    "bins": [
+      8,
+      16,
+      32
+    ],
+    "n_ranks": 48,
+    "candidates": {
+      "division_rate": {
+        "path": "define_functions.division_cond_cancer[1]",
+        "lo": 0.001,
+        "hi": 0.2,
+        "scale": "log",
+        "centre": 0.009,
+        "integer": false
+      },
+      "motility": {
+        "path": "CellsInSilico.orientation.motilityamount[9]",
+        "lo": 100,
+        "hi": 4000,
+        "scale": "log",
+        "centre": 1400,
+        "integer": true
+      }
+    },
+    "fixed": {}
+  },
+  "weighting": "scalars",
+  "seeds_per_eval": 4,
+  "snapshot": 500,
+  "parameters": [
+    "division_rate",
+    "motility"
+  ],
+  "truth": {
+    "division_rate": 0.414702333840707,
+    "motility": 0.7154089371698258
+  },
+  "forecasts": {
+    "0.2000": {
+      "n": 480,
+      "division_rate": {
+        "median": 0.41045086480060694,
+        "bias": -0.004251469040100042,
+        "sd": 0.09254081146094491,
+        "contraction": 0.6794292255519824,
+        "covered": true,
+        "interval": [
+          0.306949288220502,
+          0.6024676091889354
+        ]
+      },
+      "motility": {
+        "median": 0.6590018291466134,
+        "bias": -0.05640710802321236,
+        "sd": 0.28819435405776633,
+        "contraction": 0.0016654726349099036,
+        "covered": true,
+        "interval": [
+          0.09505782880004583,
+          0.9679052216601689
+        ]
+      },
+      "correlation": 0.5433140975823336
+    },
+    "0.1000": {
+      "n": 240,
+      "division_rate": {
+        "median": 0.40277497498973835,
+        "bias": -0.011927358850968628,
+        "sd": 0.059414739618799756,
+        "contraction": 0.7941813045235266,
+        "covered": true,
+        "interval": [
+          0.3258559649886616,
+          0.502888091994653
+        ]
+      },
+      "motility": {
+        "median": 0.5936625780456348,
+        "bias": -0.12174635912419096,
+        "sd": 0.2943878921083558,
+        "contraction": -0.019789572529554267,
+        "covered": true,
+        "interval": [
+          0.060932903467679066,
+          0.9640338974057341
+        ]
+      },
+      "correlation": 0.686088667618044
+    },
+    "0.0500": {
+      "n": 120,
+      "division_rate": {
+        "median": 0.3961374378986747,
+        "bias": -0.018564895942032256,
+        "sd": 0.056281603284252496,
+        "contraction": 0.8050348071604786,
+        "covered": true,
+        "interval": [
+          0.3308706744492689,
+          0.5013843798712297
+        ]
+      },
+      "motility": {
+        "median": 0.6153774857066086,
+        "bias": -0.10003145146321724,
+        "sd": 0.30450238794549744,
+        "contraction": -0.054827213895300764,
+        "covered": true,
+        "interval": [
+          0.028290437956127047,
+          0.960927514904876
+        ]
+      },
+      "correlation": 0.7792779599996998
+    },
+    "0.0200": {
+      "n": 48,
+      "division_rate": {
+        "median": 0.4136880079297971,
+        "bias": -0.0010143259109098857,
+        "sd": 0.052085938838988925,
+        "contraction": 0.8195690151418922,
+        "covered": true,
+        "interval": [
+          0.33867769983407015,
+          0.49683461718274935
+        ]
+      },
+      "motility": {
+        "median": 0.6898427237317414,
+        "bias": -0.025566213438084406,
+        "sd": 0.300302176670624,
+        "contraction": -0.04027725523409176,
+        "covered": true,
+        "interval": [
+          0.023462594313144174,
+          0.9607640210890415
+        ]
+      },
+      "correlation": 0.8226892072423032
+    },
+    "0.0100": {
+      "n": 24,
+      "division_rate": {
+        "median": 0.41776980448077516,
+        "bias": 0.0030674706400681817,
+        "sd": 0.05203436372012409,
+        "contraction": 0.8197476765944528,
+        "covered": true,
+        "interval": [
+          0.3435587996168967,
+          0.48838505790414294
+        ]
+      },
+      "motility": {
+        "median": 0.7689675626681629,
+        "bias": 0.05355862549833712,
+        "sd": 0.3116492868520662,
+        "contraction": -0.07958479794077178,
+        "covered": true,
+        "interval": [
+          0.04703408895338653,
+          0.9607640210890415
+        ]
+      },
+      "correlation": 0.9042772123549899
+    }
+  }
+}

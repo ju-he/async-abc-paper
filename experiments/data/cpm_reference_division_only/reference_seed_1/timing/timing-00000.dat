@@ -1,0 +1,15 @@
+#Name                     Rank      Calls  TotalTime   AverageTime  MinTime  MaxTime      Variance
+ActiveCellsDetection         0       1004      56582      56.35657       55       94       4.49636
+BC:cells                     0       1004      44214      44.03785       41      441     170.31928
+CellInfo                     0          4       4301    1075.25000      739     1421   65423.18750
+CellOrientation              0         66        399       6.04545        1       16      14.22521
+CenterOfMass                 0       1004    4359066    4341.69920     3988     7216   90811.73821
+Clean:Cells                  0         10      38752    3875.20000     3495     4516  120257.16000
+Divide:Cells                 0       1002     639782     638.50499        1    15996 5001507.11824
+ExchangeContainer            0       1006      70972      70.54871        8      145     809.92556
+Filling                      0          2        927     463.50000      448      479     240.25000
+KDtree-rebuildIndex          0       1008       5257       5.21528        0       19      17.67885
+LoggerSync                   0         10          2       0.20000        0        1       0.16000
+Sweep:Cells                  0       1002     917306     915.47505      700     2327   30409.69848
+TimeStep                     0       1002    6124209    6111.98503     4842    22221 5855909.94289
+

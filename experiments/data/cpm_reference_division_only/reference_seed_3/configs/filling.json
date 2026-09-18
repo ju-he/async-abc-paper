@@ -1,0 +1,28 @@
+{
+  "Filling": {
+    "cells": [
+      {
+        "shape": "sphere",
+        "box": [
+          [20, 20, 20],
+          [30, 30, 30]
+        ],
+        "center": [25, 25, 25],
+        "radius": 5,
+        "value": 6
+      },
+      {
+        "shape": "sphere",
+        "box": [
+          [20, 20, 20],
+          [30, 30, 30]
+        ],
+        "celltype": [0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0],
+        "pattern": "voronoi",
+        "center": [25, 25, 25],
+        "radius": 5,
+        "count": 4
+      }
+    ]
+  }
+}

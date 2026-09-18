@@ -1,0 +1,108 @@
+{
+  "protocol": {
+    "blocksize": 50,
+    "timesteps": 501,
+    "write_every": 100,
+    "extract_from": 300,
+    "bins": [
+      8,
+      16,
+      32
+    ],
+    "n_ranks": 48,
+    "candidates": {
+      "division_rate": {
+        "path": "define_functions.division_cond_cancer[1]",
+        "lo": 0.001,
+        "hi": 0.2,
+        "scale": "log",
+        "centre": 0.009,
+        "integer": false
+      }
+    },
+    "fixed": {
+      "motility": 1400
+    }
+  },
+  "weighting": "equal",
+  "seeds_per_eval": 4,
+  "snapshot": 500,
+  "parameters": [
+    "division_rate"
+  ],
+  "truth": {
+    "division_rate": 0.414702333840707
+  },
+  "forecasts": {
+    "0.2000": {
+      "n": 240,
+      "division_rate": {
+        "median": 0.5165750307730925,
+        "bias": 0.10187269693238554,
+        "sd": 0.13579398767809198,
+        "contraction": 0.5295958279583253,
+        "covered": true,
+        "interval": [
+          0.30869980430663463,
+          0.7235812290489554
+        ]
+      }
+    },
+    "0.1000": {
+      "n": 120,
+      "division_rate": {
+        "median": 0.4843376753113697,
+        "bias": 0.06963534147066269,
+        "sd": 0.11407810280088111,
+        "contraction": 0.604821859835617,
+        "covered": true,
+        "interval": [
+          0.3111862647835871,
+          0.698529434707481
+        ]
+      }
+    },
+    "0.0500": {
+      "n": 60,
+      "division_rate": {
+        "median": 0.47789968757605916,
+        "bias": 0.06319735373535218,
+        "sd": 0.09870747562580538,
+        "contraction": 0.658067274258477,
+        "covered": true,
+        "interval": [
+          0.30869980430663463,
+          0.6265829513495098
+        ]
+      }
+    },
+    "0.0200": {
+      "n": 24,
+      "division_rate": {
+        "median": 0.4810089894265635,
+        "bias": 0.06630665558585652,
+        "sd": 0.0911705971266224,
+        "contraction": 0.6841757872405938,
+        "covered": true,
+        "interval": [
+          0.31299073818457795,
+          0.5828202082591801
+        ]
+      }
+    },
+    "0.0100": {
+      "n": 12,
+      "division_rate": {
+        "median": 0.4870479754899856,
+        "bias": 0.07234564164927859,
+        "sd": 0.08520729843121659,
+        "contraction": 0.7048332598828979,
+        "covered": true,
+        "interval": [
+          0.35343395336589445,
+          0.5885937113343847
+        ]
+      }
+    }
+  }
+}

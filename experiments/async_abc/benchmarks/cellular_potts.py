@@ -8,6 +8,7 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
+import math
 import re
 import shutil
 import sys
@@ -42,6 +43,16 @@ _CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
     "division_rate": (0.00006, 0.6),
     "motility": (0.0, 10000.0),
 }
+# Optional per-parameter prior scale, matching "scale" in the parameter_space JSON.
+# A parameter whose response is confined to the bottom decade of its range is not
+# identifiable under a uniform prior on that range however strong the response is --
+# measured on division_rate, whose responsive window is 8% of [0.001, 0.2] linear and
+# 50% of the same interval log-uniform. Absent means "linear", i.e. the original
+# behaviour.
+_CPM_PARAM_SCALES: Dict[str, str] = {}
+_LOG_SCALE = "log"
+_LINEAR_SCALE = "linear"
+_VALID_SCALES = (_LINEAR_SCALE, _LOG_SCALE)
 
 try:
     _LIBC = ctypes.CDLL(None)
@@ -312,6 +323,20 @@ def _collect_reference_paths(configured_path: Path) -> list[str]:
     The second layout lets you point the config at a container directory and
     have all seed replicates picked up automatically.
     """
+    # A container must be recognised BEFORE the single-directory resolver runs.
+    # ``_resolve_reference_data_path`` raises on anything that is not itself a
+    # reference directory, and a container never is -- so asking it first made the
+    # multi-seed layout this function documents (and that
+    # ``generate_cpm_reference.py --n-seeds N`` produces) unusable.
+    direct = _resolve_repo_path(configured_path)
+    if direct.is_dir() and not _is_supported_reference_path(direct):
+        children = sorted(
+            child for child in direct.iterdir()
+            if _is_supported_reference_path(child)
+        )
+        if children:
+            return [str(child) for child in children]
+
     resolved = _resolve_reference_data_path(configured_path)
     sub_refs = sorted(
         child for child in resolved.iterdir()
@@ -361,10 +386,29 @@ def _remove_eval_path(path_like: str | Path) -> None:
         shutil.rmtree(path)
 
 
+def _resolve_scale(name: str, scales: Optional[Dict[str, str]]) -> str:
+    """Prior scale for ``name``, defaulting to linear, rejecting anything else loudly."""
+    scale = (scales if scales is not None else _CPM_PARAM_SCALES).get(name, _LINEAR_SCALE)
+    if scale not in _VALID_SCALES:
+        raise ValueError(
+            f"CPM parameter {name!r} has scale {scale!r}; expected one of {_VALID_SCALES}"
+        )
+    return scale
+
+
+def _check_log_range(name: str, lo: float, hi: float) -> None:
+    if lo <= 0.0:
+        raise ValueError(
+            f"CPM parameter {name!r} is log-scaled but its physical_range starts at {lo}; "
+            "a log-uniform prior needs a strictly positive lower bound"
+        )
+
+
 def normalize_cpm_param(
     name: str,
     value: float,
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
+    scales: Optional[Dict[str, str]] = None,
 ) -> float:
     """Map a CPM parameter from physical simulator units to [0, 1].
 
@@ -378,6 +422,9 @@ def normalize_cpm_param(
     lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
     if hi <= lo:
         raise ValueError(f"Invalid CPM physical range for {name!r}: {(lo, hi)}")
+    if _resolve_scale(name, scales) == _LOG_SCALE:
+        _check_log_range(name, lo, hi)
+        return (math.log(float(value)) - math.log(lo)) / (math.log(hi) - math.log(lo))
     return (float(value) - lo) / (hi - lo)
 
 
@@ -385,6 +432,7 @@ def denormalize_cpm_param(
     name: str,
     value: float,
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
+    scales: Optional[Dict[str, str]] = None,
 ) -> float:
     """Map a CPM parameter from [0, 1] to physical simulator units.
 
@@ -396,23 +444,30 @@ def denormalize_cpm_param(
         ``"physical_range"`` values in ``parameter_space_division_motility.json``.
     """
     lo, hi = (limits or _CPM_PHYSICAL_LIMITS)[name]
+    if _resolve_scale(name, scales) == _LOG_SCALE:
+        _check_log_range(name, lo, hi)
+        return math.exp(math.log(lo) + float(value) * (math.log(hi) - math.log(lo)))
     return lo + float(value) * (hi - lo)
 
 
 def normalize_cpm_params(
     params: Dict[str, float],
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
+    scales: Optional[Dict[str, str]] = None,
 ) -> Dict[str, float]:
     """Return CPM params normalized into the public [0, 1] parameter space."""
-    return {name: normalize_cpm_param(name, float(value), limits) for name, value in params.items()}
+    return {name: normalize_cpm_param(name, float(value), limits, scales)
+            for name, value in params.items()}
 
 
 def denormalize_cpm_params(
     params: Dict[str, float],
     limits: Optional[Dict[str, Tuple[float, float]]] = None,
+    scales: Optional[Dict[str, str]] = None,
 ) -> Dict[str, float]:
     """Return CPM params converted from public [0, 1] values to physical units."""
-    return {name: denormalize_cpm_param(name, float(value), limits) for name, value in params.items()}
+    return {name: denormalize_cpm_param(name, float(value), limits, scales)
+            for name, value in params.items()}
 
 
 class CellularPotts:
@@ -485,8 +540,31 @@ class CellularPotts:
         from nastja.parameter_space_config import ParameterSpace
 
         self._parameter_space_data: Dict[str, Any] = ps_data["parameters"]
+        # Parameters applied to every simulation but not inferred. A benchmark is not
+        # defined by its inferred parameters alone: the shipped template sets
+        # motilityamount[9] = 50, so "motility is not inferred" and "motility is held at
+        # 1400" are different experiments and only the second is reproducible. Kept in
+        # the parameter-space file so every simulator path lives in one place.
+        self._fixed_params: Dict[str, Any] = {}
+        for name, entry in (ps_data.get("fixed") or {}).items():
+            if name in ps_data["parameters"]:
+                raise ValueError(
+                    f"Parameter '{name}' is both inferred and fixed in the parameter_space "
+                    "JSON; it must be one or the other"
+                )
+            if "path" not in entry or "value" not in entry:
+                raise KeyError(
+                    f"Fixed parameter '{name}' needs both 'path' and 'value' in the "
+                    "parameter_space JSON"
+                )
+            self._fixed_params[name] = (entry["path"], entry["value"])
+        if self._fixed_params:
+            logger.info("CPM holding %d parameter(s) fixed: %s",
+                        len(self._fixed_params),
+                        {k: v[1] for k, v in self._fixed_params.items()})
         self._parameter_space = ParameterSpace.model_validate(ps_data)
         self._physical_limits: Dict[str, Tuple[float, float]] = {}
+        self._physical_scales: Dict[str, str] = {}
         for name, entry in self._parameter_space_data.items():
             if "physical_range" not in entry:
                 raise KeyError(
@@ -495,6 +573,15 @@ class CellularPotts:
                 )
             lo, hi = entry["physical_range"]
             self._physical_limits[name] = (float(lo), float(hi))
+            scale = str(entry.get("scale", _LINEAR_SCALE))
+            if scale not in _VALID_SCALES:
+                raise ValueError(
+                    f"Parameter '{name}' in parameter_space JSON has scale {scale!r}; "
+                    f"expected one of {_VALID_SCALES}"
+                )
+            if scale == _LOG_SCALE:
+                _check_log_range(name, float(lo), float(hi))
+            self._physical_scales[name] = scale
         self.limits: Dict[str, Tuple[float, float]] = {
             name: (0.0, 1.0) for name in self._parameter_space_data
         }
@@ -601,7 +688,8 @@ class CellularPotts:
         logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
         physical_params = {
-            name: denormalize_cpm_param(name, value, self._physical_limits)
+            name: denormalize_cpm_param(name, value, self._physical_limits,
+                                        self._physical_scales)
             for name, value in params.items()
         }
         param_entries = [
@@ -611,6 +699,10 @@ class CellularPotts:
                 path=self._parameter_space_data[name]["path"],
             )
             for name in params
+        ]
+        param_entries += [
+            Parameter(name=name, value=value, path=path)
+            for name, (path, value) in self._fixed_params.items()
         ]
         param_entries.append(
             Parameter(

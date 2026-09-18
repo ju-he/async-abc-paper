@@ -135,6 +135,50 @@ CANDIDATES: Dict[str, Dict[str, Any]] = {
 
 SEED_PATH = "Settings.randomseed"
 
+# Parameters applied to every simulation at a constant value but not screened.
+# A benchmark configuration is not defined by its inferred parameters alone: the
+# shipped template sets motilityamount[9] = 50, so "do not infer motility" and
+# "hold motility at 1400" are different experiments, and only the second is
+# reproducible. Populated by --fix and recorded in protocol.json.
+FIXED: Dict[str, float] = {}
+
+
+def apply_fixed(specs: Sequence[str]) -> None:
+    """Hold a candidate at a constant value instead of screening it."""
+    for spec in specs or ():
+        name, _, raw = spec.partition("=")
+        if name not in CANDIDATES:
+            raise KeyError(f"unknown parameter '{name}'; known: {sorted(CANDIDATES)}")
+        entry = CANDIDATES.pop(name)
+        FIXED[name] = int(round(float(raw))) if entry["integer"] else float(raw)
+
+
+_PATHS: Dict[str, Any] = {name: spec["path"] for name, spec in CANDIDATES.items()}
+
+
+def apply_centre_overrides(specs: Sequence[str]) -> None:
+    """Move the reference point -- the theta that plays the role of observed data.
+
+    Where the truth sits inside the prior is a design choice, not a detail: a truth at
+    the edge of a parameter's responsive window produces a posterior that runs to the
+    prior edge no matter how identifiable the parameter is, which is how the shipped
+    configuration fails.  Format is ``name=value`` in physical units.
+    """
+    for spec in specs or ():
+        name, _, raw = spec.partition("=")
+        if name not in CANDIDATES:
+            raise KeyError(f"unknown parameter '{name}'; known: {sorted(CANDIDATES)}")
+        entry = CANDIDATES[name]
+        value = int(round(float(raw))) if entry["integer"] else float(raw)
+        lo, hi = entry["lo"], entry["hi"]
+        if not (min(lo, hi) <= value <= max(lo, hi)):
+            raise ValueError(
+                f"--centre {name}={value} is outside its prior [{lo}, {hi}]; every "
+                "one-at-a-time sweep of another parameter would hold it at a value "
+                "the prior excludes"
+            )
+        entry["centre"] = value
+
 
 def apply_prior_overrides(specs: Sequence[str], only: Sequence[str] | None) -> None:
     """Re-range or subset the candidates from the command line.
@@ -541,7 +585,8 @@ def run_simulate(args: argparse.Namespace) -> None:
                            write_every=args.write_every,
                            extract_from=args.extract_from,
                            bins=list(BIN_COUNTS), n_ranks=size,
-                           candidates=candidate_snapshot()), f, indent=2)
+                           candidates=candidate_snapshot(),
+                           fixed=dict(FIXED)), f, indent=2)
     comm.Barrier()
     paths = dict(
         sim_config=out_dir / "assets" / "sim_config.json",
@@ -570,6 +615,8 @@ def run_simulate(args: argparse.Namespace) -> None:
         name: dict(path=spec["path"], range=[spec["lo"], spec["hi"]])
         for name, spec in CANDIDATES.items()
     }))
+    if FIXED:
+        print(f"[screen] holding fixed: {FIXED}", flush=True)
     with open(paths["config_builder"]) as f:
         cb_raw = json.load(f)
     sim_root = Path(args.sim_dir or (out_dir / "sims")) / f"rank{rank:04d}"
@@ -585,6 +632,7 @@ def run_simulate(args: argparse.Namespace) -> None:
         for item in mine:
             entries = [Parameter(name=n, value=v, path=CANDIDATES[n]["path"])
                        for n, v in item["params"].items()]
+            entries += [Parameter(name=n, value=v, path=_PATHS[n]) for n, v in FIXED.items()]
             entries.append(Parameter(name="random_seed", value=item["seed"], path=SEED_PATH))
             sim_dir: Path | None = None
             t0 = time.time()
@@ -1385,6 +1433,12 @@ def main(argv: List[str] | None = None) -> None:
                              "(repeatable; recorded in protocol.json)")
     parser.add_argument("--parameters", nargs="+", default=None,
                         help="screen only these candidates (default: all)")
+    parser.add_argument("--fix", action="append", default=[], metavar="NAME=VALUE",
+                        help="apply a candidate at a constant value without screening "
+                             "it (repeatable); recorded in protocol.json")
+    parser.add_argument("--centre", action="append", default=[], metavar="NAME=VALUE",
+                        help="move the reference point -- the theta standing in for "
+                             "observed data -- in physical units (repeatable)")
     parser.add_argument("--limit", type=int, default=0,
                         help="run only the first N evaluations (smoke tests)")
     # analysis
@@ -1409,6 +1463,8 @@ def main(argv: List[str] | None = None) -> None:
                              f"names available: {', '.join(sorted(set(EXTRA_BLOCKS) | set(CAMPAIGN_BLOCKS) | set(TRAJECTORY_BLOCKS)))}")
     args = parser.parse_args(argv)
     apply_prior_overrides(args.prior, args.parameters)
+    apply_centre_overrides(args.centre)
+    apply_fixed(args.fix)
 
     if args.mode == "simulate":
         run_simulate(args)

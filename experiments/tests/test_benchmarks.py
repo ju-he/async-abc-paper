@@ -2,6 +2,7 @@
 import builtins
 import importlib
 import json
+import pathlib
 import math
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -986,3 +987,162 @@ class TestLotkaVolterraExtinction:
             "load-bearing and the conditioning note can be dropped"
         )
         assert np.all(np.isfinite(bm.observed_stats))
+
+
+class TestCPMLogScaledPriors:
+    """A log-uniform prior on a CPM parameter.
+
+    division_rate's response is confined to the bottom of its range, so a uniform
+    prior on that range spends most of its mass where the discrepancy is flat --
+    the measured cause of the flat CPM posterior. A log scale is how the prior is
+    placed over the response instead.
+    """
+
+    LIMITS = {"division_rate": (0.001, 0.2)}
+    SCALES = {"division_rate": "log"}
+
+    def test_log_scale_round_trips(self):
+        from async_abc.benchmarks.cellular_potts import (
+            denormalize_cpm_param,
+            normalize_cpm_param,
+        )
+
+        for physical in (0.001, 0.009, 0.05, 0.2):
+            u = normalize_cpm_param("division_rate", physical, self.LIMITS, self.SCALES)
+            assert 0.0 <= u <= 1.0
+            assert denormalize_cpm_param(
+                "division_rate", u, self.LIMITS, self.SCALES
+            ) == pytest.approx(physical)
+
+    def test_log_scale_puts_the_geometric_midpoint_at_one_half(self):
+        from async_abc.benchmarks.cellular_potts import denormalize_cpm_param
+
+        midpoint = denormalize_cpm_param("division_rate", 0.5, self.LIMITS, self.SCALES)
+        assert midpoint == pytest.approx(math.sqrt(0.001 * 0.2))
+        # The point of the change: linear would have put 0.1005 here, which is above
+        # the entire responsive window.
+        linear = denormalize_cpm_param("division_rate", 0.5, self.LIMITS)
+        assert linear == pytest.approx(0.1005)
+
+    def test_absent_scale_is_linear(self):
+        from async_abc.benchmarks.cellular_potts import denormalize_cpm_param
+
+        assert denormalize_cpm_param(
+            "division_rate", 0.25, self.LIMITS, {}
+        ) == pytest.approx(0.001 + 0.25 * 0.199)
+
+    def test_nonpositive_lower_bound_is_refused(self):
+        from async_abc.benchmarks.cellular_potts import denormalize_cpm_param
+
+        with pytest.raises(ValueError, match="strictly positive lower bound"):
+            denormalize_cpm_param("motility", 0.5, {"motility": (0.0, 4000.0)},
+                                  {"motility": "log"})
+
+    def test_unknown_scale_is_refused(self):
+        from async_abc.benchmarks.cellular_potts import normalize_cpm_param
+
+        with pytest.raises(ValueError, match="expected one of"):
+            normalize_cpm_param("division_rate", 0.01, self.LIMITS,
+                                {"division_rate": "quadratic"})
+
+    def test_parameter_space_scale_is_read_and_validated(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        space = tmp_path / "space.json"
+        space.write_text(json.dumps({"parameters": {"division_rate": {
+            "path": "define_functions.division_cond_cancer[1]",
+            "range": [0.0, 1.0], "physical_range": [0.0, 0.2], "scale": "log"}}}))
+        config = {
+            "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+            "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+            "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
+            "parameter_space": str(space),
+            "reference_data_path": "experiments/assets/cellular_potts/reference_data",
+            "output_dir": str(tmp_path / "sims"),
+        }
+        with pytest.raises(ValueError, match="strictly positive lower bound"):
+            CellularPotts(config, _sim_manager=object(), _distance_metric=object())
+
+
+class TestCPMFixedParameters:
+    """Parameters applied to every simulation but not inferred."""
+
+    def _space(self, tmp_path, fixed):
+        space = tmp_path / "space.json"
+        space.write_text(json.dumps({
+            "parameters": {"division_rate": {
+                "path": "define_functions.division_cond_cancer[1]",
+                "range": [0.0, 1.0], "physical_range": [0.001, 0.2], "scale": "log"}},
+            "fixed": fixed,
+        }))
+        return {
+            "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+            "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+            "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params.json",
+            "parameter_space": str(space),
+            "reference_data_path": "experiments/assets/cellular_potts/reference_data",
+            "output_dir": str(tmp_path / "sims"),
+        }
+
+    def test_fixed_parameters_reach_every_simulation(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        config = self._space(tmp_path, {"motility": {
+            "path": "CellsInSilico.orientation.motilityamount[9]", "value": 1400}})
+        recorded = {}
+
+        class _Manager:
+            def build_simulation_config(self, param_list, out_dir_name):
+                recorded["names"] = {p.name: p.value for p in param_list.parameters}
+                raise RuntimeError("stop after the parameter list is built")
+
+        benchmark = CellularPotts(config, _sim_manager=_Manager(),
+                                  _distance_metric=object())
+        assert benchmark.simulate({"division_rate": 0.5}, seed=3) == float("inf")
+        assert recorded["names"]["motility"] == 1400
+        assert recorded["names"]["random_seed"] == 3
+
+    def test_a_parameter_cannot_be_both_inferred_and_fixed(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        config = self._space(tmp_path, {"division_rate": {
+            "path": "define_functions.division_cond_cancer[1]", "value": 0.01}})
+        with pytest.raises(ValueError, match="both inferred and fixed"):
+            CellularPotts(config, _sim_manager=object(), _distance_metric=object())
+
+    def test_fixed_parameter_needs_a_path_and_a_value(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        config = self._space(tmp_path, {"motility": {"value": 1400}})
+        with pytest.raises(KeyError, match="needs both 'path' and 'value'"):
+            CellularPotts(config, _sim_manager=object(), _distance_metric=object())
+
+
+class TestCPMMultiSeedReferenceContainer:
+    """``generate_cpm_reference.py --n-seeds N`` writes a container of reference dirs."""
+
+    def _reference(self, path):
+        path.mkdir(parents=True)
+        (path / "config.json").write_text("{}")
+        (path / "cis.out").write_text("")
+        (path / "configs").mkdir()
+        (path / "000000").mkdir()
+        (path / "000000" / "cellevents.log").write_text("")
+        (path / "output_cells-00000.csv").write_text("#CellID\n")
+
+    def test_container_of_seed_replicates_expands_to_all_of_them(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import _collect_reference_paths
+
+        container = tmp_path / "cpm_reference_multi"
+        for seed in range(3):
+            self._reference(container / f"reference_seed_{seed}")
+        found = _collect_reference_paths(container)
+        assert [pathlib.Path(p).name for p in found] == [
+            "reference_seed_0", "reference_seed_1", "reference_seed_2"]
+
+    def test_a_single_reference_directory_still_resolves_to_itself(self, tmp_path):
+        from async_abc.benchmarks.cellular_potts import _collect_reference_paths
+
+        single = tmp_path / "reference"
+        self._reference(single)
+        assert _collect_reference_paths(single) == [str(single)]

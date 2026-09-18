@@ -1,0 +1,184 @@
+# Proposed Cellular Potts experiment setup
+
+**Written 2026-09-19.** Follows `.plans/cpm_screening_results_2026-09-18.md` (read its two addenda —
+the second corrects the first). Four further screening corpora, **21,312 evaluations, 0.97 node hours**.
+Every number below is measured, not projected. Configuration artefacts are written and validated;
+nothing here needs a decision before it can be run.
+
+---
+
+## The proposal in one line
+
+**Infer `division_rate` alone, log-uniform on [0.001, 0.2], with a two-block distance
+(`log_n`, `log_r95`) and four replicate seeds.** Forecast posterior: **91% contraction, bias +0.006,
+coverage 92%** at 5% acceptance. Motility is held fixed at 1400 because it cannot be identified —
+demonstrated below, not assumed.
+
+---
+
+## What was screened
+
+| corpus | design | evaluations |
+|---|---|---|
+| `cpm_two_t501` | division_rate × motility, 501 steps | 5,360 |
+| `cpm_two_t1001` | the same at 1001 steps | 5,360 |
+| `cpm_one_t501` | division_rate alone, motility fixed at 1400 | 5,232 |
+| `cpm_two_k16` | division_rate × motility, 16 replicate seeds | 5,360 |
+
+All at 50³, one snapshot, truth placed at the log-midpoint of the measured responsive window. Read
+by `diag_cpm_posterior_forecast.py`, which is new here: the LHS stratum **is** a draw from the prior
+and every draw carries its discrepancy, so rejection ABC is just "keep the smallest rho" and the
+accepted subset **is** the posterior of that setup. No modelling, no further simulation. It is a
+lower bound on what the adaptive sampler achieves per simulation; the comparison between setups is
+the point.
+
+---
+
+## Why motility is out
+
+This is the load-bearing negative result, so it is shown four ways.
+
+**1. The posterior for motility is the prior — at every setting tried.** Contraction (1 − sd_post/sd_prior)
+at 5% acceptance:
+
+| setup | division_rate | motility |
+|---|---|---|
+| 501 steps, k=1 | 72% | **−7%** |
+| 501 steps, k=4 | 78% | **−13%** |
+| 1001 steps, k=4 | 87% | **−3%** |
+| 16 replicate seeds | 84% | **−1%** |
+
+Negative contraction is not a rounding artefact: the accepted set lies along a diagonal ridge across
+the prior square, which puts more marginal mass near the edges than uniform.
+
+**2. More replicate seeds sharpen the ridge instead of shortening it.** The posterior correlation
+between the two parameters at 2% acceptance goes **0.67 (k=1) → 0.82 (k=4) → 0.94 (k=16)**. If the
+degeneracy were Monte Carlo noise, more seeds would break it; instead they reveal it more exactly.
+No amount of sampling effort identifies motility.
+
+**3. A longer run makes it worse, not better.** At 1001 steps the cluster reaches a median of 269
+cells (from 52), the within-theta noise on `log_n` drops 6× to 0.0044, and division_rate's
+contraction improves to 87%. Motility's stays at −3%, and the confounding rises to **|cos| = 1.00**,
+exactly degenerate. The reason is visible in the same run: 269 cells against a domain capacity of
+~250 means the population has saturated the box, at which point everything is `log_n` and the two
+parameters move it identically. `radial_density_profile` and `dbscan_gaslike_fraction` both go dead
+there for the same reason.
+
+**4. It is a property of the summary, not of the sampler.** Motility's response is monotone across
+its whole prior — 26 noise sigmas from M=112 to M=3564 — and its identifiability score is 4.15. It is
+not weak. It is parallel: `|cos|` with division_rate is 0.86, both acting through `log_n` (49%) and
+`log_r95` (25%). A strong response along an axis another parameter already owns buys nothing.
+
+---
+
+## The recommended setup, and the evidence for each choice
+
+### 1. One inferred parameter: `division_rate`, log-uniform on [0.001, 0.2], truth 0.009
+
+Log-uniform is not cosmetic. The responsive window is **[0.0012, 0.017]** — 50% of a log-uniform
+prior on [0.001, 0.2] and **8% of a linear one**. A linear prior reproduces the original failure
+exactly: the posterior runs to the edge because most of the prior is saturated. The truth at 0.009
+sits at u = 0.415, mid-prior.
+
+*This required a code change*: `normalize_cpm_param`/`denormalize_cpm_param` were linear-only, so a
+log-uniform prior was not expressible. They now honour an optional `"scale": "log"` in the
+parameter-space JSON, defaulting to linear.
+
+### 2. Distance over `log_n` and `log_r95` only, weighted 0.5 / 0.5
+
+| weighting | contraction | bias |
+|---|---|---|
+| equal over 7 blocks (shipped) | 66% | **+0.063** |
+| `log_n` + `log_r95` | **91%** | **+0.006** |
+
+The shipped metric is not merely less precise, it is **biased**: its posterior median sits 0.06 of
+the prior range from the truth, an offset larger than the two-block posterior's entire standard
+deviation. Two further benefits fall out. The two scalars are well defined at any cell count, while a
+32-bin g(r) on 12 cells is not — so dropping the curve blocks also removes the degenerate-simulation
+hazard that made ~30% of evaluations meaningless. And nothing but `log_n`/`log_r95` is extracted, so
+each evaluation is cheaper.
+
+### 3. Four replicate seeds per evaluation
+
+Contraction at 2% acceptance, at matched total simulation cost: **78% (k=1) → 82% (k=4) → 83% (k=16)**.
+Four is where the curve flattens; sixteen costs 4× per evaluation for one further point.
+
+### 4. Protocol unchanged: 50³, 501 steps, one snapshot at t=500
+
+Every alternative was measured and rejected in the previous round (snapshot averaging hurts, bin count
+is irrelevant, 80³ gains nothing) or here (1001 steps saturates the box).
+
+### 5. A four-seed reference, and a tolerance floor at ~5% acceptance
+
+A reference is one realisation of noise like any other evaluation. Measured over 12 independent
+four-seed references:
+
+| acceptance | contraction | bias (mean ± between-reference sd) | coverage of the 90% interval |
+|---|---|---|---|
+| 20% | 78% | +0.003 ± 0.022 | 100% |
+| 10% | 87% | −0.002 ± 0.021 | 100% |
+| **5%** | **91%** | **−0.003 ± 0.020** | **92%** |
+| 2% | 93% | −0.003 ± 0.019 | 92% |
+| 1% | 93% | −0.004 ± 0.021 | **75%** |
+
+Below ~5% acceptance the posterior concentrates on the reference's own noise realisation: the last
+two points of contraction cost 17 points of coverage. The between-reference bias scatter (±0.021) is
+by then as large as the posterior's own standard deviation (0.020), which is exactly the condition
+for undercoverage. **Stop the tolerance schedule at ~5%.**
+
+---
+
+## Artefacts, written and validated
+
+| file | what |
+|---|---|
+| `experiments/configs/cellular_potts_division_only.json` | the experiment |
+| `experiments/assets/cellular_potts/parameter_space_division_only.json` | log-uniform prior; motility fixed at 1400 |
+| `experiments/assets/cellular_potts/sims_feature_space_model_size.json` | two blocks, weights 0.5/0.5, fitted on this setup's own 4,800-simulation training corpus |
+| `experiments/assets/cellular_potts/distance_metric_params_size.json` | extracts only the two blocks |
+| `experiments/data/cpm_reference_division_only/` | four-seed reference at the truth |
+
+Verified end to end by constructing `CellularPotts` from the config: prior maps u=0.415 → 0.009, four
+references load, two blocks at 0.5/0.5, motility held at 1400.
+
+Two further code changes were needed and are covered by tests:
+
+* **Fixed parameters.** "Motility is not inferred" and "motility is held at 1400" are different
+  experiments — the shipped template sets `motilityamount[9] = 50` — and only the second is
+  reproducible. The parameter-space JSON now takes a `"fixed"` section carrying path and value, applied
+  to every simulation.
+* **A bug.** Multi-seed reference containers were documented as supported and were not: the container
+  branch of `_collect_reference_paths` was dead code. Written up in `.plans/bug-fixes/previous-fixes.md`.
+
+---
+
+## What this does and does not license
+
+**It licenses** a recovery claim: a known truth, a posterior concentrating on it with 91% contraction
+and correct coverage at a stated tolerance, on a real multiscale simulator. That is a genuine
+inference result and it is what the benchmark was missing.
+
+**It does not license** a multi-parameter claim. The paper should say plainly that CPM carries a
+one-parameter inference claim, and why the second parameter is excluded — because every parameter
+that moves this summary moves it along the population-size axis. That is a more useful statement
+than the current scoping and it is now backed by 21,000 measured evaluations.
+
+**The honest caveat.** A one-parameter posterior is a weaker demonstration than a two-parameter one,
+and a reviewer may reasonably ask whether a benchmark with one identifiable parameter is worth its
+compute in a scaling paper. The counter is that CPM's role is the expensive, realistic simulator, and
+a correct one-parameter recovery on it is worth more than a flat two-parameter one. If the answer is
+that it is not worth it, the fallback is unchanged: keep CPM systems-only and correct the stated
+reason, which is not that noise swamps the signal.
+
+**If a two-parameter claim is wanted**, the requirement is now precise: a summary statistic that
+responds to motility *without* responding to population size. The sibling nastjapy campaign's
+`surface_roughness` and `invasion_ratio` are the right idea and were measured (Addendum 1); they carry
+real information, and at this benchmark's ~60 cells they are too noisy to use. That is a
+feature-engineering problem at a larger cell count, not a sweep.
+
+## Cost
+
+4 jobs, 1 node each: 9:15 + 23:48 + 8:41 + 16:42 = **0.97 node hours**, 21,312 evaluations, 0
+failures. Running total for the CPM screening work: **1.4 of the 24 authorised node hours**. Corpora
+archived to `/p/scratch/tissuetwin/herold2/async-abc/cpm_*.tar.gz`; scratch left with 9 archive files
+and no directories.

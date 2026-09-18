@@ -755,3 +755,32 @@ the same records. Suite green (686 passed, 10 skipped).
 **Blast radius:** every quality-vs-time artifact — Figs. 8 (all panels), 9, 10, plus straggler and
 runtime-heterogeneity final-quality numbers and the scaling `final_quality` column. All must be regenerated
 from existing raw records; **no simulation re-run needed**.
+
+---
+
+## CPM multi-seed reference containers were unusable (2026-09-19)
+
+**Symptom.** Pointing `reference_data_path` at a container produced by
+`generate_cpm_reference.py --n-seeds N` raised `FileNotFoundError: CPM reference_data_path does not
+point to a supported reference dataset`, even though every `reference_seed_*/` child under it was a
+valid reference directory.
+
+**Cause.** `_collect_reference_paths` (`benchmarks/cellular_potts.py`) documents two layouts, single
+and container, and names `--n-seeds N` as the container's producer — but its first statement was
+`resolved = _resolve_reference_data_path(configured_path)`, and that resolver raises on anything that
+is not *itself* a reference directory. A container never is. Its discovery fallback searches for a
+directory whose **name matches the configured path's** (`rglob(target_name)`), so it could not find
+children called `reference_seed_0…N` either. The container branch below it was therefore dead code:
+reachable only when the configured path was already a valid reference directory that also happened to
+contain reference sub-directories.
+
+**Fix.** Recognise the container before invoking the single-directory resolver: if the configured path
+is a directory that is *not* itself a reference dataset but whose immediate children are, return the
+children. The previous resolve-then-expand path is retained unchanged underneath, so the single and
+nested-discovery layouts behave exactly as before.
+
+**Tests.** `TestCPMMultiSeedReferenceContainer` in `tests/test_benchmarks.py` — a container of three
+seed replicates expands to all three in order, and a lone reference directory still resolves to itself.
+
+**Found by** building the proposed `cellular_potts_division_only` setup, whose four-seed reference is
+the first use of the container layout in this repo. Any earlier multi-seed reference would have hit it.
