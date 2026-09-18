@@ -224,3 +224,8 @@ latex/**/*.fls
 # vendored input data lives under experiments/data/paper_figures/)
 latex/sn-article-template/figures/*.png
 latex/sn-article-template/figures/*_meta.json
+
+# CPM screening corpora: ~110 MB of JSONL per run. Archived on scratch instead;
+# see experiments/data/cpm_screening/README.md.
+experiments/data/cpm_screening/*/corpus/
+experiments/data/cpm_screening/*/assets/
