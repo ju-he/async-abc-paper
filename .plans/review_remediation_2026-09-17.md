@@ -47,6 +47,42 @@ MCP budget is 8 node-h per rolling 24 h, 2 per job. Analysis passes fit; campaig
 
 ---
 
+## 0c. Progress log (2026-09-18) — scope (a) chosen
+
+**Tier A — done.** A1 twin-quality claim (`6aded59`), A2/A3 statelessness (`6cd304c`), A4 scaling
+caption + effective simulating ranks and A5 look-ahead related work (`f97be57`), A6 truncnorm and
+B4 thinning (`c2d2a9d`). Paper compiles, 57 pages, no undefined refs.
+
+**Two findings that were not in the review:**
+
+* *The point-mass metric has a computable floor.* For the straggler configuration the analytic
+  posterior has sd $0.1$, so an exactly correct posterior scores $0.1\sqrt{2/\pi} = 0.0798$ — and
+  every arm scored 0.069–0.085, i.e. at or *below* the score of a perfect answer. Below, because a
+  point-mass target rewards an over-concentrated archive. That is a much sharper statement than
+  "the wrong column was selected", and it is now in §6.1, the Table 1 caption, and a test.
+* *`raw_results.csv` did not record the field needed to rebuild the reported estimator.*
+  `tolerance` is the running-minimum trajectory for the plots; during the prior phase it carries
+  `tol_init` rather than `None`, and `None` is exactly how `extract_posterior` identifies bootstrap
+  draws. New `proposal_tolerance` column records the stamped value verbatim (`930e32c`).
+
+**The legacy-data question is closed, and better than expected.** Prior draws carry `weight`
+exactly 1.0 (proposal = prior) in a contiguous leading run, so the boundary is *read off* rather
+than fitted: 113/115/112/113/115 across five replicates of a `k=100`, `W=16` run, each reproducing
+that replicate's own stored `posterior_weight` at max$|\Delta w| = 1.3\times10^{-16}$ (`f809c6a`).
+It is `k + O(W)`, not `k` — the ranks in flight when the archive filled. **Every campaign on disk
+is exactly reconstructible; no re-run is needed for Tier B.**
+
+**Tier B in flight.** `async_abc/analysis/reported_posterior.py` replays `extract_posterior` over
+wall-clock prefixes and scores against a reference posterior; replay is bit-identical to the live
+computation (asserted). `GandK.reference_posterior_samples` gives the g-and-k reference on the
+right target — p(θ | s_obs), not the full-data posterior — via the asymptotic quantile law,
+validated against 40k simulated datasets (`e0eef7c`). `make_reported_recovery_fig.py` written;
+gaussian panel generating.
+
+**Scratch is mounted locally** at `/home/juhe/remotes/scratch` — the 5.6 GB gaussian
+`raw_results.csv` reads at ~12 MB/s, so cache the needed columns with `awk` first (8 min) and work
+from the local copy.
+
 ## 1. The scope decision that sizes everything else
 
 Two coherent papers can be built from what exists. Pick before doing Tier C.
