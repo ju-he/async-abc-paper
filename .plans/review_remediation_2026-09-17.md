@@ -117,6 +117,32 @@ cloud of attempts instead of the reported posterior. Do not monitor these jobs w
 `until ! pgrep -f "<script>.py"` — the wait loop's own command line matches the pattern, so it never
 exits.
 
+### TIER B COMPLETE (2026-09-18)
+
+| item | commit | outcome |
+|---|---|---|
+| B1 recovery metric | `930e32c` `2534e22` | reported estimator scored vs a reference on both benchmarks that admit one; verdict splits by dimension |
+| B2 references | `e0eef7c` | g-and-k reference on p(θ\|s_obs), validated against 40k simulated datasets |
+| B3 twin quality | `d177c6b` | hetero twin: both estimators, all four arms; CPM's empty column dropped |
+| B4 thinning bug | `c2d2a9d` | fixed at source; regression test |
+| B5 untraceable claims | `24e3fae` `21ae14c` `bff3c67` | all six clusters vendored and reproduced |
+| B6 data availability | `bff3c67` | statement matches what is actually committed; scratch paths overridable |
+
+**All six of the review's "untraceable" clusters now reproduce from committed artifacts:**
+r-diagnostics (ζ=0.0419/0.0221, TV 0.26%/1.06%), multimodal SBC (0.857/0.867 mode retention, ESS
+0.9934, max weight 0.0114, coverage 0.502/0.823/0.907/0.959), d=32 coverage and the 2× budget
+control, the coupling variants (≤0.0245, ESS 0.85–0.91 vs 0.995–1.000, 11–25% widening), the
+hetero-twin errors (0.003–0.034 archive), and the retrospective pass (49.3 s per 1e6, ~25 min at
+3e7).
+
+**Three findings Tier B produced that the review did not ask for:** the ESS ceiling (ESS/k ∈
+[1.9,3.6] on identified targets, and the −0.80 log–log coupling to accuracy in 4-D), Lotka–Volterra's
+98% extinction, and `raw_results.csv` not recording the field needed to rebuild the reported
+estimator (fixed: `proposal_tolerance`).
+
+**Not done, by decision:** the LV reference posterior (~60× the g-and-k cost at 1.7% survival, for a
+benchmark whose posterior claim is now scoped away). Tier C and D remain open.
+
 ## 1. The scope decision that sizes everything else
 
 Two coherent papers can be built from what exists. Pick before doing Tier C.
