@@ -174,3 +174,44 @@ class TestCurve:
             _records(hist), LIMITS, np.zeros((10, 1)), min_records=500,
         )
         assert df.empty
+
+
+class TestEffectiveSampleSize:
+    """The reported estimator's ESS is set by the archive size, not the budget.
+
+    Measured on the production Gaussian run: ESS 261-303 out of 1.1-1.3M
+    evaluated particles. ``scripts/diag_ess_growth.py`` is the controlled
+    version; this is the regression guard, since a change that made ESS grow
+    with n would be a change to what the paper reports.
+    """
+
+    @staticmethod
+    def _ess(k, n, seed=17):
+        from propulate.propagators.abcpmc import ABCPMC
+
+        rng = np.random.default_rng(seed)
+        ybar = float(rng.normal(0.0, 0.1))
+        prop = ABCPMC(LIMITS, k=k, kernel="gaussian",
+                      scheduler_type="acceptance_rate", amis_snapshots=20,
+                      perturbation_scale=0.8, tol=5.0, rng=random.Random(seed))
+        hist = []
+        for i in range(n):
+            c = prop(hist)
+            c.generation = i
+            c.loss = abs(float(rng.normal(c.position[0], 0.1)) - ybar)
+            hist.append(c)
+        _, w = prop.extract_posterior(hist)
+        w = np.asarray(w, float)
+        w = w / w.sum()
+        return float(1.0 / np.sum(w ** 2))
+
+    def test_ess_does_not_grow_with_the_budget(self):
+        small, large = self._ess(50, 2_000), self._ess(50, 8_000)
+        assert large < 3 * small, (
+            f"ESS grew from {small:.0f} to {large:.0f} over a 4x budget; if this "
+            "is a real improvement the paper's flat accuracy curve and its "
+            "effective-support discussion both need revisiting"
+        )
+
+    def test_ess_scales_with_the_archive_size(self):
+        assert self._ess(100, 4_000) > 1.5 * self._ess(30, 4_000)
