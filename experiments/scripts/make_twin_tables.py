@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import re
+import os
 import sys
 
 import numpy as np
@@ -33,7 +34,11 @@ from pathlib import Path
 
 import pandas as pd
 
-SCRATCH = Path("/home/juhe/remotes/scratch/herold2/async-abc")
+# Campaign output root. Hard-coding a personal mount makes these tables
+# unreproducible for anyone else, so it is only the default: override with
+# ASYNC_ABC_SCRATCH, or with --scratch on the command line.
+SCRATCH = Path(os.environ.get(
+    "ASYNC_ABC_SCRATCH", "/home/juhe/remotes/scratch/herold2/async-abc"))
 STRAGGLER_ROOT = SCRATCH / "twin2_20260729"
 HETERO_ROOT = SCRATCH / "heterotwin_20260730"
 CPM_TWIN = SCRATCH / "cpmtwin_20260729" / "scaling_cpm_twin" / "data"

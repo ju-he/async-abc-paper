@@ -30,12 +30,17 @@ default path; it is a one-shot table builder, re-run only when the runs change.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
-SCRATCH = Path("/home/juhe/remotes/scratch/herold2/async-abc")
+# Campaign output root. Hard-coding a personal mount makes these tables
+# unreproducible for anyone else, so it is only the default: override with
+# ASYNC_ABC_SCRATCH, or with --scratch on the command line.
+SCRATCH = Path(os.environ.get(
+    "ASYNC_ABC_SCRATCH", "/home/juhe/remotes/scratch/herold2/async-abc"))
 RERUN = SCRATCH / "rerun_20260707" / "scaling" / "data"
 KFRONTIER = SCRATCH / "kfrontier_20260729" / "scaling_kfrontier" / "data"
 PAPER_DATA = Path(__file__).resolve().parents[1] / "data" / "paper_figures"
