@@ -1,0 +1,172 @@
+{
+  "protocol": {
+    "blocksize": 50,
+    "timesteps": 501,
+    "write_every": 50,
+    "extract_from": 250,
+    "bins": [
+      8,
+      16,
+      32
+    ],
+    "n_ranks": 48,
+    "candidates": {
+      "division_rate": {
+        "path": "define_functions.division_cond_cancer[1]",
+        "lo": 0.002,
+        "hi": 0.2,
+        "scale": "log",
+        "centre": 0.03,
+        "integer": false
+      },
+      "motility": {
+        "path": "CellsInSilico.orientation.motilityamount[9]",
+        "lo": 100,
+        "hi": 4000,
+        "scale": "log",
+        "centre": 2000,
+        "integer": true
+      },
+      "adhesion_cc": {
+        "path": "CellsInSilico.adhesion.matrix[9][9]",
+        "lo": 40,
+        "hi": 200,
+        "scale": "lin",
+        "centre": 103,
+        "integer": true
+      },
+      "surface_lambda": {
+        "path": "CellsInSilico.surface.lambda_[9]",
+        "lo": 0.25,
+        "hi": 8.0,
+        "scale": "log",
+        "centre": 1.0,
+        "integer": false
+      },
+      "persistence": {
+        "path": "CellsInSilico.orientation.persistenceMagnitude",
+        "lo": 0.0,
+        "hi": 0.99,
+        "scale": "lin",
+        "centre": 0.834,
+        "integer": false
+      },
+      "recalc_time": {
+        "path": "CellsInSilico.orientation.recalculationtime",
+        "lo": 2,
+        "hi": 60,
+        "scale": "log",
+        "centre": 15,
+        "integer": true
+      }
+    }
+  },
+  "seeds_per_eval": 1,
+  "parameters": [
+    "division_rate",
+    "motility",
+    "adhesion_cc",
+    "surface_lambda",
+    "persistence",
+    "recalc_time"
+  ],
+  "weightings": {
+    "equal (9 blocks, shipped)": {
+      "held_out_r2": [
+        -0.0021428655998092516,
+        0.11445988918268046,
+        0.11739043434619834,
+        0.11586465541551216,
+        0.11455315992015636,
+        0.11354969267870374,
+        0.1142142292659114
+      ],
+      "resolved": 1,
+      "weights": {
+        "log_r95": 0.1111111111111111,
+        "log_n": 0.1111111111111111,
+        "radial_fa_equal_volume": 0.1111111111111111,
+        "radial_s2_equal_volume": 0.1111111111111111,
+        "radial_density_profile_equal_volume": 0.1111111111111111,
+        "dbscan_gaslike_fraction": 0.1111111111111111,
+        "pair_correlation_gofr": 0.1111111111111111,
+        "invasion_ratio": 0.1111111111111111,
+        "surface_roughness": 0.1111111111111111
+      }
+    },
+    "size scalars only": {
+      "held_out_r2": [
+        -0.00791250560194956,
+        0.6631722140875637,
+        0.6851731720179733,
+        0.6844172214096949,
+        0.6817921772128801,
+        0.6826255795985536,
+        0.6853782708114078
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.5,
+        "log_n": 0.5
+      }
+    },
+    "scalars + campaign features at 25%": {
+      "held_out_r2": [
+        -0.006302792574864435,
+        0.6579663506836096,
+        0.6772156933689254,
+        0.672934851543585,
+        0.6769070597358926,
+        0.674106775907214,
+        0.6737426633037011
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.375,
+        "log_n": 0.375,
+        "invasion_ratio": 0.125,
+        "surface_roughness": 0.125
+      }
+    },
+    "scalars + campaign features at 50%": {
+      "held_out_r2": [
+        -0.004000464314592556,
+        0.5435213283106108,
+        0.5553139782847089,
+        0.55387373656633,
+        0.5514686184246879,
+        0.5504537157014605,
+        0.548617516667528
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.25,
+        "log_n": 0.25,
+        "invasion_ratio": 0.25,
+        "surface_roughness": 0.25
+      }
+    },
+    "size blocks removed": {
+      "held_out_r2": [
+        -0.002472916340340525,
+        0.027060927352078434,
+        0.03481274252587041,
+        0.03321644970741988,
+        0.031981722061202866,
+        0.03428157125803588,
+        0.03356655105940742
+      ],
+      "resolved": 2,
+      "weights": {
+        "radial_fa_equal_volume": 0.14285714285714285,
+        "radial_s2_equal_volume": 0.14285714285714285,
+        "radial_density_profile_equal_volume": 0.14285714285714285,
+        "dbscan_gaslike_fraction": 0.14285714285714285,
+        "pair_correlation_gofr": 0.14285714285714285,
+        "invasion_ratio": 0.14285714285714285,
+        "surface_roughness": 0.14285714285714285
+      }
+    }
+  },
+  "best": "size scalars only"
+}

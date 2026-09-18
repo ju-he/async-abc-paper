@@ -317,11 +317,9 @@ collapses to 0.24, so the curve blocks do hold a separable direction; and it is 
 there, that the campaign's two features earn their keep, roughly doubling motility from 0.84 to
 **1.62**, across the identifiability threshold.
 
-**So: yes, they help, on the one parameter that needed it, but only in a metric that does not let
-population size dominate.** What weighting actually realises that is not settled here — a first
-attempt at scoring candidate weightings used an estimator that had not been validated and returned
-numbers contradicting the committed analysis, so it was discarded rather than reported. That is the
-open question, and it is post-processing on the corpus already committed, not new simulation.
+**So: they carry real information, but whether a metric can use it was left open here.** It is
+settled in the next section, and the answer is no — the size-removed row above is a mirage, and is
+corrected there.
 
 ## What does not transfer
 
@@ -350,3 +348,82 @@ still the safe deliverable. A `division_rate` + `motility` claim moves from "not
 "marginal, and contingent on a reweighted metric that includes `invasion_ratio` and
 `surface_roughness`" — worth one more post-processing pass on the committed corpus before any
 decision, and cheap, since it needs no simulation.
+
+
+---
+
+# Addendum 2 — the weighting question, settled: drop five of the seven blocks
+
+The open question above was which weighting exploits the campaign's features. Answering it needed a
+statistic that does not depend on estimating the noise at the reference, where rho is a near-zero
+squared distance whose robust scale is badly determined — the flaw that sank the first attempt.
+
+**The statistic: how many parameter directions does the discrepancy surface resolve?** Around the
+reference, rho is quadratic in theta, so the eigenvectors of its Hessian are the directions a
+sampler can and cannot see. Fit that surface using only the top-r curvature directions and ask how
+well it predicts **held-out thetas** (5-fold, folds by theta so replicates never straddle).
+Directions that are real improve held-out prediction; directions that are noise do not. No noise
+estimate is required, because cross-validation supplies one.
+
+Run on the 400-theta LHS stratum, four replicate seeds per evaluation:
+
+`experiments/scripts/diag_cpm_resolved_directions.py`, on the 400-theta LHS stratum of the
+`campaign_features` corpus, four replicate seeds per evaluation:
+
+| block weighting | held-out R² at r=1 | at r=2 | at r=3 | directions resolved |
+|---|---|---|---|---|
+| equal, 9 blocks (what the paper ships) | 0.204 | 0.205 | 0.199 | **1** |
+| **`log_n` + `log_r95` only** | 0.799 | **0.825** | 0.822 | **2** |
+| scalars + campaign features at 25% | 0.758 | 0.773 | 0.771 | 2 |
+| scalars + campaign features at 50% | 0.608 | 0.608 | 0.609 | **1** |
+| size blocks removed | 0.068 | 0.080 | 0.073 | 2 |
+
+Same ordering at one seed per evaluation (0.114 / **0.685** / 0.677 / 0.555 / 0.035); full tables in
+`experiments/data/cpm_screening/logs/resolved_directions_k{1,4}.md`.
+
+**Three conclusions, and the first two correct claims made earlier in this document.**
+
+1. **The size-removed comparison in Addendum 1 is an artefact.** Dropping `log_n`/`log_r95` does
+   drop the division_rate↔motility confounding from 0.88 to 0.24 — but that space predicts the
+   discrepancy at held-out R² **0.08**, against 0.83 with the size scalars alone. The directions
+   stop being parallel because the signal disappears, not because it separates. A geometry measured
+   in a space with essentially no signal says nothing, and "the blocker is the weighting, not the
+   feature list" was drawn partly from that row.
+
+2. **Adding the campaign's features to the metric monotonically degrades it** — 0.825 → 0.773 →
+   0.608 as their share goes 0% → 25% → 50%, and at 50% the second direction is lost. Their partial
+   correlation (0.41 for motility) is real, but `surface_roughness` sits at SNR 1.72 and
+   `invasion_ratio` at 2.33 against `log_n` at 33.5: mixing them in costs more in added noise than
+   they contribute in signal. **The answer to "will the campaign's features help?" is no, for this
+   benchmark's discrepancy** — not because the features are bad, but because this benchmark's cell
+   counts make everything except the two size scalars noise-dominated.
+
+3. **But the weighting question has a winner, and it is better than this document's first
+   recommendation.** `log_n` + `log_r95` alone resolves **two** directions where the shipped
+   equal weighting resolves one, at four times the held-out predictive power (0.825 vs 0.202). The
+   two directions are division_rate (leading eigenvector −0.97 on it) and motility (+0.88).
+
+**Why a 2-D summary beats a 43-D one, concretely.** The parameters' *leading* response directions
+are nearly parallel — both move `log_n` hard, which is the |cos| = 0.88 reported above. What
+separates them is the **ratio** of `log_n` to `log_r95`: partial rank correlation of `log_r95` with
+motility, after removing `log_n`, is +0.21. That is a modest signal living in a two-dimensional
+ratio, and burying it under 41 further coordinates at SNR ≈ 1 is what the shipped equal weighting
+does. Removing them does not add information; it stops spending the budget on noise.
+
+## Revised recommendation
+
+This supersedes the one-parameter recommendation above.
+
+1. **Infer `division_rate` and `motility` jointly**, log-uniform on **[0.002, 0.2]** and
+   **[100, 4000]**. Two parameters, two resolved directions.
+2. **Set `feature_weights = {"log_n": 0.5, "log_r95": 0.5}`** and drop the other five blocks from
+   the CPM distance. This is the single highest-value change in this document: 1 → 2 resolvable
+   directions, held-out R² 0.205 → 0.825, discrepancy SNR 2.35 → 14.56.
+3. **Four replicate seeds per evaluation** (held-out R² 0.685 → 0.825), one snapshot at t=500,
+   32 bins, 50³ box.
+4. **Add the cell-count guard** to `CellularPotts.simulate`, unchanged from above.
+
+The expected posterior is a correlated but proper two-parameter posterior, not a flat one. Whether
+the correlation is tight enough to be worth reporting as an inference claim is a judgement call the
+figure will settle — and it is now a cheap experiment, because none of this needs a new simulator
+configuration, only a distance-metric edit and a rerun.
