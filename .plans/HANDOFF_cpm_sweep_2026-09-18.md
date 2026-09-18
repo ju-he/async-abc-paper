@@ -1,3 +1,11 @@
+> **SUPERSEDED 2026-09-18 by `.plans/cpm_screening_results_2026-09-18.md`.** The sweep was run.
+> Its central premise — signal-to-noise 0.30, so the protocol must be fixed before any parameter can
+> be chosen — does not hold: a designed experiment under the shipped protocol, prior, model and
+> reference measures 3.78. The 0.30 is the signal inside the region the converged sampler had already
+> collapsed onto, not across the prior. Of the four Phase-A factors, only replicate seeds help;
+> snapshot averaging hurts and the 80³ domain gains nothing (the cluster never touched the walls in
+> the sense that mattered). Read the results document, not the plan below.
+
 # Handoff — Cellular Potts parameter & settings sweep
 
 **Written 2026-09-18.** Start a fresh session with this file. Budget authorised by the user:

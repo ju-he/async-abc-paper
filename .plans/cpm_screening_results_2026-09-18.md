@@ -208,10 +208,14 @@ statistics resolve only one direction in parameter space.
 - 4 jobs, 1 node each: 4:53 + 13:20 + 4:16 + 3:58 = **0.44 node hours** of the 24 authorised
   (plus two sub-minute `devel` probe jobs).
 - 9,316 evaluations, **0 simulation failures**.
-- Scratch inodes: baseline 3,015,969 at the start. Per-evaluation directories are removed by the
-  driver — **0 stray `eval_*` directories** after four jobs. The four corpora (212 files) were
-  archived to `cpm_screen_{50,80,r2,shipped}.tar.gz` under
-  `/p/scratch/tissuetwin/herold2/async-abc/` and the directories removed: **net +4 inodes**.
+- Scratch inodes: **net +4 from this work**. Per-evaluation directories are removed by the driver —
+  **0 stray `eval_*` directories** from these four jobs, whose peak footprint was 212 files. The four
+  corpora were then archived to `cpm_screen_{50,80,r2,shipped}.tar.gz` under
+  `/p/scratch/tissuetwin/herold2/async-abc/` (24 MB each) and the directories removed.
+  The project-wide counter did move over the same day, 3,015,969 (09:21) to 3,405,552 (17:21), but
+  that is someone else's +390k: this campaign never held more than 212 files. Unrelated, and
+  pre-existing: 18 `eval_*` directories survive under `old/run1/` and `small_20260618_191443/` from
+  March and June runs.
   No attempt traces are written — `_attempt_trace.py` is reached only from `pyabc_wrapper` and
   `abc_smc_baseline`, and this driver uses neither.
 - `keep_eval_dirs` is not set to `true` anywhere in the repo (checked). `_cleanup_combo_artifacts`
