@@ -118,6 +118,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", required=True)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--experiments", nargs="*", default=None,
+                    help="Explicit sub-run names; default covers every variant.")
     args = ap.parse_args()
     root = Path(args.root)
     lines: list[str] = []
@@ -125,8 +127,19 @@ def main() -> None:
         lines.append(s)
 
     emit("# SBC extra diagnostics (concern 6): multidim + multimodal\n")
-    for exp in ["sbc_gandk", "sbc_gandk_2x", "sbc_bimodal"]:
+    # The 1000-trial full-history reruns (sbc1000_20260729) use "_fullhist"
+    # names and the reported-support variants use "_topm*"; the paper quotes the
+    # full-history bimodal numbers, so all of them have to be reachable here.
+    candidates = args.experiments or [
+        "sbc_gandk", "sbc_gandk_2x", "sbc_gandk_fullhist",
+        "sbc_gandk_topm500", "sbc_gandk_topm1500",
+        "sbc_bimodal", "sbc_bimodal_fullhist",
+        "sbc_gaussian_archive", "sbc_gaussian_fullhist",
+    ]
+    for exp in candidates:
         d = root / exp / "data"
+        if not d.exists():
+            continue
         if not (d / "coverage.csv").exists():
             emit(f"## {exp}: MISSING\n")
             continue
@@ -145,7 +158,7 @@ def main() -> None:
         emit(_weight_health(d / "sbc_trials.jsonl").to_string(index=False,
              float_format=lambda x: f"{x: .4f}"))
         emit("")
-        if exp == "sbc_bimodal":
+        if exp.startswith("sbc_bimodal"):
             mc = _bimodal_mode_coverage(d / "sbc_trials.jsonl")
             emit("### Bimodal mode coverage (async top-k archive)\n")
             emit(f"trials={mc['n_trials']}  both-modes-kept={mc['frac_both_modes']:.3f}  "
