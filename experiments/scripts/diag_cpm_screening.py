@@ -195,6 +195,41 @@ BINNED_FEATURES = (
 # ignores them.  ``--extra-blocks`` screens them as candidate replacements for
 # dbscan_gaslike_fraction, which is dead in the shipped model (its scaler is the
 # RobustScaler IQR-zero fallback and its block norm is 0).
+# Features the sibling nastjapy inference campaign added for exactly this failure
+# mode.  Its finding F10 is that the size-normalised radial profiles are
+# motility-blind -- pcorr(feature, motility | division_rate) ~ 0 -- and F71 that
+# `surface_roughness` and `invasion_ratio` carry most of the signal its own
+# seven-feature gate was missing.  All three are registered in nastjapy's
+# FEATURE_FUNCTIONS and need nothing but the cell positions, so adding them to
+# the benchmark is a `distance_metric_params.json` edit.
+CAMPAIGN_BLOCKS = {
+    "invasion_ratio": {},
+    "surface_roughness": {},
+    "shape_anisotropy": {},
+}
+
+# Growth-curve features need the WHOLE trajectory, not one snapshot, so they are
+# extracted from a multi-frame handler.  The campaign's nano test put
+# growth_model_r at pcorr 0.64 for division given motility, where the
+# single-snapshot features sat at ~0.
+TRAJECTORY_BLOCKS = {
+    "growth_model_r": {},
+    "growth_model_K": {},
+    "log_n_trajectory": {},
+}
+
+# Two of the optional blocks misbehave badly enough to distort any analysis that
+# includes them, so neither is on by default. Measured on the 50^3 corpus:
+# `shape_anisotropy` is PC1/PC3, and a near-degenerate smallest axis sends it to
+# a block norm of 6e8, after which its scaled distances swamp every other block;
+# `log_n_trajectory` starts at log(4) on the four seeded spheroids, so its early
+# entries are coarsely discretised and heavy-tailed, and it captures 84-96% of
+# the whitened response direction of parameters whose identifiability is 0.
+# Ask for them by name if you want them.
+DEFAULT_EXTRA_BLOCKS = ("radial_linearity_equal_volume", "radial_planarity_equal_volume",
+                        "radial_sphericity_equal_volume", "invasion_ratio",
+                        "surface_roughness", "growth_model_r", "growth_model_K")
+
 EXTRA_BLOCKS = {
     "radial_linearity_equal_volume": 0.88,
     "radial_planarity_equal_volume": 0.88,
@@ -345,7 +380,7 @@ def build_variant_assets(out_dir: Path, *, blocksize: int, timesteps: int,
     return dict(sim_config=sim_config_path, config_builder=cb_params_path)
 
 
-def bin_metadata(n_bins: int, *, extras: bool = False) -> Dict[str, Dict[str, Any]]:
+def bin_metadata(n_bins: int, *, extras: Any = False) -> Dict[str, Dict[str, Any]]:
     """Shipped feature metadata with every binned feature set to ``n_bins``.
 
     With ``extras``, the free shape blocks are appended.  Only the analysis fit
@@ -362,8 +397,24 @@ def bin_metadata(n_bins: int, *, extras: bool = False) -> Dict[str, Dict[str, An
         metadata[name] = dict(metadata[name], n_bins=int(n_bins))
     if extras:
         template = metadata["radial_fa_equal_volume"]
-        for name, explained_var in EXTRA_BLOCKS.items():
-            metadata[name] = dict(template, explained_var=explained_var)
+        wanted = set(extras) if extras is not True else set(DEFAULT_EXTRA_BLOCKS)
+        unknown = wanted - set(EXTRA_BLOCKS) - set(CAMPAIGN_BLOCKS) - set(TRAJECTORY_BLOCKS)
+        if unknown:
+            raise KeyError(f"unknown extra blocks {sorted(unknown)}")
+        for name in wanted:
+            if name in EXTRA_BLOCKS:
+                metadata[name] = dict(template, explained_var=EXTRA_BLOCKS[name])
+            elif name in CAMPAIGN_BLOCKS:
+                metadata[name] = dict(CAMPAIGN_BLOCKS[name])
+            else:
+                metadata[name] = dict(TRAJECTORY_BLOCKS[name])
+    return metadata
+
+
+def extraction_metadata(n_bins: int) -> Dict[str, Dict[str, Any]]:
+    """What the simulate step computes: the shipped seven plus the campaign's three."""
+    metadata = bin_metadata(n_bins)
+    metadata.update({k: dict(v) for k, v in CAMPAIGN_BLOCKS.items()})
     return metadata
 
 
@@ -406,7 +457,7 @@ def extract_corpus_row(sim_dir: Path, *, bins: Sequence[int], extract_from: int,
 
     rows: List[Dict[str, Any]] = []
     probe = build_datahandler_for_dir(
-        sim_dir, feature_metadata=bin_metadata(bins[0]),
+        sim_dir, feature_metadata=extraction_metadata(bins[0]),
         base_kwargs={"scale_factor": 1}, default_timestep_range=-1,
     )
     n_frames = int(probe.sim_dir.frames)
@@ -418,7 +469,7 @@ def extract_corpus_row(sim_dir: Path, *, bins: Sequence[int], extract_from: int,
             continue
         for n_bins in bins:
             handler = build_datahandler_for_dir(
-                sim_dir, feature_metadata=bin_metadata(n_bins),
+                sim_dir, feature_metadata=extraction_metadata(n_bins),
                 base_kwargs={"scale_factor": 1, "timestep_range": frame},
                 default_timestep_range=None,
             )
@@ -436,6 +487,32 @@ def extract_corpus_row(sim_dir: Path, *, bins: Sequence[int], extract_from: int,
             rows.append(dict(frame=frame, tstep=int(tstep), bins=int(n_bins),
                              n_cells=n_cells, features=features))
             del handler
+
+    # Growth curve over the whole trajectory, attached to every row of this
+    # simulation so the analysis can treat it as one more block.
+    trajectory: Dict[str, List[float]] = {}
+    try:
+        whole = build_datahandler_for_dir(
+            sim_dir, feature_metadata={k: dict(v) for k, v in TRAJECTORY_BLOCKS.items()},
+            base_kwargs={"scale_factor": 1, "timestep_range": (0, len(times), 1)},
+            default_timestep_range=None,
+        )
+        whole.extract_all_features(show_progress=False, quiet=True)
+        for name in TRAJECTORY_BLOCKS:
+            payload = whole.features.get(name)
+            values = list(payload.values()) if isinstance(payload, dict) else [payload]
+            arrays = [a for a in (_feature_value_to_array(v) for v in values) if a is not None]
+            if not arrays:
+                continue
+            array = np.asarray(arrays[-1], dtype=float).ravel()
+            if array.size and np.isfinite(array).all():
+                trajectory[name] = [float(x) for x in array]
+        del whole
+    except Exception as exc:  # noqa: BLE001 - a missing growth fit must not lose the snapshot rows
+        print(f"[screen] growth-curve extraction failed for {sim_dir}: "
+              f"{type(exc).__name__}: {exc}", flush=True)
+    for row in rows:
+        row["trajectory"] = trajectory
     return rows
 
 
@@ -638,7 +715,9 @@ def _units(rows: Sequence[Dict[str, Any]], *, bins: int, tsteps: Sequence[int],
             continue
         key = (int(row["point_index"]), int(row["rep"]))
         slot = per_rep.setdefault(key, dict(meta=row, frames={}))
-        slot["frames"][int(row["tstep"])] = row["features"]
+        # Trajectory features describe the whole simulation, so they ride along
+        # on every frame; averaging a constant over frames is a no-op.
+        slot["frames"][int(row["tstep"])] = dict(row["features"], **row.get("trajectory", {}))
 
     points: Dict[int, Dict[str, Any]] = {}
     for (point_index, _rep), slot in sorted(per_rep.items()):
@@ -696,7 +775,7 @@ def shipped_reference_features(bins: int) -> Dict[str, np.ndarray]:
 
 
 def _fit_model(points: Dict[int, Dict[str, Any]], *, bins: int, seed: int,
-               extras: bool) -> Any:
+               extras: Any) -> Any:
     """Fit the feature-space model on the space-filling stratum.
 
     Fitting on the LHS stratum mirrors how the shipped model was built (over a
@@ -801,7 +880,7 @@ def _spread(per_point: Dict[int, List[float]], anchors: Sequence[int],
 
 
 def screen(points: Dict[int, Dict[str, Any]], *, bins: int, seed: int,
-           extras: bool = False, shipped: bool = False) -> Dict[str, Any]:
+           extras: Any = False, shipped: bool = False) -> Dict[str, Any]:
     """Within/between/identifiability for one protocol.
 
     With ``shipped``, the metric is not refitted: the paper's own feature-space
@@ -1183,7 +1262,8 @@ def run_analyze(args: argparse.Namespace) -> None:
                         group=variant["group"])
         try:
             result = screen(points, bins=variant["bins"], seed=args.fit_seed,
-                            extras=args.extra_blocks, shipped=args.shipped_model)
+                            extras=(True if args.extra_blocks == [] else args.extra_blocks),
+                            shipped=args.shipped_model)
         except ValueError as exc:
             print(f"| {variant['bins']} | {len(variant['tsteps'])} | {variant['group']} "
                   f"| skipped: {exc} | | | | |")
@@ -1323,9 +1403,10 @@ def main(argv: List[str] | None = None) -> None:
                              "bounds (repeatable). Use it to ask what the signal "
                              "looks like in the sub-region a converged sampler "
                              "occupies, rather than across the whole prior.")
-    parser.add_argument("--extra-blocks", action="store_true",
-                        help="also score the free shape blocks the shipped "
-                             "feature set ignores (linearity/planarity/sphericity)")
+    parser.add_argument("--extra-blocks", nargs="*", default=None, metavar="NAME",
+                        help="also score optional blocks the shipped feature set "
+                             "ignores. Bare flag uses the vetted default set; "
+                             f"names available: {', '.join(sorted(set(EXTRA_BLOCKS) | set(CAMPAIGN_BLOCKS) | set(TRAJECTORY_BLOCKS)))}")
     args = parser.parse_args(argv)
     apply_prior_overrides(args.prior, args.parameters)
 

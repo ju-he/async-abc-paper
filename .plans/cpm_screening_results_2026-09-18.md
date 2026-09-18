@@ -237,3 +237,116 @@ The four corpora used here were generated with `--design-seed 20260918` (rounds 
 `20260919` (round 2, with `--prior persistence=0.002:0.3:log --prior division_rate=0.002:0.06:log
 --prior motility=300:3000:log`) and `20260920` (the shipped-prior control, with
 `--parameters division_rate motility --prior division_rate=0.00006:0.6:lin --prior motility=0:10000:lin`).
+
+---
+
+# Addendum — do the sibling campaign's features help?
+
+The spheroid inference campaign in `../nastjapy/inference-campaign/` reached the *same diagnosis
+independently*, on a different model, and built features against it. Its canonical log is
+`../nastjapy/.planning/ressources/inference_execution_log.md`.
+
+**Its F67 is this screen's result in different words:** "`r95/r50` is very nearly a deterministic
+decreasing function of cell count … `N`, `tail` and `r95/r50` carry on the order of one effective
+dimension, not three … an NPE trained on (N, tail, gas, r95/r50) would return approximately the
+prior for every mechanics dimension. **⇒ this, not coverage, is now the binding obstacle**, and it
+is a feature-design problem, not a compute problem." Its F10 is the same for the blocks this paper
+uses: "the size-normalized radial profiles (radial_fa/s2, density) are motility-blind —
+pcorr(feature, motility | division_rate) ~ 0".
+
+Two things it hands over.
+
+## 1. The screening statistic, which this screen was missing
+
+F69/F71 score a feature by **partial rank correlation with log N removed from both sides** — does
+it see the parameter *beyond what population size already explains*. That is a sharper instrument
+than the response-direction geometry used above, and it changes the answer. Applied to this paper's
+corpora (1,600 LHS evaluations, 50³):
+
+| parameter | best \|partial ρ\|, shipped blocks | best \|partial ρ\|, + campaign features | via |
+|---|---|---|---|
+| motility | 0.22 | **0.41** | `surface_roughness` |
+| division_rate | 0.23 | **0.31** | `surface_roughness` |
+| recalc_time | 0.32 | 0.32 | `radial_density_profile` |
+| surface_lambda | 0.21 | 0.21 | `log_r95` |
+| persistence | 0.22 | 0.20 | `radial_s2` |
+| adhesion_cc | 0.09 | 0.08 | — |
+
+## 2. Two features, already implemented, already registered
+
+`invasion_ratio` (r95/r50) and `surface_roughness` (CV of the outer-shell radii) are in nastjapy's
+`FEATURE_FUNCTIONS` and need nothing but cell positions, so adding them to the benchmark is a
+`distance_metric_params.json` edit. F71: "**Two features carry most of the new signal and neither
+was in the gate:** `surface_roughness` (0.51 motility / 0.47 leader_fraction) and
+`pair_correlation_gofr__0`." Re-run of the round-1 50³ design with them extracted (2,392
+evaluations, 4.5 min, corpus `campaign_features/`) puts them above every curve block:
+
+| block | SNR |
+|---|---|
+| log_n / log_r95 | 33.5 / 15.6 |
+| **invasion_ratio** | **2.33** |
+| **surface_roughness** | **1.72** |
+| radial_fa / radial_s2 / radial_density / g(r) | 1.53 / 1.06 / 1.05 / 0.97 |
+
+**Two of this screen's findings are independently confirmed by the campaign's data.**
+`radial_s2_equal_volume` is dead weight — its ten PCs "max out at |0.19| against every parameter"
+there, SNR 1.06 here. And `dbscan_gaslike_fraction` is not intrinsically dead: it is the campaign's
+single *best* feature for leader motility (partial 0.73). Both benchmarks kill it the same way, by
+calibrating it over a range that never crosses the transition it measures.
+
+## But adding them is not sufficient, and the reason is the metric
+
+Added alongside the size blocks at equal weight, they change almost nothing: division_rate↔motility
+confounding 0.88 → 0.84, motility identifiability 3.37 → 3.23, and the equal-weight discrepancy SNR
+slightly *worse* (3.03 → 2.76) because two more blocks each take a share of the budget. The
+information is real but invisible at 1/9 of the budget next to a block at SNR 33.
+
+Removing the size blocks from the summary space shows what is underneath:
+
+| summary space | division_rate ↔ motility | motility identifiability |
+|---|---|---|
+| size blocks only (`log_n`, `log_r95`) | **1.00** | 4.22 |
+| shipped 7, equal weight | 0.88 | 3.37 |
+| shipped 7 + the two campaign features | 0.84 | 3.23 |
+| shipped 7, size blocks removed | **0.24** | 0.84 |
+| that, + `invasion_ratio` + `surface_roughness` | 0.26 | **1.62** |
+
+Two cells carry the argument. With only the size blocks every parameter is *perfectly* degenerate
+(|cos| = 1.00) — the one-direction result in its purest form. With size removed the confounding
+collapses to 0.24, so the curve blocks do hold a separable direction; and it is there, and only
+there, that the campaign's two features earn their keep, roughly doubling motility from 0.84 to
+**1.62**, across the identifiability threshold.
+
+**So: yes, they help, on the one parameter that needed it, but only in a metric that does not let
+population size dominate.** What weighting actually realises that is not settled here — a first
+attempt at scoring candidate weightings used an estimator that had not been validated and returned
+numbers contradicting the committed analysis, so it was discarded rather than reported. That is the
+open question, and it is post-processing on the corpus already committed, not new simulation.
+
+## What does not transfer
+
+- **The growth curve.** The campaign's nano test put `growth_model_r` at pcorr 0.64 for division
+  given motility where single-snapshot features sat at ~0. Extracted here over the *full* 10-frame
+  trajectory from t=50, it reaches **0.14** (and `growth_model_K` 0.15, a raw log-N slope 0.24).
+  Measured, not inferred from a truncated window.
+- **Adhesion, persistence, recalc_time** stay unidentifiable under every combination tried.
+- **`shape_anisotropy` and `log_n_trajectory` are traps.** `shape_anisotropy` is PC1/PC3 and a
+  near-degenerate smallest axis drives its block norm to 6×10⁸, after which it swamps every other
+  block; `log_n_trajectory` begins at log(4) on the four seeded spheroids, so its early entries are
+  coarsely discretised and heavy-tailed, and it captured 84–96% of the whitened response direction
+  of parameters whose identifiability is 0. Both are off by default in `--extra-blocks`.
+
+## The scale caveat, from the campaign's own data
+
+The campaign ran this experiment at ~148 cells ("nano") and concluded: "**motility recovery stays
+~0.25 of range (≈uninformed) for every feature set** … motility remains data-ceiling-limited at 148
+cells even with trajectory dynamics — confirming it needs the **macro** scale (developed invasion
+morphology)." This benchmark sits at a median of 60 cells, below that. Motility reaching only 1.62
+even with the right features is consistent with their ceiling, and it is the honest reason to expect
+a two-parameter CPM claim to stay marginal rather than become comfortable.
+
+**Net effect on the recommendation above:** the one-parameter `division_rate` claim is unchanged and
+still the safe deliverable. A `division_rate` + `motility` claim moves from "not supportable" to
+"marginal, and contingent on a reweighted metric that includes `invasion_ratio` and
+`surface_roughness`" — worth one more post-processing pass on the committed corpus before any
+decision, and cheap, since it needs no simulation.
