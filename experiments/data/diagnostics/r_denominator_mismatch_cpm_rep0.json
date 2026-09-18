@@ -1,0 +1,20 @@
+{
+  "benchmark": "cellular_potts",
+  "replicate": 0,
+  "n": 33748,
+  "k": 100,
+  "n_bootstrap": 0,
+  "nu_n": 0.0,
+  "m_shipped": 20,
+  "w_prior_shipped": 0.023809523809523808,
+  "m_reference": 399,
+  "w_prior_reference": 0.023809523809523808,
+  "zeta_total": 0.022119863075059677,
+  "zeta_floor": 0.0,
+  "zeta_quadrature": 0.022119863075059677,
+  "tv_bound_total": 0.022620219227090756,
+  "r_min_total": 0.9198803625054783,
+  "r_max_total": 1.8028141295218019,
+  "tv_exact": 0.010615144811149196,
+  "ess_fraction_shipped": 0.21308316390628418
+}

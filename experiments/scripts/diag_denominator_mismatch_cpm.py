@@ -14,20 +14,31 @@ by worker, not any single rank's arrival-ordered view, so the history order here
 is reconstructed from sim_end_time and is a *valid* history rather than *the*
 history the run reported against.
 """
+import argparse
+import json
 import sys, random, numpy as np, pandas as pd
-sys.path.insert(0, "/home/juhe/bwSyncShare/Code/async-abc-paper/propulate")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "propulate"))
 from scipy.special import logsumexp
 from propulate.propagators.abcpmc import ABCPMC
 from propulate.population import Individual
 
-CSV = ("/tmp/claude-1000/-home-juhe-bwSyncShare-Code-async-abc-paper/"
-       "07b2399a-f7fb-4aca-ae08-9ce6bfef146c/scratchpad/cpm/raw_results.csv")
+# The campaign output. Default is the local scratch mount; override with
+# --csv. (This used to name a session scratchpad that no longer exists, so the
+# committed script could not be run -- which is the whole point of committing
+# the scripts that produce cited numbers.)
+DEFAULT_CSV = Path("/home/juhe/remotes/scratch/herold2/async-abc/rerun_20260707"
+                   "/cellular_potts/data/raw_results.csv")
+OUT = Path(__file__).resolve().parents[1] / "data" / "diagnostics"
 LIMITS = {"division_rate": (0.0, 1.0), "motility": (0.0, 1.0)}
 K, PSCALE, M_SHIPPED, M_REF = 100, 0.8, 20, 400
 
 
-def load(replicate):
-    df = pd.read_csv(CSV, low_memory=False)
+def load(replicate, csv):
+    if not Path(csv).exists():
+        raise SystemExit(f"campaign output not found: {csv}\n"
+                         "Pass --csv <path to cellular_potts/data/raw_results.csv>.")
+    df = pd.read_csv(csv, low_memory=False)
     df = df[(df.method == "async_propulate_abc") & (df.replicate == replicate)]
     df = df.sort_values("sim_end_time", kind="mergesort").reset_index(drop=True)
     hist = []
@@ -83,8 +94,12 @@ def weights_from(prop, hist, log_qbar):
 
 
 if __name__ == "__main__":
-    rep = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-    hist = load(rep)
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("replicate", nargs="?", type=int, default=0)
+    ap.add_argument("--csv", default=str(DEFAULT_CSV))
+    args = ap.parse_args()
+    rep = args.replicate
+    hist = load(rep, args.csv)
     n = len(hist)
     n_prior = sum(1 for i in hist if i.tolerance is None)
     nu = n_prior / n
@@ -119,3 +134,21 @@ if __name__ == "__main__":
         print(f"{lab}: mean=({mu[0]:.5f}, {mu[1]:.5f})  sd=({sd[0]:.5f}, {sd[1]:.5f})  "
               f"ESS frac={1/np.sum(w**2)/n:.4f}")
     print(f"exact TV between the two reported posteriors: {tv:.4f}")
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    artifact = OUT / f"r_denominator_mismatch_cpm_rep{rep}.json"
+    zt, rt = z(lq_ref, lq_ship, w_ship)
+    zf, _ = z(lq_nof, lq_ship, w_ship)
+    zq, _ = z(lq_ref, lq_nof, w_ship)
+    artifact.write_text(json.dumps({
+        "benchmark": "cellular_potts", "replicate": rep, "n": n, "k": K,
+        "n_bootstrap": n_prior, "nu_n": nu,
+        "m_shipped": m_s, "w_prior_shipped": wp_s,
+        "m_reference": m_r, "w_prior_reference": wp_r,
+        "zeta_total": zt, "zeta_floor": zf, "zeta_quadrature": zq,
+        "tv_bound_total": zt / (1 - zt) if zt < 1 else None,
+        "r_min_total": float(rt.min()), "r_max_total": float(rt.max()),
+        "tv_exact": tv,
+        "ess_fraction_shipped": float(1 / np.sum(w_ship ** 2) / n),
+    }, indent=2) + "\n")
+    print(f"wrote {artifact}")

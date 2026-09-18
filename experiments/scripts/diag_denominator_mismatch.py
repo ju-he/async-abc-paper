@@ -14,7 +14,9 @@ The two contributions are separated:
 Everything is post hoc: one evaluated history, several denominators over it.
 No re-simulation, no propagator change.
 """
+import json
 import sys, os, numpy as np, random
+from pathlib import Path
 sys.path.insert(0, "propulate")
 from scipy.special import logsumexp
 from propulate.propagators.abcpmc import ABCPMC
@@ -25,7 +27,10 @@ LIMITS = {"x": (LO, HI)}
 SIG, NOBS, MU_TRUE, SEED = 1.0, 25, 0.4, 20260730
 N_SIMS, K = 12000, 100
 M_REF = 400
-CACHE = "/tmp/claude-1000/-home-juhe-bwSyncShare-Code-async-abc-paper/07b2399a-f7fb-4aca-ae08-9ce6bfef146c/scratchpad/hist_cache.npz"
+# The history is rebuilt from the seed in a few seconds, so there is nothing to
+# cache. (This used to name a file in a session scratchpad that no longer
+# exists, which made the script look like it needed state it does not.)
+OUT = Path(__file__).resolve().parents[1] / "data" / "diagnostics"
 
 
 def build_history():
@@ -132,3 +137,21 @@ if __name__ == "__main__":
           f"ESS frac {1/np.sum(w_ref**2)/n:.4f}")
     print(f"exact TV between the two reported posteriors: {tv:.4f}")
     print(f"|mean shift| {abs(mean_rep-mean_ref):.5f}   analytic sd {SIG/np.sqrt(NOBS):.4f}")
+
+    OUT.mkdir(parents=True, exist_ok=True)
+    artifact = OUT / "r_denominator_mismatch_gaussian.json"
+    artifact.write_text(json.dumps({
+        "benchmark": "gaussian_mean_1d_toy", "seed": SEED, "n": n, "k": K,
+        "n_bootstrap": n_prior, "nu_n": nu,
+        "m_shipped": m_rep, "w_prior_shipped": wp_rep,
+        "m_reference": m_ref, "w_prior_reference": wp_ref,
+        "zeta_total": z_tot, "zeta_floor": z_flo, "zeta_quadrature": z_qua,
+        "tv_bound_total": z_tot / (1 - z_tot),
+        "r_min_total": float(r_tot.min()), "r_max_total": float(r_tot.max()),
+        "posterior_mean_reported": mean_rep, "posterior_mean_reference": mean_ref,
+        "posterior_sd_reported": sd_rep, "posterior_sd_reference": sd_ref,
+        "tv_exact": tv, "mean_shift": abs(mean_rep - mean_ref),
+        "ess_fraction_reported": float(1 / np.sum(w_rep ** 2) / n),
+        "analytic_sd": SIG / np.sqrt(NOBS),
+    }, indent=2) + "\n")
+    print(f"\nwrote {artifact}")
