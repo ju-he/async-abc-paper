@@ -83,6 +83,40 @@ gaussian panel generating.
 `raw_results.csv` reads at ~12 MB/s, so cache the needed columns with `awk` first (8 min) and work
 from the local copy.
 
+### Tier B status (2026-09-18, later)
+
+Done: `reported_posterior.py` (replay, bit-identical, `930e32c`/`f809c6a`); g-and-k reference on
+p(θ | s_obs) via the asymptotic octile law, validated against 40k simulated datasets (`e0eef7c`);
+`make_reported_recovery_fig.py` with accuracy and ESS panels; §5.2, §6.2, limitations, abstract and
+conclusion rewritten (`054ab16`).
+
+**Two findings that change what the paper is about:**
+
+1. *ESS is set by k, not by the budget* (`c7b874e`). 237–303 effective particles out of 1.1–1.3M
+   evaluated, flat across a 13× growth of the history; ESS/k ∈ [1.9, 3.6] over a controlled sweep;
+   reproduces serially. Mechanism: reporting at the tightest bandwidth reached, while that
+   bandwidth is set by ESS-retention bisection against the archive. This is now the paper's main
+   caveat and it reframes the flat accuracy curve, the CLT rate-condition failure, and the
+   M ≈ 400–800 reported-support result (= 4–8k).
+2. *Lotka–Volterra is 98% extinct* (`ae2e7ee`). 2.6% survival at the true parameter, 1.7% over the
+   prior, observed data itself survival-conditioned. Throughput unaffected; posterior recovery
+   carries ~2% of nominal budget. LV is now scoped like CPM.
+
+**Open in Tier B:** the g-and-k accuracy sentence (`%%GANDK-ACCURACY%%` in `sn-article.tex`) — that
+panel is generating. CPM/hetero twin quality (B3), the vendor-or-delete sweep (B5), data
+availability (B6).
+
+**LV reference posterior: recommend NOT building it.** Synthetic-likelihood MCMC needs M surviving
+datasets per θ; at 1.7% survival that is ~60× the g-and-k cost, for a benchmark whose posterior
+claim is now scoped away anyway.
+
+**Practical notes.** Replay costs ~38 µs per 1000 records at d=1. Cache the campaign columns with
+`awk` first — include `record_kind`: the baseline writes one `simulation_attempt` row per evaluation
+(4.9M) alongside its `population_particle` rows (5,300), and pooling them scores an accumulated
+cloud of attempts instead of the reported posterior. Do not monitor these jobs with
+`until ! pgrep -f "<script>.py"` — the wait loop's own command line matches the pattern, so it never
+exits.
+
 ## 1. The scope decision that sizes everything else
 
 Two coherent papers can be built from what exists. Pick before doing Tier C.
