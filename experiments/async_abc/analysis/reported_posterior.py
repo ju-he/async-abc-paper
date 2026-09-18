@@ -43,6 +43,7 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
+    "infer_n_bootstrap",
     "individuals_from_records",
     "reported_posterior",
     "reported_posterior_curve",
@@ -61,6 +62,38 @@ def _import_abcpmc():
         from propulate.propagators.abcpmc import ABCPMC
         from propulate.population import Individual
     return ABCPMC, Individual
+
+
+def infer_n_bootstrap(records) -> int:
+    """Number of leading bootstrap (uniform-prior) draws, read off ``weight``.
+
+    Runs recorded before ``proposal_tolerance`` existed do not mark where the
+    prior phase ended -- but they do not have to be guessed at either. The
+    propagator assigns ``weight = 1.0`` to exactly the prior draws (the proposal
+    equals the prior, so the importance weight is pi/pi), and they form a
+    contiguous leading run. Its length is therefore the boundary, exactly.
+
+    It is *not* ``k``: it is ``k`` plus however many ranks were still in flight
+    when the archive filled, so it varies per replicate. Measured on a
+    ``k=100``, ``W=16`` run: 112, 113, 113, 115, 115 across five replicates,
+    each of which reproduces that replicate's own stored ``posterior_weight`` to
+    machine precision.
+
+    The one draw this rule cannot separate is a late prior *fallback* (weight
+    also 1.0, but with a stamped tolerance), which ``extract_posterior`` treats
+    as archive-phase anyway -- its own documented third approximation, and
+    measured at zero occurrences on the reported runs. Only the leading run is
+    used, so a late fallback cannot shift the boundary.
+    """
+    weights = np.array(
+        [1.0 if getattr(r, "weight", None) is None else float(r.weight)
+         for r in records],
+        dtype=float,
+    )
+    if weights.size == 0:
+        return 0
+    non_unit = np.flatnonzero(weights != 1.0)
+    return int(weights.size if non_unit.size == 0 else non_unit[0])
 
 
 def individuals_from_records(
@@ -85,35 +118,23 @@ def individuals_from_records(
     own output that moves the weights to a correlation of 0.967, with the largest
     errors (up to 1.9x) on exactly the early prior draws near the box edge.
 
-    Runs recorded before ``proposal_tolerance`` existed have no faithful copy of
-    the field. For those, pass ``n_bootstrap`` to mark the leading prior draws
-    explicitly; passing ``None`` falls back to ``tolerance`` and warns, because
-    the boundary is *not* recoverable from the file -- it sits at ``k + O(W)``
-    draws rather than ``k``, the surplus being the ranks still in flight when the
-    archive fills (measured: 112 for a ``k=100``, ``W=16`` run, where assuming
-    ``k`` leaves a residual and assuming 112 reproduces the run to 0.99999).
+    Runs recorded before ``proposal_tolerance`` existed have no copy of that
+    field, but the boundary is still recoverable exactly:
+    :func:`infer_n_bootstrap` reads it off the ``weight`` column, and the replay
+    then reproduces those runs' own stored ``posterior_weight`` to machine
+    precision. It is applied automatically; pass ``n_bootstrap`` to override.
 
     ``records`` is consumed in the order given; callers are responsible for
     supplying arrival order (see the module docstring).
     """
-    import warnings
-
     _, Individual = _import_abcpmc()
     names = list(limits)
     has_stamped = any(
         getattr(r, "proposal_tolerance", None) is not None for r in records
     )
     if not has_stamped and n_bootstrap is None and records:
-        warnings.warn(
-            "individuals_from_records: no proposal_tolerance on these records and "
-            "no n_bootstrap given, so the bootstrap phase cannot be identified. "
-            "Falling back to the running-minimum `tolerance`; the replayed "
-            "posterior will differ from the run's own output (correlation ~0.97 "
-            "on a measured 16-rank run). Re-run to get proposal_tolerance, or "
-            "pass n_bootstrap explicitly.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
+        # Legacy file: recover the boundary from `weight` rather than degrade.
+        n_bootstrap = infer_n_bootstrap(records)
 
     out = []
     for i, r in enumerate(records):

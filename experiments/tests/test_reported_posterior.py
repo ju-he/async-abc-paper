@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "propulate"))
 
 from async_abc.analysis.reported_posterior import (  # noqa: E402
     individuals_from_records,
+    infer_n_bootstrap,
     reported_posterior,
     reported_posterior_curve,
     weighted_w1,
@@ -80,37 +81,36 @@ class TestReplayFidelity:
         _, w_live = np.asarray(prop.extract_posterior(hist)[0]), np.asarray(
             prop.extract_posterior(hist)[1], float)
         recs = _records(hist)
-        for r in recs:               # the pre-fix serialisation
+        for r in recs:               # prior phase collapsed into tol_init
             r.proposal_tolerance = None if r.tolerance is None else r.tolerance
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            _, w_lossy = reported_posterior(
-                recs, LIMITS, k=100, kernel="gaussian",
-                scheduler_type="acceptance_rate", amis_snapshots=20,
-                perturbation_scale=0.8, tol=5.0,
-            )
+        _, w_lossy = reported_posterior(
+            recs, LIMITS, k=100, kernel="gaussian",
+            scheduler_type="acceptance_rate", amis_snapshots=20,
+            perturbation_scale=0.8, tol=5.0, n_bootstrap=0,
+        )
         assert not np.allclose(w_live, w_lossy, rtol=0, atol=1e-9)
 
-    def test_legacy_records_without_the_field_warn(self):
-        prop, hist, _ = _drive(n=300)
-        recs = _records(hist)
-        for r in recs:
-            r.proposal_tolerance = None
-        with pytest.warns(RuntimeWarning, match="proposal_tolerance"):
-            individuals_from_records(recs, LIMITS)
+    def test_infer_n_bootstrap_reads_the_boundary_off_weight(self):
+        """Prior draws have weight exactly 1.0 (proposal == prior) and form a
+        contiguous leading run, so the boundary needs no fitting."""
+        _, hist, _ = _drive()
+        truth = sum(1 for h in hist if h.tolerance is None)
+        assert truth > 0
+        assert infer_n_bootstrap(_records(hist)) == truth
 
-    def test_explicit_n_bootstrap_recovers_a_legacy_run(self):
-        """The documented escape hatch for runs recorded before the fix."""
+    def test_legacy_records_replay_exactly_without_the_field(self):
+        """A file written before proposal_tolerance existed still reproduces its
+        own reported posterior, because the boundary is inferred rather than
+        guessed."""
         prop, hist, _ = _drive()
-        n_boot = sum(1 for h in hist if h.tolerance is None)
         _, w_live = prop.extract_posterior(hist)
         recs = _records(hist)
-        for r in recs:               # simulate the legacy file
+        for r in recs:               # exactly the pre-fix serialisation
             r.proposal_tolerance = None
             r.tolerance = r.tolerance if r.tolerance is not None else 5.0
         _, w = reported_posterior(
             recs, LIMITS, k=100, kernel="gaussian", scheduler_type="acceptance_rate",
-            amis_snapshots=20, perturbation_scale=0.8, tol=5.0, n_bootstrap=n_boot,
+            amis_snapshots=20, perturbation_scale=0.8, tol=5.0,
         )
         assert np.allclose(np.asarray(w_live, float), w, rtol=0, atol=1e-12)
 
