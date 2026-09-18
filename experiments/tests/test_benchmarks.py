@@ -937,3 +937,52 @@ class TestGaussianMeanND:
         far = np.median([b.simulate({f"mu{j+1}": 3.0 for j in range(4)}, s)
                          for s in range(30)])
         assert at_truth < far
+
+
+class TestLotkaVolterraExtinction:
+    """The extinction rate is a property of the benchmark the paper reports on.
+
+    At the configured true parameters roughly 98% of simulations hit the
+    absorbing state and return EXTINCTION_LOSS, so they carry no information
+    about the summaries under a smooth kernel. That bounds how the
+    posterior-recovery results on this benchmark can be read (the throughput
+    results are unaffected -- an extinct simulation costs what a surviving one
+    costs). See scripts/diag_lv_extinction.py.
+
+    If these ever start passing with much higher survival, the benchmark's
+    configuration changed and the paper's scoping of it needs revisiting.
+    """
+
+    @staticmethod
+    def _bm():
+        from async_abc.benchmarks.lotka_volterra import LotkaVolterra
+
+        return LotkaVolterra({
+            "name": "lotka_volterra", "observed_data_seed": 42, "T_max": 30.0,
+            "x0": 50, "y0": 100, "true_theta1": 0.5, "true_theta2": 0.025,
+            "true_theta3": 0.025, "true_theta4": 0.5,
+        })
+
+    def test_most_simulations_at_the_truth_go_extinct(self):
+        from async_abc.benchmarks.lotka_volterra import EXTINCTION_LOSS
+
+        bm = self._bm()
+        truth = {"theta1": 0.5, "theta2": 0.025, "theta3": 0.025, "theta4": 0.5}
+        losses = np.array([bm.simulate(truth, seed=s) for s in range(300)])
+        survival = float((losses < EXTINCTION_LOSS).mean())
+        assert 0.0 < survival < 0.10, f"survival rate {survival:.3f}, expected ~0.026"
+
+    def test_the_observed_trajectory_is_survival_conditioned(self):
+        """__init__ re-draws until a trajectory survives, so the observed data
+        is not a typical draw from the true parameters -- which is why the ABC
+        target is p(theta | s_obs, survived)."""
+        from async_abc.benchmarks.lotka_volterra import _gillespie
+
+        bm = self._bm()
+        rng = np.random.default_rng(42)
+        _, xs, ys = _gillespie(bm.x0, bm.y0, (0.5, 0.025, 0.025, 0.5), 30.0, rng)
+        assert xs[-1] == 0 or ys[-1] == 0, (
+            "the first observed draw now survives; the retry loop is no longer "
+            "load-bearing and the conditioning note can be dropped"
+        )
+        assert np.all(np.isfinite(bm.observed_stats))
