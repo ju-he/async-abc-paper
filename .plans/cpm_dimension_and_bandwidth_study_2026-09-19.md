@@ -141,3 +141,26 @@ first, then size.
 4. If yes, design the 3-4 parameter setup and size it against the fixed transient.
    If no, CPM stays a two-parameter recovery claim and the honest framing is that its posterior
    comparison is not where the method's advantage lies — the 4-D g-and-k is.
+
+---
+
+# Addendum — what the rejection fix actually changed (gaussian_mean, job 14262064)
+
+The arm now spends its budget instead of stopping at k accepted:
+
+| | before (threshold at shared `tol_init` 5.0) | after (`best_k`) |
+|---|---|---|
+| evaluations used, of 20,000 | ~100 | **19,505-19,888** |
+| tolerance reached | 5.0 (admits 99.1% of the prior) | **~0.025** |
+| posterior sd, 5 replicates | ~2.89 (**the prior**, uniform on [-5, 5]) | **0.091-0.107** |
+
+So the baseline went from a prior sampler to a genuine ABC posterior concentrated near the truth.
+The measured tolerance (~0.025) matches the 0.0286 predicted from 20,000 prior draws beforehand,
+which is a useful check on the `best_k` selection.
+
+**This weakens, in our own direction, every comparative statement the paper makes against rejection
+ABC.** The text quotes the asynchronous arm at 0.028 against "rejection ABC's 1.x" as a reference the
+other arms are "far below"; against a rejection arm that now sits at sd ~0.09 around the truth the
+gap is a few-fold rather than the roughly forty-fold those numbers imply. The direction still favours
+the method on this benchmark, but the numbers have to be re-derived rather than re-used, and the
+honest framing is much more modest. Re-deriving them belongs with the paper rewrite, not here.
