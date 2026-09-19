@@ -168,6 +168,45 @@ def _comm_world_is_root() -> bool:
         return True
 
 
+def resolve_reported_eps(inference_cfg: Dict, population, k: int) -> Optional[float]:
+    """Bandwidth to report the posterior at, per ``inference.reported_eps_rule``.
+
+    ``"schedule"`` (the default, and what every run before 2026-09-19 did)
+    returns ``None``, leaving ``extract_posterior`` on the tightest bandwidth the
+    schedule reached. ``"order_statistic"`` returns the k-th smallest loss.
+
+    The schedule walks down from ``tol_init`` at a bounded rate, so an expensive
+    run ends inside the transient and reports at a bandwidth far looser than its
+    own evaluations support -- measured on the two-parameter Cellular Potts
+    setup at 68x the order statistic after 13,000 evaluations, costing 24 points
+    of contraction on the weaker parameter at no saving in simulation. The order
+    statistic is where the scheduler's acceptance gate equilibrates, and it is
+    what a rejection sampler with the same budget and archive size reports at,
+    so it puts every arm of a comparison on one footing.
+    """
+    rule = str(inference_cfg.get("reported_eps_rule", "schedule"))
+    if rule not in ("schedule", "order_statistic"):
+        raise ValueError(
+            f"inference.reported_eps_rule must be 'schedule' or 'order_statistic', "
+            f"got {rule!r}"
+        )
+    if rule == "schedule" or not population:
+        return None
+
+    from ..analysis.reported_posterior import order_statistic_eps
+
+    eps = order_statistic_eps([ind.loss for ind in population], k)
+    if eps is None:
+        logger.warning(
+            "reported_eps_rule='order_statistic' but fewer than k=%d finite losses "
+            "in %d individuals; reporting at the schedule bandwidth instead.",
+            k, len(population),
+        )
+    else:
+        logger.info("Reporting posterior at the k=%d order statistic eps=%.6g", k, eps)
+    return eps
+
+
 def _effective_generation_budget(max_sims: int, inference_cfg: Dict) -> int:
     """Return the Propulate generation count for this run.
 
@@ -788,17 +827,32 @@ def run_propulate_abc(
     allow_streaming_fallback = bool(
         inference_cfg.get("allow_streaming_weight_fallback", False)
     )
+    # Which bandwidth to report at. The default is the tightest the *schedule*
+    # reached, which on an expensive simulator is far from where the schedule is
+    # trying to go -- it walks down from tol_init at a bounded rate and the run
+    # ends inside the transient. "order_statistic" reports at the k-th smallest
+    # loss instead: the bandwidth at which exactly k particles accept, which is
+    # both what the scheduler's acceptance gate equilibrates to and what a
+    # rejection sampler with the same budget and archive size would report at,
+    # so every arm is reported on one footing. Default keeps the old behaviour.
+    reported_eps = resolve_reported_eps(inference_cfg, population, k)
+
     posterior_weights: List[Optional[float]] = [None] * len(population)
     if population and compute_posterior_weights:
         try:
-            _, _retro = propagator.extract_posterior(
-                population,
-                n_proposals=(
+            # eps_final is passed only when a rule asked for one: omitting it
+            # keeps the default call byte-identical to every run before the
+            # reported_eps_rule knob existed.
+            extract_kwargs = {
+                "n_proposals": (
                     int(posterior_n_proposals)
                     if posterior_n_proposals is not None
                     else None
-                ),
-            )
+                )
+            }
+            if reported_eps is not None:
+                extract_kwargs["eps_final"] = reported_eps
+            _, _retro = propagator.extract_posterior(population, **extract_kwargs)
         except Exception as exc:
             if not allow_streaming_fallback:
                 raise RuntimeError(

@@ -215,3 +215,123 @@ class TestEffectiveSampleSize:
 
     def test_ess_scales_with_the_archive_size(self):
         assert self._ess(100, 4_000) > 1.5 * self._ess(30, 4_000)
+
+
+class TestOrderStatisticBandwidth:
+    """Reporting at the k-th smallest loss rather than at whatever bandwidth the
+    schedule happened to reach.
+
+    The schedule walks down from tol_init at a bounded rate, so an expensive run
+    ends inside the transient: measured on the two-parameter Cellular Potts
+    setup the reported bandwidth had not moved from tol_init after 3,000
+    evaluations and was still 68x above this statistic at 13,000, which cost 24
+    points of contraction on the weaker parameter at no saving in simulation.
+    """
+
+    def test_it_is_the_kth_smallest_loss(self):
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        assert order_statistic_eps([5.0, 1.0, 3.0, 2.0, 4.0], 3) == pytest.approx(3.0)
+
+    def test_k_equals_one_is_the_minimum(self):
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        assert order_statistic_eps([5.0, 1.0, 3.0], 1) == pytest.approx(1.0)
+
+    def test_non_finite_losses_are_not_counted(self):
+        """A failed simulation is an infinitely-bad discrepancy, not the
+        loosest accepted one -- counting inf would loosen the bandwidth."""
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        losses = [1.0, float("inf"), 2.0, float("nan"), 3.0]
+        assert order_statistic_eps(losses, 3) == pytest.approx(3.0)
+
+    def test_too_few_finite_losses_returns_none(self):
+        """None leaves the caller on the schedule bandwidth rather than
+        inventing one from a sample that cannot support it."""
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        assert order_statistic_eps([1.0, float("inf")], 3) is None
+        assert order_statistic_eps([], 1) is None
+
+    def test_a_nonsense_k_returns_none(self):
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        assert order_statistic_eps([1.0, 2.0], 0) is None
+
+    def test_it_is_tighter_than_a_loose_schedule_bandwidth(self):
+        """The property that makes it worth reporting at: on a run whose
+        schedule stalled near tol_init, this is orders of magnitude tighter."""
+        from async_abc.analysis.reported_posterior import order_statistic_eps
+
+        rng = np.random.default_rng(0)
+        losses = list(rng.uniform(0.0, 1.0, size=5000))
+        assert order_statistic_eps(losses, 100) < 0.05
+
+
+class TestReportedEpsRuleIsWiredIn:
+    """The rule has to reach extract_posterior, and default to the old behaviour."""
+
+    class _Ind:
+        def __init__(self, loss):
+            self.loss = loss
+
+    def _population(self, n=300):
+        return [self._Ind(float(i)) for i in range(1, n + 1)]
+
+    def test_the_default_rule_leaves_the_schedule_bandwidth_alone(self):
+        """Unset must mean the previous behaviour exactly, so every run before
+        this rule existed reproduces."""
+        from async_abc.inference.propulate_abc import resolve_reported_eps
+
+        assert resolve_reported_eps({}, self._population(), 100) is None
+
+    def test_the_order_statistic_rule_returns_the_kth_loss(self):
+        from async_abc.inference.propulate_abc import resolve_reported_eps
+
+        eps = resolve_reported_eps({"reported_eps_rule": "order_statistic"},
+                                   self._population(), 100)
+        assert eps == pytest.approx(100.0)
+
+    def test_an_empty_population_falls_back_to_the_schedule(self):
+        from async_abc.inference.propulate_abc import resolve_reported_eps
+
+        assert resolve_reported_eps({"reported_eps_rule": "order_statistic"}, [], 100) is None
+
+    def test_too_few_finite_losses_warns_and_falls_back(self, caplog):
+        """Falling back silently would report at a bandwidth nobody chose."""
+        import logging
+        from async_abc.inference.propulate_abc import resolve_reported_eps
+
+        with caplog.at_level(logging.WARNING,
+                             logger="async_abc.inference.propulate_abc"):
+            eps = resolve_reported_eps({"reported_eps_rule": "order_statistic"},
+                                       self._population(10), 100)
+        assert eps is None
+        assert any("fewer than k=100" in r.getMessage() for r in caplog.records)
+
+    def test_an_unknown_rule_is_refused(self):
+        from async_abc.inference.propulate_abc import resolve_reported_eps
+
+        with pytest.raises(ValueError, match="must be 'schedule' or 'order_statistic'"):
+            resolve_reported_eps({"reported_eps_rule": "tightest"},
+                                 self._population(), 100)
+
+    def test_the_resolved_bandwidth_is_handed_to_extract_posterior(self):
+        """The seam is only worth anything if the value actually arrives."""
+        import inspect
+        from async_abc.inference import propulate_abc
+
+        src = inspect.getsource(propulate_abc.run_propulate_abc)
+        assert "resolve_reported_eps(inference_cfg, population, k)" in src
+        # Passed only when a rule asked for one, so the default call is
+        # byte-identical to every run before this knob existed.
+        assert 'extract_kwargs["eps_final"] = reported_eps' in src
+
+    def test_shipped_configs_do_not_silently_change_the_estimator(self):
+        import json
+        from pathlib import Path
+
+        for name in ("cellular_potts.json", "gaussian_mean.json", "gandk.json"):
+            cfg = json.loads((Path(__file__).parents[1] / "configs" / name).read_text())
+            assert "reported_eps_rule" not in cfg["inference"], name

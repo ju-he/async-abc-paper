@@ -45,6 +45,7 @@ import pandas as pd
 __all__ = [
     "infer_n_bootstrap",
     "individuals_from_records",
+    "order_statistic_eps",
     "reported_posterior",
     "reported_posterior_curve",
     "weighted_w1",
@@ -94,6 +95,34 @@ def infer_n_bootstrap(records) -> int:
         return 0
     non_unit = np.flatnonzero(weights != 1.0)
     return int(weights.size if non_unit.size == 0 else non_unit[0])
+
+
+def order_statistic_eps(losses, k: int) -> float | None:
+    """The k-th smallest finite loss: the bandwidth at which exactly ``k`` accept.
+
+    ``extract_posterior`` reports by default at the tightest bandwidth the
+    *schedule* reached, which on an expensive simulator is nowhere near where
+    the schedule is trying to go. The scheduler's own rule is documented as
+    equilibrating near this order statistic -- the acceptance gate holds ε until
+    ``population_size`` individuals sit below it -- but it approaches that point
+    at a bounded rate, and an expensive run ends inside the transient. Measured
+    on the two-parameter Cellular Potts setup: the reported bandwidth had not
+    moved from ``tol_init`` after 3,000 evaluations and was still 68x above this
+    statistic at 13,000, which cost 24 points of posterior contraction on the
+    weaker of the two parameters at no saving in simulation.
+
+    It is the natural rule for a *comparison* as well as for one run: it is the
+    tolerance a rejection sampler with the same budget and the same archive size
+    would report at, so every arm is reported on the same footing rather than on
+    whatever bandwidth its own schedule happened to reach.
+
+    Returns ``None`` when fewer than ``k`` finite losses exist, which leaves the
+    caller on the default (schedule) bandwidth rather than inventing one.
+    """
+    finite = np.asarray([x for x in np.asarray(losses, dtype=float) if np.isfinite(x)])
+    if finite.size < int(k) or int(k) < 1:
+        return None
+    return float(np.partition(finite, int(k) - 1)[int(k) - 1])
 
 
 def individuals_from_records(
