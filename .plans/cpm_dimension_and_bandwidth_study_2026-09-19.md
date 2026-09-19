@@ -212,3 +212,58 @@ rate, largest cells — stays near 55% fill rather than saturating).
 
 **Route E is therefore still open, not refuted.** The first screen tested a low-cell-count regime
 with a badly conditioned prior; the second tests the regime the route is actually about.
+
+---
+
+# Results — the two levers land in the same place, and the fair baseline settles the positioning
+
+## Lever 2: `tol_init` (jobs 14262028/29/30, 6 node hours, 2 replicates each)
+
+| `tol_init` | eps the schedule reached | ratio to the k-th order statistic | division_rate | cell_volume | ESS | coverage |
+|---|---|---|---|---|---|---|
+| **10.0 (shipped)** | 0.0041 | **68x** | 90% | **58%** | 1222 | both |
+| 1.0 | 0.00062 / 0.00046 | 9x / 6x | 92% / 91% | 77% / 76% | 1053 / 460 | both |
+| **0.1** | 0.00018 / 0.00013 | **2x / 2x** | 93% / 91% | **81% / 84%** | 351 / 267 | both |
+| 0.01 | 0.00054 / 0.00013 | 9x / 2x | 91% / 91% | 79% / 82% | 633 / 273 | both |
+
+Lowering `tol_init` from the shipped 10.0 to 0.1 takes the weak parameter from 58% to **81-84%**
+contraction with coverage intact, purely by letting the schedule reach its own documented
+equilibrium inside the budget: the ratio to the k-th order statistic falls from 68x to 2x. 0.01 is
+not better than 0.1 and is less consistent, so the sweet spot is about **1/5 of the prior's median
+discrepancy** (0.459) — which is a rule that transfers to other benchmarks.
+
+**The two levers are redundant, and that is the strongest evidence the mechanism is understood.**
+Fixing the bandwidth *online* (`tol_init` 0.1 → 81-84%) and fixing it *retroactively* (report at the
+order statistic → 82%) reach the same answer from opposite directions.
+
+**Prefer `tol_init` as the primary fix.** It is an *a priori* configuration choice justified by the
+prior-predictive discrepancy scale, which can be measured before any run and without reference to the
+truth. Choosing a reporting bandwidth after the fact is more contestable, however principled the rule.
+Keep `reported_eps_rule: order_statistic` as the robustness check, not the headline.
+
+Note also that division_rate barely moves (90 → 91-93%): the entire gain is on the parameter that was
+under-resolved, which is where extra bandwidth resolution should show up and nowhere else.
+
+## The fair rejection baseline (job 14262032, 13,000 draws on 48 ranks, budget-matched)
+
+| | tolerance at k=100 | division_rate | cell_volume | ESS |
+|---|---|---|---|---|
+| fair rejection ABC | 0.0029 | 91% | 67% | 100 |
+| async **as the paper reports it** | 0.0041 | 90% | **58%** | 1222 |
+| async at `tol_init` 0.1 | 0.00013 | 91% | **84%** | 267 |
+
+**A fairly-resourced rejection ABC beats the asynchronous arm as currently configured.** It loses to
+it once the bandwidth is set sensibly. The fix is therefore load-bearing for the CPM posterior claim,
+and the claim must not be made without it.
+
+**The cleanest statement of the advantage is in the tolerance, not the contraction.** At a matched
+budget the adaptive sampler's k-th order statistic is **6.1e-05 against rejection's 2.9e-03 — 48x
+tighter**. That is the per-simulation efficiency claim stated directly; the contraction gap follows
+from it, and unlike the contraction it does not depend on how the posterior is reported.
+
+## What this means for the paper
+
+The CPM posterior comparison is winnable and honest, but only with the bandwidth fixed. Report the
+48x tolerance ratio as the primary quantity. And the direction of travel for a decisive margin is
+still dimension, since rejection's cost to a fixed posterior grows like eps^-d and we are already 48x
+ahead in eps.
