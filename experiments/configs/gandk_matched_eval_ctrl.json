@@ -1,0 +1,80 @@
+{
+  "experiment_name": "gandk_matched_eval_ctrl",
+  "benchmark": {
+    "name": "gandk",
+    "observed_data_seed": 42,
+    "n_obs": 1000,
+    "true_A": 3.0,
+    "true_B": 1.0,
+    "true_g": 2.0,
+    "true_k": 0.5
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 50000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 10.0,
+    "n_generations": 1000,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20,
+    "_comment_method_overrides": [
+      "rejection_abc thresholds at tol_init and stops at k accepted, while the",
+      "asynchronous scheduler treats tol_init as a STARTING bandwidth and tightens",
+      "from there. At the shared value this arm accepted 85.9% of prior draws and",
+      "stopped after ~100 evaluations, so its reported posterior was the prior.",
+      "The override is the tolerance at which the budget yields k accepted: 0.2% of prior draws (k=100 of the 50,000 budget).",
+      "Measured, not guessed -- see .plans/cpm_dimension_and_bandwidth_study_2026-09-19.md."
+    ],
+    "_comment_rejection": [
+      "rejection_abc reports the k closest of everything it evaluates",
+      "(rejection_mode defaults to best_k), so it needs no tolerance constant and",
+      "reports at the k-th order statistic of its own draws -- the same rule the",
+      "asynchronous arm uses. Before 2026-09-19 it thresholded at the shared",
+      "tol_init, which the asynchronous scheduler needs LOOSE because it treats it",
+      "as a starting bandwidth; at that value this arm accepted most of the prior",
+      "and stopped after ~100 evaluations, reporting a prior sample."
+    ]
+  },
+  "execution": {
+    "n_replicates": 3,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
+  },
+  "analysis": {
+    "target_wasserstein": 1.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  },
+  "_comment": [
+    "Matched-EVALUATION-COUNT g-and-k run, which the paper names as the control",
+    "it has not run (sec:limitations vii). max_wall_time_s is removed so the",
+    "generation budget binds: propulate_budget_mode=total_simulations then gives",
+    "exactly max_simulations evaluations across ranks, instead of the wall clock",
+    "deciding how many each arm gets.",
+    "Purpose: the async arm's k-th order statistic at 50,000 evaluations was",
+    "measured at 0.062 on a tol_init=10.0 history. The bandwidth transient is",
+    "~7.3 halvings from 10.0 and costs of order 1,200 evaluations each, so up to",
+    "a fifth of a 50,000 prefix may be spent walking the bandwidth down. If that",
+    "degrades SAMPLING and not merely reporting, 0.062 is pessimistic.",
+    "This arm: tol_init 10.0 (shipped control)"
+  ]
+}
