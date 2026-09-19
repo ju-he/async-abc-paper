@@ -128,6 +128,20 @@ for undercoverage. **Stop the tolerance schedule at ~5%.**
 
 ---
 
+## BLOCKER before this can be run — replicate averaging is not implemented
+
+`n_replicates_per_evaluation: 4` is present in both configs and **nothing reads it**.
+`CellularPotts.simulate` runs one simulation and calls `DistanceMetric.calculate_distance`;
+the four-seed feature averaging that every forecast in this document assumes is not wired in.
+nastjapy already provides `DistanceMetric.calculate_distance_replicates`, which averages the raw
+feature arrays across replicates — the same operation `diag_cpm_screening.py` performs offline — so
+the change is to run `k` simulations per evaluation with distinct seeds and pass their directories to
+that method instead.
+
+It is the first task of the next session, and it is not optional: at one seed per evaluation the
+forecast drops from 91%/64% contraction to roughly 85%/16%, and the reference in
+`experiments/data/cpm_reference_proposed/` is a four-seed set generated to match.
+
 ## Artefacts, written and validated
 
 | file | what |
