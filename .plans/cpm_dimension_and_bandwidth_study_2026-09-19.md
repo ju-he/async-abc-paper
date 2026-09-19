@@ -404,3 +404,29 @@ throughput claim is made from them; only the eps-at-matched-wall-clock compariso
 Confirmed separately: the g-and-k bandwidth transient does **not** bind (jobs 14262212/13, matched
 50,000 evaluations at `tol_init` 10.0 and 1.3 give the same k-th order statistic, ratio 1x both), so
 0.062 is the sampler's real per-evaluation efficiency on 4-D and the transient is CPM-specific.
+
+## The CPM exponent, pinned on seven replicates
+
+The `tol_init` sweep produced six more asynchronous replicates, so the exponent need not rest on one:
+
+| `tol_init` | replicates | exponent (1k-12k) | late segment |
+|---|---|---|---|
+| 10.0 | 1 | -1.77 | -0.94 |
+| 1.0 | 2 | -1.65, -1.52 | -1.28, -1.16 |
+| 0.1 | 2 | -1.64, -1.69 | -1.02, -0.82 |
+| 0.01 | 2 | -1.47, -1.39 | -1.35, -1.06 |
+| **all** | **7** | **-1.59 +/- 0.13** | **-1.09 +/- 0.19** |
+
+Against rejection ABC's n^-0.50 at d=2, the advantage **widens by about 1.5x per doubling of
+compute** rather than staying a constant factor. Every replicate lands between -1.39 and -1.77, so
+the steep curve is not a one-run artefact.
+
+**`tol_init` does not affect the sampling exponent** — a 1000x range moves it within noise. Combined
+with the same result on g-and-k (jobs 14262212/13), this settles it: **the bandwidth transient is
+purely a reporting defect.** The sampler always found the target efficiently; only the reported
+posterior discarded it. That is worth stating precisely in the paper, because it separates a
+configuration mistake from an algorithmic limitation.
+
+Incidental: at `tol_init` 0.01 the sampler is genuinely better *early* (eps 0.0022 at n=1000 against
+0.005 at 10.0, 2.3x tighter) because the kernel concentrates from the start; it washes out by
+n=12,000. On a budget-limited expensive run that early advantage is worth something.
