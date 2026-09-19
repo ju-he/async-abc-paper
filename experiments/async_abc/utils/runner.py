@@ -605,6 +605,7 @@ def run_experiment(
     List[ParticleRecord]
         All records produced (across all methods and replicates).
     """
+    validate_method_overrides(cfg)
     created_benchmark = benchmark is None
     if benchmark is None:
         benchmark = make_benchmark(cfg["benchmark"])
@@ -745,6 +746,56 @@ def run_experiment(
     return all_records
 
 
+def inference_cfg_for_method(name: str, inference_cfg: Dict) -> Dict:
+    """Return ``inference_cfg`` with this method's ``method_overrides`` applied.
+
+    One inference block cannot serve every method. ``tol_init`` is the case that
+    forced this: the asynchronous scheduler treats it as a *starting* bandwidth
+    and tightens from there, so it wants a loose one, while ``rejection_abc``
+    treats it as a *fixed* acceptance threshold. A value loose enough for the
+    first is one that accepts the whole prior for the second -- measured at 98.8%
+    of prior draws on gaussian_mean and ~100% on cellular_potts, which turned
+    that arm into a prior sampler that stopped after ~100 evaluations.
+
+    An override naming a method that is not configured is an error: a typo here
+    silently reverts to the shared value, which is the failure mode this exists
+    to end.
+    """
+    overrides = inference_cfg.get("method_overrides")
+    if not overrides:
+        return inference_cfg
+    if not isinstance(overrides, dict):
+        raise TypeError(
+            f"inference.method_overrides must be a dict of method name -> settings, "
+            f"got {type(overrides).__name__}"
+        )
+    for method_name, settings in overrides.items():
+        if not isinstance(settings, dict):
+            raise TypeError(
+                f"inference.method_overrides['{method_name}'] must be a dict of "
+                f"settings, got {type(settings).__name__}"
+            )
+    if name not in overrides:
+        return inference_cfg
+    merged = dict(inference_cfg)
+    merged.pop("method_overrides", None)
+    merged.update(overrides[name])
+    logger.info("[runner] %s: applying method_overrides %s", name, overrides[name])
+    return merged
+
+
+def validate_method_overrides(cfg: Dict) -> None:
+    """Fail loudly on a ``method_overrides`` entry that names no configured method."""
+    overrides = (cfg.get("inference") or {}).get("method_overrides") or {}
+    unknown = [name for name in overrides if name not in (cfg.get("methods") or [])]
+    if unknown:
+        raise ValueError(
+            f"inference.method_overrides names methods that are not in this config's "
+            f"'methods' list: {sorted(unknown)}; configured methods are "
+            f"{sorted(cfg.get('methods') or [])}"
+        )
+
+
 def run_method_distributed(
     name: str,
     simulate_fn,
@@ -756,6 +807,7 @@ def run_method_distributed(
     **kwargs,
 ) -> List[ParticleRecord]:
     """Execute one inference method with rank-aware coordination."""
+    inference_cfg = inference_cfg_for_method(name, inference_cfg)
     execution_mode = method_execution_mode_for_cfg(name, inference_cfg, simulate_fn)
     root_rank = is_root_rank()
     progress = MethodProgressReporter(

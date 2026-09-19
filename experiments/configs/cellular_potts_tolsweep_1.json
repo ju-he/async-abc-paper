@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "tol_init arm of the CPM bandwidth-transient study.",
+    "Measured on the validation replicate: the reported bandwidth sits at",
+    "tol_init for the first ~3000 evaluations and is still 68x above the",
+    "k-th order statistic of the losses at 13,000. The schedule tightens at a",
+    "bounded rate per scheduler call, so the transient is proportional to",
+    "log2(tol_init / eps*) -- and the shipped 10.0 is ~1000x the prior median",
+    "discrepancy of 0.459, spending 4-5 halvings walking down from an",
+    "arbitrary constant. This sweeps tol_init with everything else held.",
+    "tol_init is shared by both arms of the matched comparison by construction,",
+    "so nothing here favours one method over the other."
+  ],
+  "experiment_name": "cellular_potts_tolsweep_1",
+  "benchmark": {
+    "name": "cellular_potts",
+    "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+    "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+    "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params_size.json",
+    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_volume.json",
+    "reference_data_path": "experiments/data/cpm_reference_proposed",
+    "output_dir": "experiments/data/cpm_sims",
+    "engine_backend": "cis",
+    "seed_param_name": "random_seed",
+    "seed_param_path": "Settings.randomseed",
+    "true_division_rate": 0.009,
+    "true_params_scale": "physical",
+    "true_cell_volume": 500,
+    "n_replicates_per_evaluation": 4,
+    "average_reference_replicates": true
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 2000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 1.0,
+    "n_generations": 1000,
+    "max_wall_time_s": 3600,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
+  },
+  "execution": {
+    "n_replicates": 2,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
+  },
+  "analysis": {
+    "target_wasserstein": 2.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  }
+}

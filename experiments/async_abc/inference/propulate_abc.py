@@ -569,6 +569,18 @@ def run_propulate_abc(
     for key in ("percentile", "decay_factor", "high_rate", "shrink_factor"):
         if key in inference_cfg:
             scheduler_kwargs[key] = inference_cfg[key]
+    # How fast the bandwidth may tighten, and how often it is allowed to try.
+    # These bound the transient: the schedule walks down from tol_init at
+    # max_tighten_factor per search and searches once per bisect_interval calls,
+    # so time-to-accuracy carries a log2(tol_init / eps*) term that on an
+    # expensive simulator is the whole run. Measured on the two-parameter CPM
+    # setup: the reported bandwidth had not moved from tol_init after 3,000
+    # evaluations and was still 68x above the k-th order statistic of the losses
+    # at 13,000. Left unset the propagator defaults (0.5, population_size) apply,
+    # which is what every run before 2026-09-19 used.
+    for key in ("max_tighten_factor", "bisect_interval"):
+        if key in inference_cfg:
+            scheduler_kwargs[key] = inference_cfg[key]
 
     mpi_rank = get_rank()
 
@@ -590,6 +602,11 @@ def run_propulate_abc(
     # (make_matched_epsilon) read the same ESS-retention target (review II.1).
     if "ess_retention" in inference_cfg:
         abcpmc_kwargs["ess_target"] = float(inference_cfg["ess_retention"])
+    # A floor on the bandwidth. Assumption 3(ii) of the paper needs the limit
+    # bandwidth to be deterministic for the CLT, and only a schedule that
+    # reaches its floor makes it so; the reported runs leave it unset.
+    if inference_cfg.get("min_tol") is not None:
+        abcpmc_kwargs["min_tol"] = float(inference_cfg["min_tol"])
     # Barrierized twin (external review concern 4): identical proposals,
     # weights, archive and estimator, with a collective barrier before each
     # breed so the asynchronous arm and the twin differ only in synchronization.

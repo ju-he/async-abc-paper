@@ -1458,3 +1458,135 @@ class TestGenerateCPMReferenceHonoursTheParameterSpace:
         params = self._run(tmp_path, monkeypatch, {"division_rate": 0.5}, "normalized")
         # log-uniform midpoint of [0.001, 0.2], not the module default's linear map.
         assert params["division_rate"] == pytest.approx(math.sqrt(0.001 * 0.2))
+
+
+class TestPerMethodInferenceOverrides:
+    """One inference block cannot serve every method.
+
+    ``tol_init`` is the case that forced this: the asynchronous scheduler treats
+    it as a starting bandwidth and tightens from there, while ``rejection_abc``
+    treats it as a fixed acceptance threshold. The shipped values are loose
+    enough for the first, which made the second accept 87-99% of prior draws on
+    three of four benchmarks and stop after ~100 evaluations -- a prior sampler
+    presented as a method comparator.
+    """
+
+    def test_an_override_reaches_only_its_own_method(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        cfg = {"tol_init": 10.0, "k": 100,
+               "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}
+        assert inference_cfg_for_method("rejection_abc", cfg)["tol_init"] == 0.02
+        assert inference_cfg_for_method("async_propulate_abc", cfg)["tol_init"] == 10.0
+
+    def test_untouched_settings_survive_the_merge(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        cfg = {"tol_init": 10.0, "k": 100, "kernel": "gaussian",
+               "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}
+        merged = inference_cfg_for_method("rejection_abc", cfg)
+        assert merged["k"] == 100 and merged["kernel"] == "gaussian"
+
+    def test_the_overrides_key_is_not_passed_on_to_the_method(self):
+        """A method reading inference_cfg must not see the override table."""
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        cfg = {"tol_init": 10.0, "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}
+        assert "method_overrides" not in inference_cfg_for_method("rejection_abc", cfg)
+
+    def test_the_original_config_is_not_mutated(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        cfg = {"tol_init": 10.0, "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}
+        inference_cfg_for_method("rejection_abc", cfg)
+        assert cfg["tol_init"] == 10.0
+        assert "method_overrides" in cfg
+
+    def test_absent_overrides_return_the_config_unchanged(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        cfg = {"tol_init": 10.0}
+        assert inference_cfg_for_method("rejection_abc", cfg) is cfg
+
+    def test_an_override_for_an_unconfigured_method_is_refused(self):
+        """A typo here silently reverts to the shared value -- which is the
+        failure this exists to end, so it has to crash."""
+        from async_abc.utils.runner import validate_method_overrides
+
+        cfg = {"methods": ["async_propulate_abc"], "inference": {
+            "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}}
+        with pytest.raises(ValueError, match="not in this config's"):
+            validate_method_overrides(cfg)
+
+    def test_a_valid_override_table_passes_validation(self):
+        from async_abc.utils.runner import validate_method_overrides
+
+        validate_method_overrides({"methods": ["rejection_abc"], "inference": {
+            "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}})
+
+    def test_a_non_dict_override_table_is_refused(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        with pytest.raises(TypeError, match="must be a dict"):
+            inference_cfg_for_method("rejection_abc",
+                                     {"method_overrides": ["rejection_abc"]})
+
+    def test_a_non_dict_entry_is_refused(self):
+        from async_abc.utils.runner import inference_cfg_for_method
+
+        with pytest.raises(TypeError, match="must be a dict of settings"):
+            inference_cfg_for_method("rejection_abc",
+                                     {"method_overrides": {"rejection_abc": 0.02}})
+
+
+class TestBandwidthTransientKnobs:
+    """The bandwidth walks down from tol_init at a bounded rate, so the
+    transient carries a log2(tol_init / eps*) term. On an expensive simulator
+    that transient is the whole run -- measured on the two-parameter CPM setup,
+    where the reported bandwidth had not moved from tol_init after 3,000
+    evaluations. These knobs exist on the propagator; they were not reachable
+    from an experiment config."""
+
+    @staticmethod
+    def _captured(cfg_extra):
+        import async_abc.inference.propulate_abc as pa
+
+        captured = {}
+
+        class _FakeABCPMC:
+            def __init__(self, *args, **kwargs):
+                captured.update(kwargs)
+                raise RuntimeError("stop after construction")
+
+        return captured, _FakeABCPMC, pa
+
+    def _build(self, monkeypatch, cfg_extra):
+        captured, fake, pa = self._captured(cfg_extra)
+        monkeypatch.setattr(pa, "ABCPMC", fake)
+        monkeypatch.setattr(pa, "Propulator", object)
+        monkeypatch.setattr(pa, "_ensure_propulate_imports", lambda: None)
+        cfg = {"max_simulations": 10, "k": 100, "tol_init": 10.0,
+               "kernel": "gaussian", "scheduler_type": "acceptance_rate",
+               "amis_snapshots": 20, "perturbation_scale": 0.8}
+        cfg.update(cfg_extra)
+        with pytest.raises(RuntimeError, match="stop after construction"):
+            pa.run_propulate_abc(lambda p, seed: 1.0, {"x": (0.0, 1.0)}, cfg,
+                                 None, 0, 0)
+        return captured
+
+    def test_tightening_knobs_reach_the_propagator(self, monkeypatch):
+        captured = self._build(monkeypatch, {"max_tighten_factor": 0.25,
+                                             "bisect_interval": 10})
+        assert captured["max_tighten_factor"] == 0.25
+        assert captured["bisect_interval"] == 10
+
+    def test_min_tol_reaches_the_propagator(self, monkeypatch):
+        captured = self._build(monkeypatch, {"min_tol": 1e-4})
+        assert captured["min_tol"] == pytest.approx(1e-4)
+
+    def test_absent_knobs_are_not_forwarded(self, monkeypatch):
+        """Unset must mean the propagator default, so every run before these
+        knobs existed is reproduced exactly."""
+        captured = self._build(monkeypatch, {})
+        for key in ("max_tighten_factor", "bisect_interval", "min_tol"):
+            assert key not in captured
