@@ -486,3 +486,35 @@ need a run rather than arithmetic: k sets the proposal breadth (so it changes wh
 draws, not merely how it reports), and `bisect_interval` defaults to k, so raising k lengthens the
 bandwidth transient. Jobs **14262269** (k=30) and **14262270** (k=300) sweep it at `tol_init` 0.1
 against the validated k=100.
+
+---
+
+# Does throughput convert? On CPM, yes — measured (job 14261956, the as-shipped control)
+
+Five replicates per method, each arm given the same 3600s wall clock, so "end of run" *is* matched
+compute. Truncating the faster arm to the slower one's evaluation count separates the two factors.
+
+| | evaluations in 3600s | eps (k=100) |
+|---|---|---|
+| **`async_propulate_abc`** | **13,266** | **6.3e-05** |
+| `abc_smc_baseline` | 7,957 | 2.4e-04 |
+| async truncated to 7,956 | 7,956 | 1.2e-04 |
+| `rejection_abc` (as shipped) | 100 | — (prior sampler) |
+
+**At equal compute the asynchronous arm reaches a 3.8x tighter tolerance**, decomposing as
+
+    3.8x  =  1.67x (throughput)  x  2.2x (per-evaluation efficiency)
+
+**This is the opposite of g-and-k**, where the asynchronous arm is 1.2-2x *worse* per evaluation and
+throughput does not convert. On the expensive 2-D simulator both factors point the same way. It is
+the first time the two have been measured together rather than reported in separate sections.
+
+**Caveat on what is comparable.** `eps` — the k-th order statistic of each method's own draws — is
+the quantity that compares across methods. Posterior *contraction* is not available for the
+synchronous arm here: pyABC records carry no AMIS `posterior_weight`, so that column is empty.
+
+**The control also shows the bandwidth defect is worse than one replicate suggested.** Across five
+replicates at the shipped `tol_init: 10.0`, mean `cell_volume` contraction is **13%**, not the 58%
+the single validation replicate gave — the defect is erratic as well as harmful. Against the 81-84%
+measured at `tol_init` 0.1, the fix is worth roughly **70 points**, not the 24 quoted earlier from
+one run. The fixed production run (14262214) gives five replicates at 0.1 for the matched comparison.
