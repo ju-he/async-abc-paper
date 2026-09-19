@@ -1,0 +1,119 @@
+{
+  "protocol": {
+    "blocksize": 50,
+    "timesteps": 501,
+    "write_every": 50,
+    "extract_from": 300,
+    "bins": [
+      8,
+      16,
+      32
+    ],
+    "n_ranks": 48,
+    "candidates": {
+      "division_rate": {
+        "path": "define_functions.division_cond_cancer[1]",
+        "lo": 0.001,
+        "hi": 0.2,
+        "scale": "log",
+        "centre": 0.009,
+        "integer": false
+      },
+      "cell_volume": {
+        "path": "CellsInSilico.volume.default.value",
+        "lo": 200,
+        "hi": 1200,
+        "scale": "log",
+        "centre": 500,
+        "integer": true
+      }
+    },
+    "fixed": {
+      "motility": 1400
+    }
+  },
+  "seeds_per_eval": 4,
+  "parameters": [
+    "division_rate",
+    "cell_volume"
+  ],
+  "weightings": {
+    "equal (9 blocks, shipped)": {
+      "held_out_r2": [
+        -0.001666138291492425,
+        0.527824271257584,
+        0.5615966185284675
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.1111111111111111,
+        "log_n": 0.1111111111111111,
+        "radial_fa_equal_volume": 0.1111111111111111,
+        "radial_s2_equal_volume": 0.1111111111111111,
+        "radial_density_profile_equal_volume": 0.1111111111111111,
+        "dbscan_gaslike_fraction": 0.1111111111111111,
+        "pair_correlation_gofr": 0.1111111111111111,
+        "invasion_ratio": 0.1111111111111111,
+        "surface_roughness": 0.1111111111111111
+      }
+    },
+    "size scalars only": {
+      "held_out_r2": [
+        -0.0007890264392214075,
+        0.6866857998141049,
+        0.7803956309401955
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.5,
+        "log_n": 0.5
+      }
+    },
+    "scalars + campaign features at 25%": {
+      "held_out_r2": [
+        -0.0013477258987268925,
+        0.6995404215274639,
+        0.7963516254544447
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.375,
+        "log_n": 0.375,
+        "invasion_ratio": 0.125,
+        "surface_roughness": 0.125
+      }
+    },
+    "scalars + campaign features at 50%": {
+      "held_out_r2": [
+        -0.0014750877541420682,
+        0.6711642520807717,
+        0.7287541011075984
+      ],
+      "resolved": 2,
+      "weights": {
+        "log_r95": 0.25,
+        "log_n": 0.25,
+        "invasion_ratio": 0.25,
+        "surface_roughness": 0.25
+      }
+    },
+    "size blocks removed": {
+      "held_out_r2": [
+        -0.0016062643698395718,
+        0.4773010056421598,
+        0.5212685437235842
+      ],
+      "resolved": 2,
+      "weights": {
+        "radial_fa_equal_volume": 0.14285714285714285,
+        "radial_s2_equal_volume": 0.14285714285714285,
+        "radial_density_profile_equal_volume": 0.14285714285714285,
+        "dbscan_gaslike_fraction": 0.14285714285714285,
+        "pair_correlation_gofr": 0.14285714285714285,
+        "invasion_ratio": 0.14285714285714285,
+        "surface_roughness": 0.14285714285714285
+      }
+    }
+  },
+  "best": "scalars + campaign features at 25%"
+}

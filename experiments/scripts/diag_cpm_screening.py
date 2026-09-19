@@ -126,6 +126,24 @@ CANDIDATES: Dict[str, Dict[str, Any]] = {
         lo=0.0, hi=0.99, scale="lin", centre=0.834, integer=False,
         drives="directional correlation; S2, FA",
     ),
+    # Cell target volume. Sets how much space a cell occupies, so it moves the
+    # cluster radius AT FIXED cell count -- the one direction in (log_n, log_r95)
+    # that division and motility both leave alone. A standard CPM parameter and
+    # biologically meaningful (cell size), not a tuning knob.
+    "cell_volume": dict(
+        path="CellsInSilico.volume.default.value",
+        lo=200, hi=1200, scale="log", centre=500, integer=True,
+        drives="cluster radius at fixed cell count; packing",
+    ),
+    # Fluctuation amplitude. Excluded from the earlier screens because only
+    # Delta-H / T enters the Boltzmann acceptance, making it degenerate with
+    # adhesion -- but that degeneracy only binds when adhesion is also inferred.
+    # With adhesion fixed, T is a free knob acting on membrane roughness.
+    "temperature": dict(
+        path="CellsInSilico.temperature",
+        lo=15, hi=150, scale="log", centre=50, integer=True,
+        drives="membrane fluctuation; cell shape, surface roughness",
+    ),
     "recalc_time": dict(
         path="CellsInSilico.orientation.recalculationtime",
         lo=2, hi=60, scale="log", centre=15, integer=True,
@@ -260,6 +278,13 @@ TRAJECTORY_BLOCKS = {
     "growth_model_r": {},
     "growth_model_K": {},
     "log_n_trajectory": {},
+    # Mean squared displacement. The one observable that measures motion directly
+    # rather than inferring it from a static arrangement, and it is free: it needs
+    # only cell positions matched by CellID across the snapshots already written.
+    # Population size does not enter it at all, which is exactly what every block
+    # in the shipped summary fails to avoid.
+    "msd": {},
+    "non_gaussian_parameter": {},
 }
 
 # Two of the optional blocks misbehave badly enough to distort any analysis that
@@ -272,7 +297,8 @@ TRAJECTORY_BLOCKS = {
 # Ask for them by name if you want them.
 DEFAULT_EXTRA_BLOCKS = ("radial_linearity_equal_volume", "radial_planarity_equal_volume",
                         "radial_sphericity_equal_volume", "invasion_ratio",
-                        "surface_roughness", "growth_model_r", "growth_model_K")
+                        "surface_roughness", "growth_model_r", "growth_model_K",
+                        "msd", "non_gaussian_parameter")
 
 EXTRA_BLOCKS = {
     "radial_linearity_equal_volume": 0.88,

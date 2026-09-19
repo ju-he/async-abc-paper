@@ -1,11 +1,11 @@
 {
-  "experiment_name": "cellular_potts_division_only",
+  "experiment_name": "cellular_potts_two_param",
   "benchmark": {
     "name": "cellular_potts",
     "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
     "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
     "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params_size.json",
-    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_only.json",
+    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_volume.json",
     "reference_data_path": "experiments/data/cpm_reference_proposed",
     "output_dir": "experiments/data/cpm_sims",
     "engine_backend": "cis",
@@ -13,6 +13,7 @@
     "seed_param_path": "Settings.randomseed",
     "true_division_rate": 0.009,
     "true_params_scale": "physical",
+    "true_cell_volume": 500,
     "n_replicates_per_evaluation": 4
   },
   "methods": [

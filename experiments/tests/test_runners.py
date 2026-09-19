@@ -1400,3 +1400,61 @@ class TestStragglerRunner:
         )
         rows = _rows(csv_path)
         assert rows
+
+
+class TestGenerateCPMReferenceHonoursTheParameterSpace:
+    """The reference must be a simulation of the SAME model as every evaluation.
+
+    Two ways it silently was not: fixed parameters in the parameter-space file were
+    not applied (so a setup pinning motility at 1400 got a reference at the
+    template's 50), and normalized true-params were denormalised through the module
+    default limits rather than the file's own physical_range and scale.
+    """
+
+    def _space(self, tmp_path):
+        space = tmp_path / "space.json"
+        space.write_text(json.dumps({
+            "parameters": {"division_rate": {
+                "path": "define_functions.division_cond_cancer[1]",
+                "range": [0.0, 1.0], "physical_range": [0.001, 0.2], "scale": "log"}},
+            "fixed": {"motility": {
+                "path": "CellsInSilico.orientation.motilityamount[9]", "value": 1400}},
+        }))
+        return space
+
+    def _run(self, tmp_path, monkeypatch, true_params, scale):
+        gen = test_helpers.import_runner_module("generate_cpm_reference.py")
+
+        captured = {}
+
+        class _Manager:
+            def __init__(self, *a, **k):
+                pass
+
+            def build_simulation_config(self, param_list, out_dir_name):
+                captured["params"] = {p.name: p.value for p in param_list.parameters}
+                raise SystemExit(0)
+
+        monkeypatch.setattr(gen, "_ensure_nastjapy_on_path", lambda: None)
+        import simulation.manager as manager_mod
+        monkeypatch.setattr(manager_mod, "SimulationManager", _Manager)
+        with pytest.raises(SystemExit):
+            gen.main([
+                "--config-template", "experiments/assets/cellular_potts/sim_config.json",
+                "--config-builder-params",
+                "experiments/assets/cellular_potts/config_builder_params.json",
+                "--parameter-space", str(self._space(tmp_path)),
+                "--true-params", json.dumps(true_params),
+                "--true-params-scale", scale,
+                "--output-dir", str(tmp_path / "out"),
+            ])
+        return captured["params"]
+
+    def test_fixed_parameters_are_applied_to_the_reference(self, tmp_path, monkeypatch):
+        params = self._run(tmp_path, monkeypatch, {"division_rate": 0.009}, "physical")
+        assert params["motility"] == 1400
+
+    def test_normalized_params_use_the_files_own_range_and_scale(self, tmp_path, monkeypatch):
+        params = self._run(tmp_path, monkeypatch, {"division_rate": 0.5}, "normalized")
+        # log-uniform midpoint of [0.001, 0.2], not the module default's linear map.
+        assert params["division_rate"] == pytest.approx(math.sqrt(0.001 * 0.2))

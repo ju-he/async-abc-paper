@@ -174,11 +174,31 @@ def main(args=None):
     if unknown:
         parser.error(f"--true-params contains unknown parameter(s): {sorted(unknown)}")
 
+    # Denormalise against THIS parameter space's ranges and scales, not the module
+    # defaults. Reading them from the file is the whole point of passing it: a custom
+    # space with its own physical_range or a log scale would otherwise be silently
+    # mapped through the shipped division/motility limits.
+    limits = {name: tuple(entry["physical_range"]) for name, entry in param_space_data.items()
+              if "physical_range" in entry}
+    scales = {name: str(entry.get("scale", "linear")) for name, entry in param_space_data.items()}
     physical_true_params = (
-        denormalize_cpm_params(true_params)
+        denormalize_cpm_params(true_params, limits, scales)
         if args.true_params_scale == "normalized"
         else {name: float(value) for name, value in true_params.items()}
     )
+
+    # Parameters the benchmark holds fixed must be applied here too, or the reference
+    # is a simulation of a DIFFERENT model than every evaluation compared against it.
+    # The shipped template sets motilityamount[9] = 50, so a setup that fixes motility
+    # at 1400 and a reference generated without it differ in the one place that matters.
+    fixed_entries = []
+    for name, entry in (ps_data.get("fixed") or {}).items():
+        if "path" not in entry or "value" not in entry:
+            parser.error(f"Fixed parameter '{name}' needs both 'path' and 'value'")
+        fixed_entries.append(Parameter(name=name, value=entry["value"], path=entry["path"]))
+    if fixed_entries:
+        print("Holding fixed: "
+              + ", ".join(f"{p.name}={p.value}" for p in fixed_entries))
 
     n_seeds = args.n_seeds
     base_seed = args.seed
@@ -197,6 +217,7 @@ def main(args=None):
             )
             for name in true_params
         ]
+        param_entries += list(fixed_entries)
         param_entries.append(
             Parameter(
                 name="random_seed",

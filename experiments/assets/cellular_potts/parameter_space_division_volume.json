@@ -1,0 +1,43 @@
+{
+  "_comment": [
+    "Two-parameter CPM inference setup (see .plans/cpm_setup_proposal_2026-09-19.md,",
+    "Addendum 2). division_rate moves the population count; cell_volume moves the",
+    "cluster radius AT FIXED count. Those are the two directions (log_n, log_r95)",
+    "resolves, and the pair is measured at |cos| 0.07 -- against 0.86 for the",
+    "division/motility pair, which is why that one gives a ridge and this one does not.",
+    "motility is fixed: it is 0.82-0.86 confounded with division_rate and its ABC",
+    "posterior is the prior at every setting screened."
+  ],
+  "parameters": {
+    "division_rate": {
+      "path": "define_functions.division_cond_cancer[1]",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "physical_range": [
+        0.001,
+        0.2
+      ],
+      "scale": "log"
+    },
+    "cell_volume": {
+      "path": "CellsInSilico.volume.default.value",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "physical_range": [
+        200,
+        1200
+      ],
+      "scale": "log"
+    }
+  },
+  "fixed": {
+    "motility": {
+      "path": "CellsInSilico.orientation.motilityamount[9]",
+      "value": 1400
+    }
+  }
+}

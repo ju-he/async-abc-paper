@@ -2,7 +2,7 @@
 Never hide failures, prefer to crash loudly, only handle errors with clear recovery path, otherwise pass upwards. No silent handling. 
 
 # Testing
-Use the venv at .venv (repo root). Full suite: 742 passed, 10 skipped.
+Use the venv at .venv (repo root). Full suite: 744 passed, 10 skipped.
 
 To rebuild it (propulate and nastjapy come from the sibling checkouts, editable):
 

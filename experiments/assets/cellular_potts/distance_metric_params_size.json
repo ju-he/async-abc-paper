@@ -4,7 +4,7 @@
     "log_n": {}
   },
   "feature_space_model": "experiments/assets/cellular_potts/sims_feature_space_model_size.json",
-  "reference_data": "experiments/data/cpm_reference_division_only",
+  "reference_data": "experiments/data/cpm_reference_proposed",
   "lambda_dict": {},
   "standardization_factors": {},
   "sim_datahandler_kwargs": {

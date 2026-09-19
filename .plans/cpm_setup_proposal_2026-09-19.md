@@ -278,3 +278,118 @@ be presented as one.
 **Cost:** 7 jobs, 1 node each, 6:49 + 5:37 + 6:15 + 6:43 + 6:53 + 7:29 + 5:59 = **0.76 node hours**.
 Running total for all CPM screening: **2.2 of the 24 authorised node hours**, 52,408 evaluations,
 zero failures. Corpora archived; scratch left with 16 archives and none of my directories.
+
+---
+
+# Addendum 2 — other routes to a 2-D inference, and one that works
+
+**Asked:** what other options are there? The failure so far was always the same shape — every
+parameter moves the summary along the population-size axis — so the routes out are the ways of
+breaking that, and they are worth listing before choosing:
+
+| route | what it would mean | status |
+|---|---|---|
+| **A. A size-invariant summary** | a statistic whose null does not depend on n | the campaign's `f_radial`/`omega` are built this way; untested here |
+| **B. Measure motion, not arrangement** | MSD from the snapshots already written | **tested — works as a block (SNR 4.3), does not break the ridge** |
+| **C. Use per-cell data** | `Volume`, `Surface`, `Polarity`, `MotilityDir` are in every CSV and no block reads them | untested |
+| **D. A parameter that moves a different observable** | something acting on packing, not count | **tested — `cell_volume`, and it works** |
+| **E. More cells** | 80³ *and* longer together, or a much bigger box | untested; 80³ alone and t=1001 alone both fail |
+| **F. Reparameterise along the ridge** | report a tight combination and a loose one | honest but still one effective dimension |
+
+Two were tested, at 9,984 evaluations and 0.3 node hours.
+
+## B. MSD works as a statistic and still does not rescue motility
+
+`msd` needs only cell positions matched by CellID across snapshots — which the protocol already
+writes — so it costs nothing. It is the only block in any of these screens that measures motion
+rather than inferring it from a static arrangement, and it is immediately the **third-strongest block
+of all**:
+
+| block | SNR |
+|---|---|
+| log_n / log_r95 | 30.1 / 20.7 |
+| **msd** | **4.28** |
+| g(r) / non_gaussian_parameter / radial_density / radial_s2 / radial_fa | 1.82 / 1.77 / 1.57 / 1.11 / 0.88 |
+
+But motility's identifiability with `msd` in the summary is 2.44 and its confounding with
+division_rate is still 0.82. MSD measures how far cells move, and in this model cells that divide
+more also move more, so it lands on the same axis. **A better statistic does not fix a degenerate
+parameterisation** — which is the same lesson as the campaign's features in Addendum 1, now with a
+statistic that is size-independent by construction rather than merely intensive.
+
+## D. `cell_volume` gives the second direction — this is the result
+
+Target cell volume (`CellsInSilico.volume.default.value`, a standard CPM parameter meaning cell
+size) sets how much space a cell occupies, so it moves the cluster radius **at fixed cell count**.
+That is the one direction in `(log_n, log_r95)` that division and motility both leave alone. Screened
+against division_rate with motility fixed at 1400:
+
+| | identifiability | confounding with division_rate |
+|---|---|---|
+| division_rate | 22.6 | — |
+| **cell_volume** | **26.3** | **0.07** |
+| *(motility, for contrast)* | *2.4* | *0.82* |
+
+It is the first parameter in this entire campaign that is **both** strongly identifiable **and**
+orthogonal. adhesion was orthogonal but weak (1.7); motility is strong but parallel (0.86). Both
+conditions are met here for the first time.
+
+**The posterior**, four replicate seeds, sixteen independent references, two-scalar weighting:
+
+| acceptance | ESS | division_rate contraction | coverage | cell_volume contraction | coverage | posterior corr |
+|---|---|---|---|---|---|---|
+| 10% | 120 | 85% | 94% | 16% | 100% | +0.13 |
+| 5% | 60 | 88% | 94% | 38% | 100% | +0.09 |
+| **2%** | **24** | **91%** | **94%** | **64%** | **100%** | **+0.04** |
+| 1% | 12 | 91% | 94% | 78% | 94% | −0.26 |
+
+Both parameters contract, the posterior is essentially uncorrelated, and coverage holds — where
+division × motility gave 78% and **−13%** at a correlation of +0.78.
+
+**Why the two-scalar distance still wins.** `cell_volume`'s response direction is carried mostly by
+`radial_density_profile` (86%), so one would expect that block to be needed — yet weighting it in
+gives 36% against the two scalars' 64%. The reason is the physical reading of the two resolved
+directions found earlier: `log_n` is the count and the **ratio** of `log_r95` to `log_n` is the
+packing. division moves the count, `cell_volume` moves the packing. The pair of scalars spans both
+and is far less noisy than the density block, which reaches the same information the long way round.
+This also explains, after the fact, why `scalars_only` resolved exactly two directions.
+
+## Revised recommendation: a two-parameter setup
+
+This supersedes the one-parameter recommendation. Both configurations are written and validated;
+the one-parameter one is kept as the conservative fallback.
+
+1. **Infer `division_rate` and `cell_volume`**, log-uniform on [0.001, 0.2] and [200, 1200], truths
+   0.009 and 500. `motility` fixed at 1400.
+2. **Distance over `log_n` and `log_r95` at 0.5/0.5**, four replicate seeds, 50³, one snapshot at
+   t=500 — all unchanged.
+3. **Tolerance floor at ~2% acceptance**, not 5%: with two constrained directions the posterior no
+   longer over-concentrates on the reference's noise realisation, so coverage holds where the
+   one-parameter setup lost it.
+
+`experiments/configs/cellular_potts_two_param.json` and
+`experiments/assets/cellular_potts/parameter_space_division_volume.json`.
+
+## A bug this turned up, and a correction to what was committed yesterday
+
+`generate_cpm_reference.py` ignored the parameter-space file's `fixed` section, so the reference
+committed with the one-parameter proposal was generated at the template's `motilityamount[9] = 50`
+while every evaluation would have run at 1400 — **the observed data came from a different model than
+the simulations compared against it**. It also denormalised `--true-params` through the module
+default limits rather than the file's own `physical_range` and `scale`, so any custom parameter space
+was silently mapped through the shipped division/motility ranges. Both are fixed and tested
+(`TestGenerateCPMReferenceHonoursTheParameterSpace`), the reference is regenerated as
+`experiments/data/cpm_reference_proposed/` (verified: `motilityamount[9] = 1400`), and the wrong one
+is deleted. The screening results are unaffected — `diag_cpm_screening.py` applies fixed parameters
+to its reference stratum like any other evaluation, so every forecast above was self-consistent.
+
+## What is still untested
+
+**A** (size-invariant summaries: the campaign's `f_radial`, `omega`, `outer_frac`) and **C** (per-cell
+`Volume`/`Surface` distributions, which no block currently reads and which bear directly on
+`surface_lambda` and `temperature`) would be the next places to look for a *third* direction. **E**
+(80³ with a longer run, or a substantially bigger box) is the expensive route to the cell counts the
+sibling campaign says the mechanics parameters need. None is required for the two-parameter claim.
+
+**Cost:** 2 jobs, 8:52 + 8:49 = **0.30 node hours**. Running total for all CPM screening: **2.5 of
+the 24 authorised**, 62,392 evaluations, zero failures.
