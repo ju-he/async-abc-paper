@@ -360,3 +360,47 @@ bandwidth transient degrades *sampling* and not merely reporting within a 50,000
 0.062 is pessimistic and the async-vs-sync gap on 4-D may narrow or reverse. One g-and-k job at
 `tol_init` set from its prior-predictive scale settles it, and it should be settled before any of
 this reaches the paper.
+
+---
+
+# The quantity that decides whether throughput is worth anything
+
+Throughput is instrumental. What matters is posterior quality per node-second:
+
+    quality per node-second  =  per-evaluation efficiency  x  evaluations per node-second
+
+and the asynchronous method *loses* the first term on 4-D while winning the second. Whether it nets
+out is set by **how fast tolerance improves with budget** — the exponent of eps against n. Measured
+by the k-th order statistic over prefixes of real runs:
+
+| | exponent, early | exponent, late | rejection's n^(-1/d) | 2x throughput buys |
+|---|---|---|---|---|
+| **CPM, 2-D, expensive** | -2.6 | **-1.1** | -0.50 | **2.1x** better eps |
+| **g-and-k, 4-D, cheap** | -0.31 | **-0.18** | -0.25 | **1.13x** better eps |
+
+**On CPM throughput converts.** The curve is steeper than rejection's, so the advantage *widens* with
+compute: a 2-5x throughput gain becomes a 2-9x tolerance gain.
+
+**On g-and-k it does not.** At -0.18 it takes **18x the budget to halve eps**, and rejection's -0.25
+is *steeper*, so the 7.4x constant-factor lead would erode with more compute rather than grow. At
+matched wall clock (600s) the synchronous baseline reaches eps ~ 0.026 against the asynchronous arm's
+~0.031. On that benchmark, more throughput does not buy a better posterior.
+
+The flat exponent is very likely the paper's own ESS ceiling seen from another angle: the proposal
+concentrates onto the archive and stops exploring, so extra draws add little new information.
+
+**What to do with it.** The paper reports throughput (§5.3) and posterior quality (§5.2) in separate
+sections and never connects them. This exponent is the connection, and it should be reported per
+benchmark next to the throughput numbers, because it is what says whether a systems gain is a science
+gain. It also *explains* the existing results instead of excusing them: the 4-D case is weak because
+the curve is flat there, and CPM should be strong because it is not.
+
+**Caveats.** The CPM exponent is one replicate over a 26x budget range and is flattening (-2.6 →
+-1.1); the production run (14262214) gives five replicates and pins it. If it keeps flattening toward
+-0.5 the throughput argument weakens on CPM too. Cross-method record counts (3.3M baseline against
+1.8M asynchronous in 600s) may not be comparable units — pyABC may log rejected proposals — so no
+throughput claim is made from them; only the eps-at-matched-wall-clock comparison stands.
+
+Confirmed separately: the g-and-k bandwidth transient does **not** bind (jobs 14262212/13, matched
+50,000 evaluations at `tol_init` 10.0 and 1.3 give the same k-th order statistic, ratio 1x both), so
+0.062 is the sampler's real per-evaluation efficiency on 4-D and the transient is CPM-specific.
