@@ -1118,6 +1118,337 @@ class TestCPMFixedParameters:
             CellularPotts(config, _sim_manager=object(), _distance_metric=object())
 
 
+class TestCPMReplicateSeeds:
+    """Deterministic, distinct NAStJA seeds for the replicates of one evaluation."""
+
+    def test_one_replicate_is_the_evaluation_seed(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        assert replicate_seeds(99, 1) == [99]
+
+    def test_the_first_replicate_is_always_the_evaluation_seed(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        assert replicate_seeds(7, 4)[0] == 7
+
+    def test_seeds_are_distinct(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        seeds = replicate_seeds(3, 8)
+        assert len(set(seeds)) == 8
+
+    def test_seeds_are_deterministic_in_the_evaluation_seed(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        assert replicate_seeds(12345, 4) == replicate_seeds(12345, 4)
+
+    def test_a_prefix_property_holds_across_k(self):
+        """k=4 extends k=2 rather than redrawing, so k is a protocol knob and not a
+        different experiment on the same seeds."""
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        assert replicate_seeds(5, 4)[:2] == replicate_seeds(5, 2)
+
+    def test_different_evaluations_get_different_replicates(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        a, b = replicate_seeds(1, 4), replicate_seeds(2, 4)
+        assert not set(a) & set(b)
+
+    def test_seeds_are_positive_32_bit_integers(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        for seed in replicate_seeds(1_000_000, 16):
+            assert isinstance(seed, int)
+            assert 1 <= seed <= 2 ** 31 - 1
+
+    def test_zero_replicates_is_refused(self):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        with pytest.raises(ValueError, match=">= 1"):
+            replicate_seeds(1, 0)
+
+
+class TestCPMReplicateAveraging:
+    """One evaluation = k simulations at the same theta, averaged before the distance.
+
+    A single 50^3 realisation is too noisy for the discrepancy to order nearby
+    thetas; k=4 is what the posterior forecasts in
+    .plans/cpm_setup_proposal_2026-09-19.md were computed under. Until this was
+    wired, ``n_replicates_per_evaluation`` sat in the configs and nothing read it.
+    """
+
+    @staticmethod
+    def _sim_manager(record):
+        """A SimulationManager that writes a real per-replicate directory."""
+        manager = MagicMock()
+
+        def build(param_list, out_dir_name=None):
+            record["param_lists"].append(param_list)
+            config_path = Path(record["root"]) / out_dir_name / "config.json"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text("{}")
+            record["dirs"].append(config_path.parent)
+            return str(config_path)
+
+        manager.build_simulation_config.side_effect = build
+        return manager
+
+    def _benchmark(self, cpm_config, record, **extra):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        record.setdefault("root", cpm_config["output_dir"])
+        record.setdefault("param_lists", [])
+        record.setdefault("dirs", [])
+        mock_dist = MagicMock()
+        mock_dist.calculate_distance.return_value = 2.5
+        mock_dist.calculate_distance_replicates.return_value = 1.25
+        cpm_config.update(extra)
+        benchmark = CellularPotts(
+            cpm_config,
+            _sim_manager=self._sim_manager(record),
+            _distance_metric=mock_dist,
+        )
+        return benchmark, mock_dist
+
+    def test_four_replicates_run_four_simulations(self, cpm_config):
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        assert len(record["dirs"]) == 4
+        assert bm._sim_manager.run_simulation.call_count == 4
+
+    def test_each_replicate_gets_its_own_seed(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import replicate_seeds
+
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        seeds = [
+            next(p.value for p in pl.parameters if p.name == "random_seed")
+            for pl in record["param_lists"]
+        ]
+        assert seeds == replicate_seeds(42, 4)
+        assert len(set(seeds)) == 4
+
+    def test_every_replicate_carries_the_same_parameters(self, cpm_config):
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        thetas = [
+            {p.name: p.value for p in pl.parameters if p.name != "random_seed"}
+            for pl in record["param_lists"]
+        ]
+        assert all(theta == thetas[0] for theta in thetas)
+
+    def test_replicates_are_scored_together_through_the_averaging_path(self, cpm_config):
+        """Features are averaged across replicates and *then* compared -- averaging
+        distances instead would not divide the within-theta noise by k."""
+        record = {}
+        bm, mock_dist = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        result = bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        mock_dist.calculate_distance.assert_not_called()
+        mock_dist.calculate_distance_replicates.assert_called_once()
+        passed = list(mock_dist.calculate_distance_replicates.call_args.args[0])
+        assert [Path(p) for p in passed] == record["dirs"]
+        assert result == pytest.approx(1.25)
+
+    def test_the_default_is_one_replicate_through_the_single_path(self, cpm_config):
+        record = {}
+        bm, mock_dist = self._benchmark(cpm_config, record)
+        result = bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        assert len(record["dirs"]) == 1
+        mock_dist.calculate_distance.assert_called_once()
+        mock_dist.calculate_distance_replicates.assert_not_called()
+        assert result == pytest.approx(2.5)
+
+    def test_every_replicate_directory_is_cleaned_up(self, cpm_config):
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        assert not any(d.exists() for d in record["dirs"])
+        assert bm._sim_manager.cleanup_simdir.call_count == 4
+
+    def test_a_failed_replicate_fails_the_evaluation_and_cleans_the_rest(self, cpm_config):
+        """An evaluation averaged over fewer replicates than the others carries more
+        noise than the tolerance schedule was set for, so it is not the same
+        evaluation: the whole evaluation is a failure."""
+        record = {}
+        bm, mock_dist = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        calls = {"n": 0}
+
+        def run(_config_path):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                raise RuntimeError("NAStJA crashed")
+
+        bm._sim_manager.run_simulation.side_effect = run
+        result = bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        assert result == float("inf")
+        assert calls["n"] == 3  # stops at the failure, does not run the fourth
+        assert not any(d.exists() for d in record["dirs"])
+        mock_dist.calculate_distance_replicates.assert_not_called()
+        assert bm._nan_counter == 1
+
+    def test_a_failed_distance_still_removes_every_replicate(self, cpm_config):
+        record = {}
+        bm, mock_dist = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        mock_dist.calculate_distance_replicates.side_effect = ValueError("degenerate")
+        result = bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        assert result == float("inf")
+        assert not any(d.exists() for d in record["dirs"])
+
+    def test_a_nan_replicate_distance_maps_to_inf(self, cpm_config):
+        record = {}
+        bm, mock_dist = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        mock_dist.calculate_distance_replicates.return_value = float("nan")
+        assert bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42) == float("inf")
+
+    def test_one_evaluation_counts_once_however_many_replicates(self, cpm_config):
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        bm.simulate({"division_rate": 0.5, "motility": 0.3}, seed=43)
+        assert bm._eval_counter == 2
+
+    def test_repeating_an_evaluation_repeats_its_replicate_seeds(self, cpm_config):
+        record = {}
+        bm, _ = self._benchmark(cpm_config, record, n_replicates_per_evaluation=4)
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        first = [
+            next(p.value for p in pl.parameters if p.name == "random_seed")
+            for pl in record["param_lists"]
+        ]
+        record["param_lists"].clear()
+        bm.simulate({"division_rate": 0.4, "motility": 0.2}, seed=42)
+        second = [
+            next(p.value for p in pl.parameters if p.name == "random_seed")
+            for pl in record["param_lists"]
+        ]
+        assert first == second
+
+    def test_a_nonsense_replicate_count_is_refused(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        cpm_config["n_replicates_per_evaluation"] = 0
+        with pytest.raises(ValueError, match="must be >= 1"):
+            CellularPotts(cpm_config, _sim_manager=MagicMock(), _distance_metric=MagicMock())
+
+
+class TestCPMAveragedReference:
+    """The observed data as one replicate-averaged observation.
+
+    ``DistanceMetric`` averages the distance to each reference directory; the
+    screening forecasts were computed against the *average of the references*,
+    which is a different (and half as noisy) observation.
+    """
+
+    class _Handler:
+        def __init__(self, value):
+            self.features = {"log_n": np.array([value]), "log_r95": np.array([2 * value])}
+            self.feature_metadata = {}
+            self.closed = False
+            self._SimDir__con = self
+
+        def close(self):
+            self.closed = True
+
+    @staticmethod
+    def _metric(handlers, with_model=True):
+        """A DistanceMetric stand-in exposing the pieces the collapse touches."""
+        metric = MagicMock()
+        metric.reference_data = list(handlers)
+        metric.feature_space_model = object() if with_model else None
+
+        def average(dhs):
+            item = MagicMock()
+            item.features = {
+                name: np.mean([dh.features[name] for dh in dhs], axis=0)
+                for name in dhs[0].features
+            }
+            return item
+
+        metric._average_feature_item.side_effect = average
+        return metric
+
+    def _config(self, cpm_config, **extra):
+        cpm_config.update(extra)
+        return cpm_config
+
+    def test_reference_replicates_collapse_to_their_average(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        handlers = [self._Handler(v) for v in (1.0, 2.0, 3.0, 4.0)]
+        metric = self._metric(handlers)
+        CellularPotts(
+            self._config(cpm_config, average_reference_replicates=True),
+            _sim_manager=MagicMock(), _distance_metric=metric,
+        )
+        assert len(metric.reference_data) == 1
+        assert metric.reference_data[0].features["log_n"] == pytest.approx([2.5])
+
+    def test_without_the_flag_the_references_are_left_alone(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        handlers = [self._Handler(v) for v in (1.0, 2.0, 3.0, 4.0)]
+        metric = self._metric(handlers)
+        CellularPotts(cpm_config, _sim_manager=MagicMock(), _distance_metric=metric)
+        assert metric.reference_data == handlers
+
+    def test_a_single_reference_is_not_touched(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        handlers = [self._Handler(1.0)]
+        metric = self._metric(handlers)
+        CellularPotts(
+            self._config(cpm_config, average_reference_replicates=True),
+            _sim_manager=MagicMock(), _distance_metric=metric,
+        )
+        assert metric.reference_data == handlers
+
+    def test_averaging_without_a_feature_space_model_is_refused(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        metric = self._metric([self._Handler(1.0), self._Handler(2.0)], with_model=False)
+        with pytest.raises(ValueError, match="requires a feature_space_model"):
+            CellularPotts(
+                self._config(cpm_config, average_reference_replicates=True),
+                _sim_manager=MagicMock(), _distance_metric=metric,
+            )
+
+    def test_close_still_closes_the_original_reference_handlers(self, cpm_config):
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        handlers = [self._Handler(v) for v in (1.0, 2.0)]
+        metric = self._metric(handlers)
+        benchmark = CellularPotts(
+            self._config(cpm_config, average_reference_replicates=True),
+            _sim_manager=MagicMock(), _distance_metric=metric,
+        )
+        benchmark.close()
+        assert all(handler.closed for handler in handlers)
+
+
+class TestCPMProposedConfigsRequestReplicates:
+    """The two proposed CPM setups must actually ask for the protocol they were
+    forecast under: four replicate seeds and one averaged four-seed reference."""
+
+    _CONFIGS = ["cellular_potts_two_param.json", "cellular_potts_division_only.json"]
+
+    @pytest.mark.parametrize("name", _CONFIGS)
+    def test_config_asks_for_four_replicates_against_an_averaged_reference(self, name):
+        cfg = json.loads((Path(__file__).parents[1] / "configs" / name).read_text())
+        benchmark = cfg["benchmark"]
+        assert benchmark["n_replicates_per_evaluation"] == 4
+        assert benchmark["average_reference_replicates"] is True
+
+    @pytest.mark.parametrize("name", _CONFIGS)
+    def test_the_reference_container_holds_four_seed_replicates(self, name):
+        cfg = json.loads((Path(__file__).parents[1] / "configs" / name).read_text())
+        reference = Path(__file__).parents[2] / cfg["benchmark"]["reference_data_path"]
+        assert len([p for p in reference.iterdir() if p.is_dir()]) == 4
+
+
 class TestCPMMultiSeedReferenceContainer:
     """``generate_cpm_reference.py --n-seeds N`` writes a container of reference dirs."""
 

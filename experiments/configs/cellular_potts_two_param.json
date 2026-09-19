@@ -14,7 +14,8 @@
     "true_division_rate": 0.009,
     "true_params_scale": "physical",
     "true_cell_volume": 500,
-    "n_replicates_per_evaluation": 4
+    "n_replicates_per_evaluation": 4,
+    "average_reference_replicates": true
   },
   "methods": [
     "async_propulate_abc",

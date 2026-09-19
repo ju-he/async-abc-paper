@@ -6,6 +6,7 @@ repo-local ``.venv`` is used only as a fallback.
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import json
 import logging
 import math
@@ -50,6 +51,9 @@ _CPM_PHYSICAL_LIMITS: Dict[str, Tuple[float, float]] = {
 # 50% of the same interval log-uniform. Absent means "linear", i.e. the original
 # behaviour.
 _CPM_PARAM_SCALES: Dict[str, str] = {}
+# NAStJA takes the random seed as a positive 32-bit integer; derived replicate
+# seeds are drawn from [1, 2**31 - 1].
+_MAX_NASTJA_SEED = 2 ** 31 - 1
 _LOG_SCALE = "log"
 _LINEAR_SCALE = "linear"
 _VALID_SCALES = (_LINEAR_SCALE, _LOG_SCALE)
@@ -470,6 +474,39 @@ def denormalize_cpm_params(
             for name, value in params.items()}
 
 
+def replicate_seeds(seed: int, n_replicates: int) -> list[int]:
+    """Return ``n_replicates`` distinct NAStJA seeds derived from one evaluation seed.
+
+    A CPM evaluation at k replicates is k independent Monte Carlo realisations of
+    the *same* theta, whose feature vectors are averaged before the discrepancy is
+    taken (see ``CellularPotts.simulate``). The seeds must therefore be distinct,
+    and they must be a deterministic function of the evaluation's own seed so a
+    run is reproducible from its recorded seeds alone.
+
+    The first seed is the evaluation seed itself, so k=1 reproduces the
+    single-replicate behaviour exactly; the rest are SHA-256 derived, which
+    spreads them over the seed range instead of handing NAStJA k consecutive
+    integers.
+    """
+    if int(n_replicates) < 1:
+        raise ValueError(f"n_replicates must be >= 1, got {n_replicates}")
+    seeds = [int(seed)]
+    counter = 1
+    # Distinctness is by construction (the digest varies with the counter); the
+    # loop only skips the vanishingly rare collision with an earlier draw.
+    while len(seeds) < int(n_replicates):
+        digest = hashlib.sha256(f"{int(seed)}:{counter}".encode()).digest()
+        candidate = int.from_bytes(digest[:8], "big") % _MAX_NASTJA_SEED + 1
+        if candidate not in seeds:
+            seeds.append(candidate)
+        counter += 1
+        if counter > int(n_replicates) + 1000:
+            raise RuntimeError(
+                f"Could not derive {n_replicates} distinct replicate seeds from seed {seed}"
+            )
+    return seeds
+
+
 class CellularPotts:
     """Cellular Potts model benchmark using nastjapy's SimulationManager + DistanceMetric.
 
@@ -591,6 +628,23 @@ class CellularPotts:
         self._keep_eval_dirs: bool = bool(config.get("keep_eval_dirs", False))
         self._eval_counter: int = 0  # for logging only; dir names use uuid4
         self._nan_counter: int = 0   # for NaN rate monitoring
+        # One evaluation = k simulations at the same theta, feature-averaged. A single
+        # 50^3 CPM realisation is too noisy for the discrepancy to order nearby thetas;
+        # averaging k of them divides the within-theta feature variance by k, which is
+        # what every forecast in .plans/cpm_setup_proposal_2026-09-19.md assumes.
+        self._n_replicates: int = int(config.get("n_replicates_per_evaluation", 1))
+        if self._n_replicates < 1:
+            raise ValueError(
+                "n_replicates_per_evaluation must be >= 1, got "
+                f"{config['n_replicates_per_evaluation']!r}"
+            )
+        # With several reference directories the observed data can be read two ways:
+        # as one observation whose features are the replicate average (True), or as
+        # several independent observations whose distances are averaged (False, the
+        # nastjapy default). They are different targets. The averaged observation is
+        # the one the screening forecasts were computed under -- it halves the
+        # reference's own noise, symmetric with the candidate averaging above.
+        self._average_reference: bool = bool(config.get("average_reference_replicates", False))
 
         # SimulationManager
         if _sim_manager is not None:
@@ -639,6 +693,36 @@ class CellularPotts:
             dm_params = DistanceMetricParams.model_validate(dm_raw)
             self._distance_metric = DistanceMetric(params=dm_params)
 
+        self._reference_handlers = list(getattr(self._distance_metric, "reference_data", []))
+        if self._average_reference:
+            self._collapse_reference_to_one_average()
+        logger.info("CPM running %d simulation(s) per evaluation; reference read as %s",
+                    self._n_replicates,
+                    "one replicate-averaged observation" if self._average_reference
+                    else "independent observations with averaged distances")
+
+    def _collapse_reference_to_one_average(self) -> None:
+        """Replace the reference replicates by their single feature-averaged observation.
+
+        ``DistanceMetric`` averages the distance to each reference; this averages the
+        references first and takes one distance, which is the operation the offline
+        screening performed (``diag_cpm_screening._units``) and so the one the
+        forecast posteriors were measured under.
+        """
+        metric = self._distance_metric
+        references = list(getattr(metric, "reference_data", []))
+        if len(references) < 2:
+            return
+        if getattr(metric, "feature_space_model", None) is None:
+            raise ValueError(
+                "average_reference_replicates requires a feature_space_model: the "
+                "averaging is over raw feature arrays, which the legacy lambda_dict "
+                "path does not expose."
+            )
+        metric.reference_data = [metric._average_feature_item(references)]
+        logger.info("CPM averaged %d reference replicates into one observation",
+                    len(references))
+
     def _cleanup_eval_dir(self, sim_dir: str) -> None:
         """Archive simulation output and optionally remove the directory."""
         path = Path(sim_dir)
@@ -654,38 +738,9 @@ class CellularPotts:
             except Exception as exc:
                 logger.warning("Removal failed for %s: %s", sim_dir, exc)
 
-    def simulate(self, params: dict, seed: int) -> float:
-        """Run a CPM simulation and return the distance to reference data.
-
-        The NAStJA random seed is injected as an extra parameter alongside the
-        inference parameters so every call is reproducible.
-
-        Returns ``float('inf')`` on simulation or scoring failure rather than
-        raising. A failed simulation is, in ABC terms, an infinitely-bad
-        discrepancy: ``inf`` is excluded from every archive (``loss < tol`` is
-        False) exactly as a rejected sample should be, yet the ABCPMC
-        ``_check_loss`` guard accepts it — whereas ``nan`` is rejected by that
-        guard (crash-loudly), so a single failed NAStJA run would otherwise
-        abort a whole scaling combo. ``inf`` is behaviourally identical to the
-        old ``nan`` for archive selection but keeps the run alive.
-
-        Parameters
-        ----------
-        params:
-            Dict of parameter name → value (must match keys in ``limits``).
-        seed:
-            RNG seed injected into the NAStJA config.
-
-        Returns
-        -------
-        float
-            ABC distance (lower is better). ``inf`` on failure.
-        """
+    def _build_param_list(self, params: dict, seed: int):
+        """Physical parameters + fixed parameters + the NAStJA seed for one simulation."""
         from simulation.simulation_config import Parameter, ParameterList
-
-        self._eval_counter += 1
-        sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
-        logger.debug("CPM eval #%d starting (dir=%s)", self._eval_counter, sim_dir_name)
 
         physical_params = {
             name: denormalize_cpm_param(name, value, self._physical_limits,
@@ -711,24 +766,88 @@ class CellularPotts:
                 path=self._seed_param_path,
             )
         )
-        param_list = ParameterList(parameters=param_entries)
+        return ParameterList(parameters=param_entries)
 
-        # --- run simulation ---
+    def _run_one_simulation(self, params: dict, seed: int) -> str:
+        """Run one NAStJA simulation and return its output directory.
+
+        Raises on failure, having first removed whatever directory it created --
+        the caller cleans up the replicates that already succeeded.
+        """
+        sim_dir_name = f"eval_{uuid.uuid4().hex[:12]}"
         sim_dir: str | None = None
         try:
             config_path = self._sim_manager.build_simulation_config(
-                param_list, out_dir_name=sim_dir_name
+                self._build_param_list(params, seed), out_dir_name=sim_dir_name
             )
             _rewrite_generated_config_paths(config_path)
             sim_dir = str(Path(config_path).parent)
             self._sim_manager.run_simulation(config_path)
+        except Exception:
+            self._cleanup_eval_dir(
+                sim_dir if sim_dir is not None
+                else str(Path(self._output_dir) / sim_dir_name)
+            )
+            raise
+        return sim_dir
+
+    def _distance_over_replicates(self, sim_dirs: list) -> float:
+        """Discrepancy of one evaluation from its replicate simulation directories."""
+        if len(sim_dirs) == 1:
+            return float(self._distance_metric.calculate_distance(sim_dirs[0]))
+        return float(self._distance_metric.calculate_distance_replicates(sim_dirs))
+
+    def simulate(self, params: dict, seed: int) -> float:
+        """Run the CPM simulations of one evaluation and return the distance to reference.
+
+        The evaluation runs ``n_replicates_per_evaluation`` simulations at the same
+        parameters with distinct seeds derived from ``seed`` (see
+        ``replicate_seeds``). Their raw feature arrays are averaged before the
+        discrepancy is taken -- averaging features, not distances, which is what
+        divides the within-theta noise by k.
+
+        Returns ``float('inf')`` on simulation or scoring failure rather than
+        raising. A failed simulation is, in ABC terms, an infinitely-bad
+        discrepancy: ``inf`` is excluded from every archive (``loss < tol`` is
+        False) exactly as a rejected sample should be, yet the ABCPMC
+        ``_check_loss`` guard accepts it -- whereas ``nan`` is rejected by that
+        guard (crash-loudly), so a single failed NAStJA run would otherwise
+        abort a whole scaling combo. ``inf`` is behaviourally identical to the
+        old ``nan`` for archive selection but keeps the run alive.
+
+        A replicate that fails fails the whole evaluation: an evaluation averaged
+        over fewer replicates than the rest carries more noise than the tolerance
+        schedule was set for, so it is not the same evaluation.
+
+        Parameters
+        ----------
+        params:
+            Dict of parameter name → value (must match keys in ``limits``).
+        seed:
+            RNG seed for the evaluation; the replicate seeds are derived from it.
+
+        Returns
+        -------
+        float
+            ABC distance (lower is better). ``inf`` on failure.
+        """
+        self._eval_counter += 1
+        seeds = replicate_seeds(seed, self._n_replicates)
+        logger.debug("CPM eval #%d starting (%d replicate(s), seeds=%s)",
+                     self._eval_counter, len(seeds), seeds)
+
+        # --- run simulations ---
+        sim_dirs: list = []
+        try:
+            for replicate_seed in seeds:
+                sim_dirs.append(self._run_one_simulation(params, replicate_seed))
         except Exception as exc:
             logger.error(
-                "CPM simulation failed for params=%s seed=%d: %s", params, seed, exc
+                "CPM simulation failed for params=%s seed=%d (replicate seeds=%s): %s",
+                params, seed, seeds, exc
             )
-            if sim_dir is None:
-                sim_dir = str(Path(self._output_dir) / sim_dir_name)
-            self._cleanup_eval_dir(sim_dir)
+            for done_dir in sim_dirs:
+                self._cleanup_eval_dir(done_dir)
             _restore_default_fp_state()
             self._nan_counter += 1
             self._warn_if_high_nan_rate()
@@ -737,14 +856,14 @@ class CellularPotts:
         # --- compute distance ---
         score = float("inf")
         try:
-            distance_result = self._distance_metric.calculate_distance(sim_dir)
-            score = float(distance_result)
+            score = self._distance_over_replicates(sim_dirs)
         except Exception as exc:
             logger.error(
-                "Distance computation failed for sim_dir=%s: %s", sim_dir, exc
+                "Distance computation failed for sim_dirs=%s: %s", sim_dirs, exc
             )
         finally:
-            self._cleanup_eval_dir(sim_dir)
+            for sim_dir in sim_dirs:
+                self._cleanup_eval_dir(sim_dir)
             _restore_default_fp_state()
 
         # A NaN distance (e.g. a degenerate feature vector) is treated as a
@@ -772,8 +891,9 @@ class CellularPotts:
 
     def close(self) -> None:
         """Best-effort teardown for CPM helper objects between experiment runs."""
-        distance_metric = getattr(self, "_distance_metric", None)
-        reference_data = getattr(distance_metric, "reference_data", []) if distance_metric else []
+        # The real DataHandlers, kept separately because averaging the reference
+        # replaces ``reference_data`` with a plain feature container.
+        reference_data = getattr(self, "_reference_handlers", [])
         for datahandler in reference_data:
             # nastjapy's DataHandler keeps an internal sqlite connection in the
             # private ``_SimDir__con`` attribute.  There is no public close() API;
@@ -792,6 +912,7 @@ class CellularPotts:
                 except Exception:
                     logger.debug("Failed to close CPM reference-data connection", exc_info=True)
 
+        self._reference_handlers = []
         self._distance_metric = None
         self._sim_manager = None
         gc.collect()
