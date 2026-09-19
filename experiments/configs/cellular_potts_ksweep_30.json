@@ -1,0 +1,71 @@
+{
+  "_comment": [
+    "Archive-size arm (k=30) of the CPM study; k=100 is the validated setting.",
+    "The paper calls raising k 'the obvious lever' because ESS scales with it.",
+    "Measured here, that is only half: the reported tolerance is the k-th order",
+    "statistic, and on this benchmark eps ~ k^0.99 (rejection eps ~ n^-1.01, so",
+    "the discrepancy is noise-dominated near the mode, effective dimension 1).",
+    "Doubling k therefore doubles the bandwidth -- particles bought one-for-one",
+    "with resolution. On 4-D g-and-k the same exponent is k^0.28, a real bargain.",
+    "k also sets the proposal breadth and is the default bisect_interval, so it",
+    "lengthens the bandwidth transient too. Those need a run, not arithmetic.",
+    "tol_init 0.1 throughout, from the sweep (jobs 14262028/29/30)."
+  ],
+  "experiment_name": "cellular_potts_ksweep_30",
+  "benchmark": {
+    "name": "cellular_potts",
+    "nastja_config_template": "experiments/assets/cellular_potts/sim_config.json",
+    "config_builder_params": "experiments/assets/cellular_potts/config_builder_params.json",
+    "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params_size.json",
+    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_volume.json",
+    "reference_data_path": "experiments/data/cpm_reference_proposed",
+    "output_dir": "experiments/data/cpm_sims",
+    "engine_backend": "cis",
+    "seed_param_name": "random_seed",
+    "seed_param_path": "Settings.randomseed",
+    "true_division_rate": 0.009,
+    "true_params_scale": "physical",
+    "true_cell_volume": 500,
+    "n_replicates_per_evaluation": 4,
+    "average_reference_replicates": true
+  },
+  "methods": [
+    "async_propulate_abc"
+  ],
+  "inference": {
+    "max_simulations": 2000,
+    "n_workers": 48,
+    "k": 30,
+    "tol_init": 0.1,
+    "n_generations": 1000,
+    "max_wall_time_s": 3600,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
+  },
+  "execution": {
+    "n_replicates": 2,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
+  },
+  "analysis": {
+    "target_wasserstein": 2.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  }
+}
