@@ -393,3 +393,77 @@ sibling campaign says the mechanics parameters need. None is required for the tw
 
 **Cost:** 2 jobs, 8:52 + 8:49 = **0.30 node hours**. Running total for all CPM screening: **2.5 of
 the 24 authorised**, 62,392 evaluations, zero failures.
+
+---
+
+# Addendum 3 — routes A and C: better statistics, no third direction
+
+The two routes flagged as untested in Addendum 2, both implemented and screened (4,792
+evaluations, 0.26 node hours, `cpm_custom`). Six new blocks, all **intensive by construction** —
+proportions, coefficients of variation, dimensionless ratios — which is precisely the property the
+shipped feature set lacks:
+
+* **Route C, per-cell data.** `cell_shape_index` (Surface / Volume^(2/3), mean and CV),
+  `cell_volume_dispersion` (CV of cell volume), `motility_order` (polar and nematic order of the
+  per-cell motility directions). Every CellInfo CSV carries `Volume`, `Surface`, `MotilityDir` and
+  `Polarity`; no shipped block reads any of them. These are the only statistics here that look at a
+  *cell* rather than at an arrangement of cells.
+* **Route A, size-invariant structure.** `aggregation_omega` (Σn_i²/Σn_i over contact components,
+  over N), `outer_fraction`, `radial_variance_fraction` (the sibling campaign's estimator, whose
+  null median is free of component size).
+
+## They are good statistics
+
+Screened against six parameters at motility 1400:
+
+| block | SNR |
+|---|---|
+| log_n / log_r95 | 29.2 / 18.3 |
+| **cell_shape_index** | **6.90** |
+| msd | 4.96 |
+| **aggregation_omega** | **2.56** |
+| **outer_fraction** | **2.23** |
+| cell_volume_dispersion | 1.34 |
+| *every shipped curve block* | *≤ 1.29* |
+
+`cell_shape_index` is the third-strongest block of all and beats the four 10-dimensional curve
+blocks by a factor of five. And it does what it was built for: **`surface_lambda` goes from
+identifiability 1.30 to 6.14**, carried by `msd` (41%) and `cell_shape_index` (27%).
+
+## And there is still no third direction
+
+| parameter | identifiability | confounding with division_rate |
+|---|---|---|
+| division_rate | 21.9 | — |
+| **cell_volume** | **14.0** | **0.10** |
+| surface_lambda | 6.1 | **0.81** |
+| persistence | 2.0 | **0.00** |
+| recalc_time | 1.8 | 0.68 |
+| temperature | 0.0 | 0.85 |
+
+`surface_lambda` is now visible but parallel — it changes cell shape, which changes how cells pack,
+which changes the count, so it lands back on the size axis. `persistence` is *perfectly* orthogonal
+(0.00) and far too weak. Nothing clears both bars. Forecast on the six-parameter corpus confirms it:
+division_rate 56%, cell_volume 47%, and everything else between −5% and 11%.
+
+**The general shape of the result, now from three independent directions of attack.** Better
+features (the sibling campaign's, Addendum 1), better observables (MSD, Addendum 2), and better
+statistics (these) all improve what can be *seen* without adding what can be *separated*. In this
+model at ~50 cells every mechanism except cell size ultimately expresses itself through how many
+cells there are. `cell_volume` works because it is the one knob that changes the cluster's radius
+without changing its count.
+
+**No change to the recommendation.** `division_rate` + `cell_volume`, two-scalar distance, four
+seeds, 2% tolerance floor. The new blocks are not needed: `scalars_only` scores 21.9 against 4.4 for
+an equal weighting over all fourteen. They are worth keeping in the diagnostic because they are the
+best non-scalar statistics measured here, and because a future attempt at a third parameter should
+start from them rather than from the shipped curves.
+
+**A bug caught by the loud-failure guard.** The first run of this screen failed all 4,792
+evaluations with `TypeError: '<' not supported between 'str' and 'int'`: the new per-cell hook bound
+its DataFrame to `frame`, shadowing the loop's integer frame index, so the next bin count passed a
+DataFrame in as `timestep_range` and nastjapy iterated its column names. The driver refused to
+report a screen rather than producing a partial corpus. Fixed and re-run clean.
+
+**Cost:** 2 jobs (one failed, one clean), 7:16 + 8:08 = **0.26 node hours**. Running total for all
+CPM screening: **2.7 of 24**, 71,976 evaluations.

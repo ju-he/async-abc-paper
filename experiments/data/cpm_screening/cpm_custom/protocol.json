@@ -1,0 +1,65 @@
+{
+  "blocksize": 50,
+  "timesteps": 501,
+  "write_every": 50,
+  "extract_from": 300,
+  "bins": [
+    8,
+    16,
+    32
+  ],
+  "n_ranks": 48,
+  "candidates": {
+    "division_rate": {
+      "path": "define_functions.division_cond_cancer[1]",
+      "lo": 0.001,
+      "hi": 0.2,
+      "scale": "log",
+      "centre": 0.009,
+      "integer": false
+    },
+    "surface_lambda": {
+      "path": "CellsInSilico.surface.lambda_[9]",
+      "lo": 0.25,
+      "hi": 8.0,
+      "scale": "log",
+      "centre": 1.0,
+      "integer": false
+    },
+    "persistence": {
+      "path": "CellsInSilico.orientation.persistenceMagnitude",
+      "lo": 0.01,
+      "hi": 0.99,
+      "scale": "lin",
+      "centre": 0.834,
+      "integer": false
+    },
+    "cell_volume": {
+      "path": "CellsInSilico.volume.default.value",
+      "lo": 200,
+      "hi": 1200,
+      "scale": "log",
+      "centre": 500,
+      "integer": true
+    },
+    "temperature": {
+      "path": "CellsInSilico.temperature",
+      "lo": 15,
+      "hi": 150,
+      "scale": "log",
+      "centre": 50,
+      "integer": true
+    },
+    "recalc_time": {
+      "path": "CellsInSilico.orientation.recalculationtime",
+      "lo": 2,
+      "hi": 60,
+      "scale": "log",
+      "centre": 15,
+      "integer": true
+    }
+  },
+  "fixed": {
+    "motility": 1400
+  }
+}

@@ -242,6 +242,107 @@ def candidate_snapshot() -> Dict[str, Dict[str, Any]]:
     return {name: {k: v for k, v in spec.items() if k != "drives"}
             for name, spec in CANDIDATES.items()}
 
+# Blocks computed here rather than by nastjapy, from columns every CellInfo CSV
+# already carries and no shipped block reads.  All are INTENSIVE by construction --
+# proportions, coefficients of variation, or dimensionless ratios -- which is the
+# property the whole shipped feature set lacks: measured over eleven configurations,
+# every one of its blocks moves with population size.
+#
+#   cell_shape_index         Surface / Volume^(2/3) per cell, mean and CV. The only
+#                            statistic here that sees a CELL rather than an arrangement,
+#                            and the direct observable of surface.lambda and temperature.
+#   cell_volume_dispersion   CV of cell volume: how tightly volume is held.
+#   motility_order           polar and nematic order of the per-cell motility directions.
+#                            persistence and recalculationtime control exactly this and
+#                            nothing in the shipped set looks at direction at all.
+#   aggregation_omega        sum n_i^2 / sum n_i over contact components, over N. The
+#                            sibling campaign's aggregation index: 1/N is a haze of
+#                            singletons, 1 is one blob.
+#   outer_fraction           cells outside the largest contact component.
+#   radial_variance_fraction mean over outer components of the fraction of a component's
+#                            own spatial variance lying along its outward direction. The
+#                            campaign's estimator, whose null median is free of component
+#                            size (0.296 at n=3, 0.332 at n=62) -- size-invariant by
+#                            construction rather than by normalisation.
+CUSTOM_BLOCKS = ("cell_shape_index", "cell_volume_dispersion", "motility_order",
+                 "aggregation_omega", "outer_fraction", "radial_variance_fraction")
+# Contact radius as a multiple of the cloud's own median nearest-neighbour distance,
+# so the graph is scale-free in the same way the features are.
+CONTACT_SCALE = 1.5
+
+
+def custom_features(frame: Any) -> Dict[str, List[float]]:
+    """Intensive per-cell and structural features for one snapshot."""
+    from scipy.sparse.csgraph import connected_components
+    from scipy.sparse import coo_matrix
+    from scipy.spatial import cKDTree
+
+    position = frame[["CenterX", "CenterY", "CenterZ"]].to_numpy(dtype=float)
+    n = len(position)
+    out: Dict[str, List[float]] = {}
+    if n < 4:
+        return out  # below this nothing here means anything; the row is simply absent
+
+    volume = frame["Volume"].to_numpy(dtype=float)
+    surface = frame["Surface"].to_numpy(dtype=float)
+    good = (volume > 0) & np.isfinite(surface)
+    if good.sum() >= 3:
+        shape = surface[good] / np.cbrt(volume[good]) ** 2
+        mean_shape = float(np.mean(shape))
+        out["cell_shape_index"] = [mean_shape,
+                                   float(np.std(shape) / mean_shape) if mean_shape > 0 else 0.0]
+        mean_volume = float(np.mean(volume[good]))
+        out["cell_volume_dispersion"] = [float(np.std(volume[good]) / mean_volume)
+                                         if mean_volume > 0 else 0.0]
+
+    direction = frame[["MotilityDirX", "MotilityDirY", "MotilityDirZ"]].to_numpy(dtype=float)
+    norm = np.linalg.norm(direction, axis=1)
+    moving = norm > 1e-9
+    if moving.sum() >= 3:
+        unit = direction[moving] / norm[moving, None]
+        polar = float(np.linalg.norm(unit.mean(axis=0)))
+        # Nematic order: largest eigenvalue of the Q tensor, 0 isotropic, 1 aligned.
+        q = (3.0 * (unit[:, :, None] * unit[:, None, :]).mean(axis=0) - np.eye(3)) / 2.0
+        out["motility_order"] = [polar, float(np.max(np.linalg.eigvalsh(q)))]
+
+    tree = cKDTree(position)
+    nearest = tree.query(position, k=2)[0][:, 1]
+    radius = CONTACT_SCALE * float(np.median(nearest))
+    if not np.isfinite(radius) or radius <= 0:
+        return out
+    pairs = tree.query_pairs(radius, output_type="ndarray")
+    if len(pairs):
+        graph = coo_matrix((np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(n, n))
+    else:
+        graph = coo_matrix((n, n))
+    _count, labels = connected_components(graph, directed=False)
+    sizes = np.bincount(labels)
+    out["aggregation_omega"] = [float(np.sum(sizes ** 2) / np.sum(sizes) / n)]
+    core = int(np.argmax(sizes))
+    out["outer_fraction"] = [float((n - sizes[core]) / n)]
+
+    centre = position[labels == core].mean(axis=0) if sizes[core] else position.mean(axis=0)
+    fractions = []
+    for label in range(len(sizes)):
+        if label == core or sizes[label] < 3:
+            continue
+        points = position[labels == label]
+        outward = points.mean(axis=0) - centre
+        length = np.linalg.norm(outward)
+        if length <= 0:
+            continue
+        centred = points - points.mean(axis=0)
+        total = float(np.sum(centred ** 2))
+        if total <= 0:
+            continue
+        along = float(np.sum((centred @ (outward / length)) ** 2))
+        fractions.append(along / total)
+    # 1/3 is the isotropic expectation, so an empty periphery reports "isotropic"
+    # rather than dropping the block and desynchronising the corpus.
+    out["radial_variance_fraction"] = [float(np.mean(fractions)) if fractions else 1.0 / 3.0]
+    return out
+
+
 # Radial bin counts to extract for every snapshot.  32 is the shipped value.
 BIN_COUNTS = (8, 16, 32)
 # Features whose metadata carries an ``n_bins`` entry.
@@ -298,7 +399,7 @@ TRAJECTORY_BLOCKS = {
 DEFAULT_EXTRA_BLOCKS = ("radial_linearity_equal_volume", "radial_planarity_equal_volume",
                         "radial_sphericity_equal_volume", "invasion_ratio",
                         "surface_roughness", "growth_model_r", "growth_model_K",
-                        "msd", "non_gaussian_parameter")
+                        "msd", "non_gaussian_parameter") + CUSTOM_BLOCKS
 
 EXTRA_BLOCKS = {
     "radial_linearity_equal_volume": 0.88,
@@ -468,7 +569,8 @@ def bin_metadata(n_bins: int, *, extras: Any = False) -> Dict[str, Dict[str, Any
     if extras:
         template = metadata["radial_fa_equal_volume"]
         wanted = set(extras) if extras is not True else set(DEFAULT_EXTRA_BLOCKS)
-        unknown = wanted - set(EXTRA_BLOCKS) - set(CAMPAIGN_BLOCKS) - set(TRAJECTORY_BLOCKS)
+        unknown = (wanted - set(EXTRA_BLOCKS) - set(CAMPAIGN_BLOCKS)
+                   - set(TRAJECTORY_BLOCKS) - set(CUSTOM_BLOCKS))
         if unknown:
             raise KeyError(f"unknown extra blocks {sorted(unknown)}")
         for name in wanted:
@@ -476,6 +578,8 @@ def bin_metadata(n_bins: int, *, extras: Any = False) -> Dict[str, Dict[str, Any
                 metadata[name] = dict(template, explained_var=EXTRA_BLOCKS[name])
             elif name in CAMPAIGN_BLOCKS:
                 metadata[name] = dict(CAMPAIGN_BLOCKS[name])
+            elif name in CUSTOM_BLOCKS:
+                metadata[name] = {}
             else:
                 metadata[name] = dict(TRAJECTORY_BLOCKS[name])
     return metadata
@@ -553,7 +657,16 @@ def extract_corpus_row(sim_dir: Path, *, bins: Sequence[int], extract_from: int,
                 array = np.asarray(arrays[-1], dtype=float).ravel()
                 if array.size and np.isfinite(array).all():
                     features[name] = [float(x) for x in array]
-            n_cells = int(len(handler.data[next(iter(handler.data))])) if handler.data else 0
+            # NOT named `frame`: that is the loop's integer frame index, and shadowing
+            # it fed a DataFrame back in as `timestep_range` on the next bin count.
+            snapshot = handler.data[next(iter(handler.data))] if handler.data else None
+            n_cells = int(len(snapshot)) if snapshot is not None else 0
+            # Recomputed per bin count although they do not depend on it: a KD-tree
+            # over ~50 points is far cheaper than desynchronising the corpus by
+            # attaching them to only one of the three bin variants.
+            for name, values in (custom_features(snapshot) if snapshot is not None else {}).items():
+                if np.isfinite(values).all():
+                    features[name] = [float(v) for v in values]
             rows.append(dict(frame=frame, tstep=int(tstep), bins=int(n_bins),
                              n_cells=n_cells, features=features))
             del handler
