@@ -430,3 +430,59 @@ configuration mistake from an algorithmic limitation.
 Incidental: at `tol_init` 0.01 the sampler is genuinely better *early* (eps 0.0022 at n=1000 against
 0.005 at 10.0, 2.3x tighter) because the kernel concentrates from the start; it washes out by
 n=12,000. On a budget-limited expensive run that early advantage is worth something.
+
+---
+
+# Archive size, and a correction to the simulation-ratio claim
+
+## The two benchmarks are in different regimes, and I assumed the wrong one
+
+`eps` was measured throughout as the k-th order statistic, so both its k- and n-scaling are
+measurable rather than assumed. Measured:
+
+| | rejection eps vs n | eps vs k | regime |
+|---|---|---|---|
+| **CPM** | **n^-1.01** | k^+0.99 | **noise-dominated** — positive density at rho=0, effective dim 1 |
+| **g-and-k** | **n^-0.24** | k^+0.28 | **geometry-dominated** — d=4, exactly as theory predicts |
+
+**Correction.** Earlier in this document the tolerance ratio was converted to a simulation ratio
+through acceptance ~ eps^d, giving "~2,300x" for CPM. That conversion assumes geometry-dominated
+scaling. CPM is not: eps ~ k/n, so the simulation ratio *equals* the tolerance ratio. The correct
+figure is **~53x, not 2,300x**. The g-and-k figure stands (measured n^-0.24 gives ~4,600x against
+the ~3,000x estimated). Measure the baseline's scaling; do not infer it from dimension.
+
+**Also retract** the suggestion that the g-and-k advantage "erodes with more compute". The exponent
+gap is 0.24 against 0.18, so closing a 7.4x lead takes e^33 more compute. True in sign, irrelevant
+in practice.
+
+## The advantage is robust to k
+
+At a matched 12,000-evaluation budget on CPM:
+
+| k | async eps | rejection eps | advantage |
+|---|---|---|---|
+| 10 | 6.6e-06 | 3.6e-04 | 54x |
+| 30 | 2.1e-05 | 1.1e-03 | 51x |
+| 100 | 6.7e-05 | 3.6e-03 | 53x |
+| 300 | 2.0e-04 | 9.8e-03 | 49x |
+| 1000 | 7.7e-04 | 3.4e-02 | 44x |
+
+Stable over two decades of k, so no comparison here is a k=100 artefact. The async exponent steepens
+mildly with k (-1.38 at k=10 to -1.75 at k=1000).
+
+## Where k does bite — and it contradicts the paper's own advice
+
+§Limitations says *"Raising k raises the effective sample proportionally and is the obvious lever."*
+That is half the story. ESS scales with k, but the reported bandwidth is the k-th order statistic and
+so loosens as k^(1/d_eff):
+
+* **CPM (d_eff ~ 1): doubling k doubles eps.** Particles are bought one-for-one with resolution. The
+  "obvious lever" is close to free of net benefit here, and may be harmful.
+* **g-and-k (d = 4): eps ~ k^0.28.** Doubling k costs 21% in bandwidth for 100% more ESS — a genuine
+  bargain, which is presumably the case the advice was written from.
+
+So the advice is benchmark-dependent and the paper states it unconditionally. Two further effects
+need a run rather than arithmetic: k sets the proposal breadth (so it changes where the sampler
+draws, not merely how it reports), and `bisect_interval` defaults to k, so raising k lengthens the
+bandwidth transient. Jobs **14262269** (k=30) and **14262270** (k=300) sweep it at `tol_init` 0.1
+against the validated k=100.
