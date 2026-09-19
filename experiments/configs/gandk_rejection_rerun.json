@@ -1,0 +1,78 @@
+{
+  "experiment_name": "gandk_rejection_rerun",
+  "benchmark": {
+    "name": "gandk",
+    "observed_data_seed": 42,
+    "n_obs": 1000,
+    "true_A": 3.0,
+    "true_B": 1.0,
+    "true_g": 2.0,
+    "true_k": 0.5
+  },
+  "methods": [
+    "rejection_abc"
+  ],
+  "inference": {
+    "max_simulations": 50000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 10.0,
+    "n_generations": 1000,
+    "max_wall_time_s": 600,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20,
+    "_comment_method_overrides": [
+      "rejection_abc thresholds at tol_init and stops at k accepted, while the",
+      "asynchronous scheduler treats tol_init as a STARTING bandwidth and tightens",
+      "from there. At the shared value this arm accepted 85.9% of prior draws and",
+      "stopped after ~100 evaluations, so its reported posterior was the prior.",
+      "The override is the tolerance at which the budget yields k accepted: 0.2% of prior draws (k=100 of the 50,000 budget).",
+      "Measured, not guessed -- see .plans/cpm_dimension_and_bandwidth_study_2026-09-19.md."
+    ],
+    "_comment_rejection": [
+      "rejection_abc reports the k closest of everything it evaluates",
+      "(rejection_mode defaults to best_k), so it needs no tolerance constant and",
+      "reports at the k-th order statistic of its own draws -- the same rule the",
+      "asynchronous arm uses. Before 2026-09-19 it thresholded at the shared",
+      "tol_init, which the asynchronous scheduler needs LOOSE because it treats it",
+      "as a starting bandwidth; at that value this arm accepted most of the prior",
+      "and stopped after ~100 evaluations, reporting a prior sample."
+    ]
+  },
+  "execution": {
+    "n_replicates": 5,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
+  },
+  "analysis": {
+    "target_wasserstein": 1.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  },
+  "_comment": [
+    "Rejection-arm rerun only. rejection_abc changed on 2026-09-19 from",
+    "thresholding at the shared tol_init (which admitted 86-99% of prior draws,",
+    "so it stopped after ~100 evaluations and reported a prior sample) to",
+    "reporting the k closest of its whole budget. The asynchronous and",
+    "synchronous arms are byte-identical to before, so only this one is re-run.",
+    "Separate config because a full-config run of this benchmark does not fit",
+    "one node: the asynchronous arm on a near-instantaneous simulator reaches",
+    "~1.9GB per rank within 60s and 48 ranks exhaust a 94GB node."
+  ]
+}
