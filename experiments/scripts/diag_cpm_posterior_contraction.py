@@ -109,11 +109,55 @@ def load_rows(results_csv: Path) -> List[Dict[str, str]]:
         return list(csv.DictReader(f))
 
 
+def replay_reported_posterior(group: Sequence[Dict], names: Sequence[str],
+                              inference_cfg: Dict, prefix: int):
+    """Reported posterior over the first ``prefix`` arrivals of one run.
+
+    The stored ``posterior_weight`` column is the estimator over the WHOLE
+    history; restricting it to a prefix is not the same thing, because the
+    cumulative-mixture denominator has fewer components over a prefix. So the
+    prefix is replayed through ``extract_posterior`` rather than sliced -- which
+    is how a budget-matched comparison against a fixed-size rejection corpus has
+    to be made.
+    """
+    from async_abc.analysis.reported_posterior import reported_posterior
+    from async_abc.io.records import ParticleRecord
+
+    def arrival(row: Dict) -> float:
+        end = row.get("sim_end_time") or ""
+        return float(end) if end else float(row["step"])
+
+    ordered = sorted(group, key=arrival)[:prefix]
+    records = [
+        ParticleRecord(
+            method=row["method"], replicate=int(row["replicate"]),
+            seed=int(row["seed"]), step=index + 1,
+            params={n: float(row[f"param_{n}"]) for n in names},
+            loss=float(row["loss"]),
+            weight=float(row["weight"]) if row["weight"] else None,
+            tolerance=float(row["tolerance"]) if row["tolerance"] else None,
+            proposal_tolerance=(float(row["proposal_tolerance"])
+                                if row["proposal_tolerance"] else None),
+        )
+        for index, row in enumerate(ordered)
+    ]
+    limits = {n: (0.0, 1.0) for n in names}
+    return reported_posterior(
+        records, limits,
+        k=int(inference_cfg.get("k", 100)),
+        kernel=str(inference_cfg.get("kernel", "gaussian")),
+        scheduler_type=str(inference_cfg.get("scheduler_type", "quantile")),
+        amis_snapshots=int(inference_cfg.get("amis_snapshots", 20)),
+        perturbation_scale=float(inference_cfg.get("perturbation_scale", 0.8)),
+    )
+
+
 def run(results_csv: Path, config_path: Path, *, top_k: int,
-        methods: Sequence[str] | None) -> Dict:
+        methods: Sequence[str] | None, prefix: int | None = None) -> Dict:
     with open(config_path) as f:
         cfg = json.load(f)
     benchmark_cfg = cfg["benchmark"]
+    inference_cfg = cfg.get("inference", {})
     rows = load_rows(results_csv)
     if not rows:
         raise ValueError(f"{results_csv} has no rows")
@@ -151,6 +195,13 @@ def run(results_csv: Path, config_path: Path, *, top_k: int,
             sub = theta[finite][best]
             entry["top_k"] = summarise(sub, np.ones(len(sub)), truth, names)
             _print(f"top-{top_k} archive", entry["top_k"], names, forecast)
+        if prefix and len(group) > prefix:
+            positions, weights = replay_reported_posterior(
+                group, names, inference_cfg, prefix)
+            if len(positions) > 2:
+                entry["prefix"] = summarise(positions, weights, truth, names)
+                _print(f"reported over the first {prefix} arrivals",
+                       entry["prefix"], names, forecast)
         print()
         results[f"{method}_rep{replicate}"] = entry
     return {"truth": {n: float(t) for n, t in zip(names, truth)},
@@ -181,10 +232,14 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=100,
                         help="archive size for the unweighted cross-check")
     parser.add_argument("--methods", nargs="*", default=None)
+    parser.add_argument("--prefix", type=int, default=None,
+                        help="also replay the reported estimator over the first N "
+                             "arrivals, for a budget-matched comparison")
     parser.add_argument("--json", type=Path, default=None,
                         help="also write the numbers here")
     args = parser.parse_args()
-    out = run(args.results, args.config, top_k=args.top_k, methods=args.methods)
+    out = run(args.results, args.config, top_k=args.top_k, methods=args.methods,
+              prefix=args.prefix)
     if args.json:
         args.json.write_text(json.dumps(out, indent=2) + "\n")
         print(f"wrote {args.json}")
