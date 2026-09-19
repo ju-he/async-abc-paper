@@ -895,14 +895,17 @@ class CellularPotts:
         # replaces ``reference_data`` with a plain feature container.
         reference_data = getattr(self, "_reference_handlers", [])
         for datahandler in reference_data:
-            # nastjapy's DataHandler keeps an internal sqlite connection in the
-            # private ``_SimDir__con`` attribute.  There is no public close() API;
-            # this is a known workaround.  File an upstream nastjapy issue if the
-            # attribute disappears and this warning fires.
-            conn = getattr(datahandler, "_SimDir__con", _SENTINEL)
+            # The sqlite connection belongs to nastjapy's SimDir, which the
+            # DataHandler holds as ``sim_dir``; it is private there
+            # (``_SimDir__con``) and there is no public close() API, so this is a
+            # known workaround. A CSV-backed reference never opens one (``__con``
+            # stays 0), which is the usual case for CPM. File an upstream nastjapy
+            # issue if the attribute disappears and this warning fires.
+            owner = getattr(datahandler, "sim_dir", None) or datahandler
+            conn = getattr(owner, "_SimDir__con", _SENTINEL)
             if conn is _SENTINEL:
                 logger.warning(
-                    "Cannot close CPM reference-data connection: nastjapy DataHandler "
+                    "Cannot close CPM reference-data connection: nastjapy SimDir "
                     "no longer exposes '_SimDir__con'. Resource leak possible. "
                     "Request a public close() API from nastjapy."
                 )

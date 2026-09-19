@@ -1416,6 +1416,37 @@ class TestCPMAveragedReference:
                 _sim_manager=MagicMock(), _distance_metric=metric,
             )
 
+    def test_close_reaches_the_connection_through_sim_dir(self, cpm_config, caplog):
+        """The sqlite connection belongs to nastjapy's SimDir, not to the
+        DataHandler: looking for ``_SimDir__con`` on the handler itself found
+        nothing and warned on every close."""
+        import logging
+        from async_abc.benchmarks.cellular_potts import CellularPotts
+
+        class _SimDir:
+            def __init__(self):
+                self.closed = False
+                self._SimDir__con = self
+
+            def close(self):
+                self.closed = True
+
+        class _Handler:
+            def __init__(self):
+                self.features, self.feature_metadata = {}, {}
+                self.sim_dir = _SimDir()
+
+        handlers = [_Handler(), _Handler()]
+        metric = MagicMock()
+        metric.reference_data = list(handlers)
+        benchmark = CellularPotts(cpm_config, _sim_manager=MagicMock(),
+                                  _distance_metric=metric)
+        with caplog.at_level(logging.WARNING,
+                             logger="async_abc.benchmarks.cellular_potts"):
+            benchmark.close()
+        assert all(handler.sim_dir.closed for handler in handlers)
+        assert not [r for r in caplog.records if "Cannot close" in r.getMessage()]
+
     def test_close_still_closes_the_original_reference_handlers(self, cpm_config):
         from async_abc.benchmarks.cellular_potts import CellularPotts
 

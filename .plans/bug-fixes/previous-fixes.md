@@ -784,3 +784,29 @@ seed replicates expands to all three in order, and a lone reference directory st
 
 **Found by** building the proposed `cellular_potts_division_only` setup, whose four-seed reference is
 the first use of the container layout in this repo. Any earlier multi-seed reference would have hit it.
+
+---
+
+## CPM reference connections were never closed, and said so on every run (2026-09-19)
+
+**Symptom.** `CellularPotts.close()` logged "Cannot close CPM reference-data connection: nastjapy
+DataHandler no longer exposes '_SimDir__con'. Resource leak possible." once per reference replicate,
+on every run, on a stock checkout.
+
+**Cause.** The guard looked for `_SimDir__con` on the `DataHandler`. That attribute belongs to
+nastjapy's `SimDir` (`src/data/io.py`), which the `DataHandler` *holds* as `self.sim_dir` — so the
+lookup could never succeed and the close could never happen. The warning was written to fire when
+nastjapy changed; it fired because the attribute was being sought on the wrong object all along.
+
+**Fix.** Look on `datahandler.sim_dir` first, falling back to the handler itself, and warn only when
+neither exposes it (`benchmarks/cellular_potts.py`).
+
+**Blast radius: none for the CPM results.** These references load through CSV, where `SimDir.__con`
+stays `0` and there is no connection to leak. A `.sqlite`-backed reference would have leaked one
+connection per replicate per benchmark instance.
+
+**Tests.** `test_close_reaches_the_connection_through_sim_dir` in `tests/test_benchmarks.py`: a
+handler whose `sim_dir` carries the connection is closed, and no warning is logged.
+
+**Found by** running the two-parameter CPM setup end to end locally, where the warning appeared four
+times (once per reference seed) in an otherwise clean log.
