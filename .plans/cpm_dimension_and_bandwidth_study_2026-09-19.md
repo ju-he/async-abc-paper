@@ -267,3 +267,47 @@ The CPM posterior comparison is winnable and honest, but only with the bandwidth
 48x tolerance ratio as the primary quantity. And the direction of travel for a decisive margin is
 still dimension, since rejection's cost to a fixed posterior grows like eps^-d and we are already 48x
 ahead in eps.
+
+---
+
+# Route E, properly tested (job 14262079): no third direction, and now we know why
+
+3,108 evaluations at 80³ / t=1001 with `division_rate` in the calibrated band. **Median 313 cells
+against the 50³ baseline's ~49** — 6.4x — at 24% fill (p90 51%), so nothing saturates. This is the
+test the first screen failed to be.
+
+| parameter | identifiability 50³ → 80³ | confounding with division_rate |
+|---|---|---|
+| `cell_volume` | 14.0 → **46.2** | 0.15 |
+| `division_rate` | 21.9 → 15.6 | — |
+| `surface_lambda` | 6.1 → **10.5** | **0.81 → 0.98** |
+| `persistence` | 2.0 → 2.2 | 0.00 → 0.91 |
+| `adhesion_cl` | 1.7 → 2.2 | 0.05 → 0.48 |
+
+**`surface_lambda` cleared the strength bar exactly as predicted and is still useless.** More cells
+made it visible (6.1 → 10.5, comfortably past the ≳10 threshold) and simultaneously drove its
+confounding with `division_rate` from 0.81 to **0.98** — perfectly parallel. `adhesion_cl` and
+`persistence` lost the orthogonality that made them candidates at all.
+
+**More cells sharpens the coupling rather than breaking it.** The saturation hypothesis was wrong:
+nothing saturates here, and the responses are *more* aligned, not less, because with a larger
+population the growth dynamics dominate the summary even more completely. Anything that changes how
+cells pack changes how fast the cluster grows, and at 313 cells that chain is tighter than at 49.
+
+**Route E is now tested and fails.** All four routes to a third direction are closed: better campaign
+features, MSD, per-cell statistics, and now cell count. The campaign's general result holds and is
+now established at 6.4x the population: *every mechanism in this model except cell size ultimately
+expresses itself through how many cells there are.* `cell_volume` works because it is the one knob
+that changes the cluster's radius without changing its count.
+
+**CPM is a two-parameter benchmark. That is final** — not for want of screening, but as a property of
+the model at this scale.
+
+**What the screen does deliver.** The two-parameter setup is far stronger at 80³: `cell_volume`
+identifiability **46.2 against 14.0**, and it is now carried by `radial_density_profile` (94%) rather
+than borrowed from the scalars. With an 8x more expensive simulation that is a better *systems*
+benchmark and a better two-parameter posterior — it is just not a third parameter.
+
+**So the decisive-margin-by-dimension route on CPM is closed.** It lives on the 4-D g-and-k instead,
+where rejection ABC's cost to a fixed posterior grows like eps^-d and we are already 48x ahead in eps
+on a 2-D target.
