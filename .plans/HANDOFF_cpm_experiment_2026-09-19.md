@@ -1,6 +1,13 @@
 # Handoff — build and run the better CPM experiment
 
-**Written 2026-09-19.** Start a fresh session with this file.
+**Written 2026-09-19. PARTLY SUPERSEDED the same day: jobs 1 and 2 are done.** Read
+`.plans/cpm_two_param_validation_2026-09-19.md` first — replicate averaging is wired and the
+forecast is confirmed on a real run (90%/58% contraction, truth covered). Only **job 3**, the
+paper rewrite, is still open, and the validation document lists three measured facts that change
+how it should be written. Two claims below are now known to be wrong: the ~4 node hour estimate
+(it is ~10.5, because `max_simulations` is inert under a wall-time cap) and "rejection ABC is a
+lower bound on what the adaptive sampler achieves per simulation" (true of the archive, false of
+the reported estimator).
 
 ## Where things stand
 
