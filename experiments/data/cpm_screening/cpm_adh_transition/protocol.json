@@ -1,0 +1,29 @@
+{
+  "blocksize": 50,
+  "timesteps": 501,
+  "write_every": 100,
+  "extract_from": 300,
+  "bins": [
+    8,
+    16,
+    32
+  ],
+  "n_ranks": 48,
+  "candidates": {
+    "adhesion_cl": {
+      "path": [
+        "CellsInSilico.adhesion.matrix[9][1]",
+        "CellsInSilico.adhesion.matrix[1][9]"
+      ],
+      "lo": 25,
+      "hi": 110,
+      "scale": "lin",
+      "centre": 51,
+      "integer": true
+    }
+  },
+  "fixed": {
+    "motility": 2500,
+    "division_rate": 0.009
+  }
+}

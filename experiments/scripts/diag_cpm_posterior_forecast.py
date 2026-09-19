@@ -42,7 +42,26 @@ SIZE_BLOCKS = ("log_n", "log_r95")
 PRIOR_SD = 1.0 / np.sqrt(12.0)
 
 
-def build_weights(scheme: str, blocks: Sequence[str]) -> Dict[str, float]:
+def build_weights(scheme: str, blocks: Sequence[str],
+                  explicit: Sequence[str] | None = None) -> Dict[str, float]:
+    """Block weights as shares of the distance budget.
+
+    ``explicit`` overrides the named scheme with ``block=weight`` pairs, renormalised.
+    It exists because the best weighting depends on WHICH parameter is being inferred:
+    the two size scalars are right for division_rate and throw away the block that
+    carries adhesion.
+    """
+    if explicit:
+        chosen: Dict[str, float] = {}
+        for item in explicit:
+            name, _, value = item.partition("=")
+            if name not in blocks:
+                raise KeyError(f"'{name}' is not a block in this corpus; have {sorted(blocks)}")
+            chosen[name] = float(value)
+        total = sum(chosen.values())
+        if total <= 0:
+            raise ValueError("--weights must sum to something positive")
+        return {k: v / total for k, v in chosen.items()}
     if scheme == "equal":
         return {b: 1.0 / len(blocks) for b in blocks}
     if scheme == "scalars":
@@ -74,7 +93,8 @@ def summarise(theta: np.ndarray, truth: np.ndarray, names: Sequence[str]) -> Dic
 
 def run(out_dir: Path, *, scheme: str, seeds: int, bins: int, tstep: int | None,
         acceptances: Sequence[float], fit_seed: int,
-        reference_mode: str = "median", reference_draws: int = 1) -> Dict[str, Any]:
+        reference_mode: str = "median", reference_draws: int = 1,
+        explicit_weights: Sequence[str] | None = None) -> Dict[str, Any]:
     from async_abc.benchmarks.cellular_potts import _ensure_nastjapy_on_path
 
     _ensure_nastjapy_on_path()
@@ -100,7 +120,7 @@ def run(out_dir: Path, *, scheme: str, seeds: int, bins: int, tstep: int | None,
     zs, blocks = result["zs"], result["blocks"]
     block_norms, z_ref = result["block_norms"], result["z_ref"]
     names = list(screening.CANDIDATES)
-    weights = build_weights(scheme, blocks)
+    weights = build_weights(scheme, blocks, explicit_weights)
 
     reference = next(i for i, e in points.items() if e["meta"]["stratum"] == "reference")
     truth = np.asarray([screening._to_unit(n, float(points[reference]["meta"]["params"][n]))
@@ -136,7 +156,8 @@ def run(out_dir: Path, *, scheme: str, seeds: int, bins: int, tstep: int | None,
     order = np.argsort(rho)
 
     print(f"# Posterior forecast -- {out_dir.name}")
-    print(f"weighting '{scheme}' over {len(weights)} of {len(blocks)} blocks, "
+    print(f"weighting '{'custom' if explicit_weights else scheme}' over "
+          f"{len(weights)} of {len(blocks)} blocks, "
           f"{seeds} seed(s) per evaluation, snapshot t={tstep}, "
           f"{len(theta)} prior draws, reference = {reference_mode}"
           + (f" (x{len(references)} realisations)" if len(references) > 1 else "") + "\n")
@@ -194,6 +215,9 @@ def main(argv: List[str] | None = None) -> None:
     parser.add_argument("--acceptance", type=float, nargs="+",
                         default=[0.20, 0.10, 0.05, 0.02, 0.01])
     parser.add_argument("--fit-seed", type=int, default=0)
+    parser.add_argument("--weights", action="append", default=None, metavar="BLOCK=W",
+                        help="explicit block weights, renormalised; overrides "
+                             "--weighting (repeatable)")
     parser.add_argument("--reference", choices=["median", "single"], default="median",
                         help="'median' pools every reference replicate (an idealised "
                              "low-noise observation); 'single' uses one reference "
@@ -209,7 +233,8 @@ def main(argv: List[str] | None = None) -> None:
     out_dir = Path(args.out).resolve()
     report = run(out_dir, scheme=args.weighting, seeds=args.seeds_per_eval, bins=args.bins,
                  tstep=args.tstep, acceptances=args.acceptance, fit_seed=args.fit_seed,
-                 reference_mode=args.reference, reference_draws=args.reference_draws)
+                 reference_mode=args.reference, reference_draws=args.reference_draws,
+                 explicit_weights=args.weights)
     name = (args.report
             or f"posterior_forecast_{args.weighting}_k{args.seeds_per_eval}"
                f"_{args.reference}.json")

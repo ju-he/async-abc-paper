@@ -182,3 +182,99 @@ feature-engineering problem at a larger cell count, not a sweep.
 failures. Running total for the CPM screening work: **1.4 of the 24 authorised node hours**. Corpora
 archived to `/p/scratch/tissuetwin/herold2/async-abc/cpm_*.tar.gz`; scratch left with 9 archive files
 and no directories.
+
+---
+
+# Addendum — other parameter combinations, including adhesion at high motility
+
+**Asked 2026-09-19:** were other pairs explored, e.g. division and adhesion at a fixed and
+probably rather high motility? Fairly: **no.** Every adhesion screen to that point held motility at
+its centre. Pooled over every corpus that varied it, motility reached at most 3830 with a median of
+~650, against a shipped prior ceiling of 10000. The regime the question names had never been
+visited, and the hypothesis behind it is sound — at low motility a cluster stays cohesive whatever
+J is, so adhesion can only express itself once cells have the motile energy to work against the
+surface tension.
+
+Seven further screens, **31,096 evaluations, 0.76 node hours**, all at 50³ with the protocol above.
+
+## The interaction is real, and it is what destroys the model
+
+The same six mechanics parameters screened at motility held **low** and **high**:
+
+| | motility = 500 | motility = 6000 |
+|---|---|---|
+| median cells at t=500 | 49 | **13** |
+| evaluations below 20 cells | 27% | **74%** |
+| adhesion_cl identifiability | 0.00 | **1.18** |
+| adhesion_cc identifiability | 0.00 | 0.73 |
+| division_rate identifiability | 14.9 | 11.0 |
+
+So adhesion does become visible at high motility — and the mechanism that reveals it is the
+mechanism that evaporates the cluster. High motility plus weak adhesion disperses the population
+before it can grow, and three quarters of the prior lands where the summaries mean nothing. There is
+no window in which adhesion is both visible and the model measurable. (Note the collapse is the
+*interaction*, not motility alone: pooled over corpora at template adhesion, median cell count falls
+only from 71 to 38 across the whole motility range.)
+
+## Pairs screened, and what each posterior does
+
+Forecast by `diag_cpm_posterior_forecast.py`, four replicate seeds, 5% acceptance, twelve
+independent references, two-scalar weighting except where noted:
+
+| setup | first parameter | second parameter | confounding |
+|---|---|---|---|
+| **`division_rate` alone** | **91%** | — | — |
+| `division_rate` × `motility` | 78% | **−13%** | 0.86 |
+| `division_rate` × `adhesion_cl`, M = 2500 | 90% | **6%** | **0.05** |
+| `division_rate` × `adhesion_cl`, prior narrowed to [110, 230] | — | identifiability **0.00** | 0.05 |
+| `division_rate` × `surface_lambda`, M = 1400 | 78% | **7%** | 0.17 |
+| `motility` × `adhesion_cl`, division fixed | **45%** | **1%** | 0.10 |
+| `adhesion_cl` alone at its transition, everything else fixed | **1%** | — | — |
+
+Contraction is 1 − sd_post/sd_prior; the first column is the parameter named first.
+
+**Adhesion is genuinely orthogonal — and that is not enough.** `adhesion_cl` sits at |cos| 0.05 to
+division_rate and 0.10 to motility, the only thing found in this whole campaign that is off the
+population-size axis, and it is carried by `radial_fa_equal_volume` (86%) rather than by the
+scalars. But orthogonal and weak is still unusable: 6% contraction beside division, 1% on its own.
+No weighting rescues it — `radial_fa` alone, and three mixed weightings, all leave it at −3% to 2%
+while costing division_rate 30 to 90 points.
+
+**Narrowing its prior made it worse, and that located the real transition.** [110, 230] centred on
+the template J_cl = 151 took identifiability from 1.73 to 0.00. The weak signal in the wide prior was
+coming from the bottom end, which is where the physics says it should: the surface tension is
+γ = J_cl − J_cc/2 = J_cl − 51.5, zero at J_cl ≈ 51, not 151. The motility × adhesion screen had
+independently put the responsive window at [37, 71], bracketing it. So the fairest possible test is
+adhesion alone, prior [25, 110] straddling the transition, motility and division both fixed — and it
+gives **1% contraction**. That is the answer: adhesion is not identifiable from these summaries at
+this scale, at the transition or away from it, at low motility or high.
+
+**`motility` is identifiable once `division_rate` is fixed** — 45%, against −13% when both are free.
+Its failure really is the ridge and nothing else.
+
+## What this changes in how the screen is read
+
+Comparing identifiability against posterior contraction across eleven configurations calibrates the
+score, and the threshold quoted from the handoff was far too generous:
+
+| identifiability | measured contraction |
+|---|---|
+| ≳ 10 | 85–93% |
+| 3–4 | 45% if unconfounded, 0% if confounded with a stronger parameter |
+| ≲ 2 | 0–7% |
+
+"A parameter scoring below 1 will not be identified" is true but nearly vacuous. **A parameter needs
+roughly 10, and low confounding, before its posterior contracts usefully.** Every earlier table in
+these documents that flagged a score of 1–4 as promising should be read with that in mind.
+
+## Verdict
+
+The one-parameter proposal stands, now tested against seven further candidate configurations rather
+than assumed. If a second reported parameter is wanted for presentation, `division_rate × adhesion_cl`
+at M = 2500 is the least damaging pair — division keeps 90% against 91% alone, where motility costs
+it 13 points and surface_lambda 13 — but adhesion's own 6% is not an inference result and should not
+be presented as one.
+
+**Cost:** 7 jobs, 1 node each, 6:49 + 5:37 + 6:15 + 6:43 + 6:53 + 7:29 + 5:59 = **0.76 node hours**.
+Running total for all CPM screening: **2.2 of the 24 authorised node hours**, 52,408 evaluations,
+zero failures. Corpora archived; scratch left with 16 archives and none of my directories.

@@ -1,0 +1,1468 @@
+{
+  "protocol": {
+    "blocksize": 50,
+    "timesteps": 501,
+    "write_every": 100,
+    "extract_from": 300,
+    "bins": [
+      8,
+      16,
+      32
+    ],
+    "n_ranks": 48,
+    "candidates": {
+      "division_rate": {
+        "path": "define_functions.division_cond_cancer[1]",
+        "lo": 0.001,
+        "hi": 0.2,
+        "scale": "log",
+        "centre": 0.009,
+        "integer": false
+      },
+      "adhesion_cc": {
+        "path": "CellsInSilico.adhesion.matrix[9][9]",
+        "lo": 40,
+        "hi": 400,
+        "scale": "lin",
+        "centre": 103,
+        "integer": true
+      },
+      "adhesion_cl": {
+        "path": [
+          "CellsInSilico.adhesion.matrix[9][1]",
+          "CellsInSilico.adhesion.matrix[1][9]"
+        ],
+        "lo": 20,
+        "hi": 200,
+        "scale": "lin",
+        "centre": 151,
+        "integer": true
+      },
+      "surface_lambda": {
+        "path": "CellsInSilico.surface.lambda_[9]",
+        "lo": 0.25,
+        "hi": 8.0,
+        "scale": "log",
+        "centre": 1.0,
+        "integer": false
+      },
+      "persistence": {
+        "path": "CellsInSilico.orientation.persistenceMagnitude",
+        "lo": 0.01,
+        "hi": 0.99,
+        "scale": "lin",
+        "centre": 0.834,
+        "integer": false
+      },
+      "recalc_time": {
+        "path": "CellsInSilico.orientation.recalculationtime",
+        "lo": 2,
+        "hi": 60,
+        "scale": "log",
+        "centre": 15,
+        "integer": true
+      }
+    },
+    "fixed": {
+      "motility": 500
+    }
+  },
+  "protocol_screen": [
+    {
+      "key": "b8_s1_k1",
+      "bins": 8,
+      "snapshots": [
+        500
+      ],
+      "seeds": 1,
+      "within_rho": 0.056557435786788623,
+      "between_rho": 0.23248341817404256,
+      "snr_rho": 4.110572110278537,
+      "outlier_rate": 0.052616279069767444,
+      "weightings": {
+        "equal": {
+          "within": 0.056557435786788623,
+          "between": 0.23248341817404256,
+          "snr": 4.110572110278537,
+          "total": 0.23419698036392553,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.052616279069767444,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.056557435786788623,
+          "between": 0.23248341817404256,
+          "snr": 4.110572110278537,
+          "total": 0.23419698036392553,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.052616279069767444,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.09852349436366269,
+          "between": 0.9216572639507297,
+          "snr": 9.354695242017868,
+          "dims": 1,
+          "block_norm": 0.8955898732997628,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.07650630830365482,
+          "between": 0.888442495508639,
+          "snr": 11.612669794265798,
+          "dims": 1,
+          "block_norm": 0.7508134343839521,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 2.29545007951871,
+          "between": 0.9962255965759822,
+          "snr": 0.4340001141670927,
+          "dims": 7,
+          "block_norm": 589.671691651311,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 2.3566804705555042,
+          "between": 1.1095386053978076,
+          "snr": 0.47080570287760437,
+          "dims": 7,
+          "block_norm": 19.16935120351236,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 2.7305116903260003,
+          "between": 0.726785615442586,
+          "snr": 0.2661719479237292,
+          "dims": 7,
+          "block_norm": 49.56166550202763,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5481992269604029,
+          "between": 0.0,
+          "snr": 0.0,
+          "dims": 1,
+          "block_norm": 2.1132734636379644,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 1.8268570324755498,
+          "between": 1.6589221644072578,
+          "snr": 0.9080744332572508,
+          "dims": 7,
+          "block_norm": 98.5794188971113,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 240,
+      "n_lhs_points": 800
+    },
+    {
+      "key": "b8_s1_k4",
+      "bins": 8,
+      "snapshots": [
+        500
+      ],
+      "seeds": 4,
+      "within_rho": 0.04195480174353724,
+      "between_rho": 0.2018215265299588,
+      "snr_rho": 4.810451203265371,
+      "outlier_rate": 0.0034883720930232558,
+      "weightings": {
+        "equal": {
+          "within": 0.04195480174353724,
+          "between": 0.2018215265299588,
+          "snr": 4.810451203265371,
+          "total": 0.2061362024493087,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0034883720930232558,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.04195480174353724,
+          "between": 0.2018215265299588,
+          "snr": 4.810451203265371,
+          "total": 0.2061362024493087,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0034883720930232558,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.03569391254304785,
+          "between": 0.4114048444690934,
+          "snr": 11.525910586936295,
+          "total": 0.41295036196287527,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0011627906976744186,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.04400860897874056,
+          "between": 0.2297992192856425,
+          "snr": 5.221687861042204,
+          "total": 0.23397529538080403,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.002325581395348837,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_s2_equal_volume"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.05510642930439188,
+          "between": 0.9103094194863058,
+          "snr": 16.519114574780765,
+          "dims": 1,
+          "block_norm": 1.317021273962747,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.030940510492532138,
+          "between": 0.900882750165852,
+          "snr": 29.116609125867228,
+          "dims": 1,
+          "block_norm": 1.1634934031994417,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 1.857566716288477,
+          "between": 1.3078915824295714,
+          "snr": 0.7040886181696948,
+          "dims": 6,
+          "block_norm": 344.4767473777618,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 1.464436101056377,
+          "between": 1.9018479057545634,
+          "snr": 1.2986895805031422,
+          "dims": 6,
+          "block_norm": 14.60054513467491,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 1.9977991553338528,
+          "between": 1.3570716171016926,
+          "snr": 0.6792833070724329,
+          "dims": 6,
+          "block_norm": 37.57333900010451,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5244915050991066,
+          "between": 0.8521503538310848,
+          "snr": 1.624717169956956,
+          "dims": 1,
+          "block_norm": 1.881624758220503,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 1.2047467169009423,
+          "between": 2.0643863588870803,
+          "snr": 1.7135438760086035,
+          "dims": 6,
+          "block_norm": 60.29259754547884,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 60,
+      "n_lhs_points": 800
+    },
+    {
+      "key": "b16_s1_k1",
+      "bins": 16,
+      "snapshots": [
+        500
+      ],
+      "seeds": 1,
+      "within_rho": 0.07306598921192764,
+      "between_rho": 0.21204194248192793,
+      "snr_rho": 2.9020607914703107,
+      "outlier_rate": 0.032848837209302324,
+      "weightings": {
+        "equal": {
+          "within": 0.07306598921192764,
+          "between": 0.21204194248192793,
+          "snr": 2.9020607914703107,
+          "total": 0.21516608716614385,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.032848837209302324,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.07306598921192764,
+          "between": 0.21204194248192793,
+          "snr": 2.9020607914703107,
+          "total": 0.21516608716614385,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.032848837209302324,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.09852349436366269,
+          "between": 0.9216572639507297,
+          "snr": 9.354695242017868,
+          "dims": 1,
+          "block_norm": 0.8955898732997628,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.07650630830365482,
+          "between": 0.888442495508639,
+          "snr": 11.612669794265798,
+          "dims": 1,
+          "block_norm": 0.7508134343839521,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 2.6174678207671596,
+          "between": 0.9178158850659894,
+          "snr": 0.3506503032373421,
+          "dims": 10,
+          "block_norm": 184.17944920338857,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 2.8795171452379957,
+          "between": 1.1843104558013804,
+          "snr": 0.4112878639253581,
+          "dims": 10,
+          "block_norm": 22.517331580313254,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 3.261529454070409,
+          "between": 0.6628619497979166,
+          "snr": 0.203236536457048,
+          "dims": 10,
+          "block_norm": 66.32254258167167,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5481992269604029,
+          "between": 0.0,
+          "snr": 0.0,
+          "dims": 1,
+          "block_norm": 2.1132734636379644,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 2.5400933989558925,
+          "between": 1.693418009648874,
+          "snr": 0.666675489312698,
+          "dims": 10,
+          "block_norm": 134.87599746335857,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 240,
+      "n_lhs_points": 800
+    },
+    {
+      "key": "b16_s1_k4",
+      "bins": 16,
+      "snapshots": [
+        500
+      ],
+      "seeds": 4,
+      "within_rho": 0.04773911815943205,
+      "between_rho": 0.17872897226889656,
+      "snr_rho": 3.7438683234994823,
+      "outlier_rate": 0.002325581395348837,
+      "weightings": {
+        "equal": {
+          "within": 0.04773911815943205,
+          "between": 0.17872897226889656,
+          "snr": 3.7438683234994823,
+          "total": 0.18499478082080104,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.002325581395348837,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.04773911815943205,
+          "between": 0.17872897226889656,
+          "snr": 3.7438683234994823,
+          "total": 0.18499478082080104,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.002325581395348837,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.03569391254304785,
+          "between": 0.4114048444690934,
+          "snr": 11.525910586936295,
+          "total": 0.41295036196287527,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0011627906976744186,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.04178260581584491,
+          "between": 0.16770793644360502,
+          "snr": 4.013821856462728,
+          "total": 0.17283442392918874,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.002325581395348837,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_s2_equal_volume"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.05510642930439188,
+          "between": 0.9103094194863058,
+          "snr": 16.519114574780765,
+          "dims": 1,
+          "block_norm": 1.317021273962747,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.030940510492532138,
+          "between": 0.900882750165852,
+          "snr": 29.116609125867228,
+          "dims": 1,
+          "block_norm": 1.1634934031994417,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 2.0547177097458555,
+          "between": 1.5959404281042888,
+          "snr": 0.7767200431156491,
+          "dims": 9,
+          "block_norm": 86.06903983546822,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 2.130678697234405,
+          "between": 2.3073764201256446,
+          "snr": 1.082930252750258,
+          "dims": 10,
+          "block_norm": 21.866044607400312,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 2.75638526411318,
+          "between": 1.5273106830201773,
+          "snr": 0.5540991322602951,
+          "dims": 10,
+          "block_norm": 70.8906513715839,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5244915050991066,
+          "between": 0.8521503538310848,
+          "snr": 1.624717169956956,
+          "dims": 1,
+          "block_norm": 1.881624758220503,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 1.9107553779916553,
+          "between": 2.4524082110750047,
+          "snr": 1.2834757600696467,
+          "dims": 10,
+          "block_norm": 124.15543181035765,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 60,
+      "n_lhs_points": 800
+    },
+    {
+      "key": "b32_s1_k1",
+      "bins": 32,
+      "snapshots": [
+        500
+      ],
+      "seeds": 1,
+      "within_rho": 0.09086403458925969,
+      "between_rho": 0.15285982144415822,
+      "snr_rho": 1.6822918125432496,
+      "outlier_rate": 0.03226744186046512,
+      "weightings": {
+        "equal": {
+          "within": 0.09086403458925969,
+          "between": 0.15285982144415822,
+          "snr": 1.6822918125432496,
+          "total": 0.15946847088813348,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.03226744186046512,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.09086403458925969,
+          "between": 0.15285982144415822,
+          "snr": 1.6822918125432496,
+          "total": 0.15946847088813348,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.03226744186046512,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.09362917119837369,
+          "between": 0.5968627527770668,
+          "snr": 6.374752068588578,
+          "total": 0.5986958752801305,
+          "units_per_point": 4.0,
+          "outlier_rate": 0.043313953488372095,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.09852349436366269,
+          "between": 0.9216572639507297,
+          "snr": 9.354695242017868,
+          "dims": 1,
+          "block_norm": 0.8955898732997628,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.07650630830365482,
+          "between": 0.888442495508639,
+          "snr": 11.612669794265798,
+          "dims": 1,
+          "block_norm": 0.7508134343839521,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 3.2326466625654073,
+          "between": 0.34627164614431805,
+          "snr": 0.10711707225976845,
+          "dims": 10,
+          "block_norm": 28.817226562322833,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 2.7686829171047145,
+          "between": 1.296313278806454,
+          "snr": 0.4682057561730627,
+          "dims": 10,
+          "block_norm": 22.247452816959967,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 3.33118602905815,
+          "between": 0.6209038281819402,
+          "snr": 0.18639122005368544,
+          "dims": 10,
+          "block_norm": 75.03046215534755,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5481992269604029,
+          "between": 0.0,
+          "snr": 0.0,
+          "dims": 1,
+          "block_norm": 2.1132734636379644,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 2.511202843843274,
+          "between": 1.6851278188840597,
+          "snr": 0.6710440867074894,
+          "dims": 10,
+          "block_norm": 128.31295503835585,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 240,
+      "n_lhs_points": 800
+    },
+    {
+      "key": "b32_s1_k4",
+      "bins": 32,
+      "snapshots": [
+        500
+      ],
+      "seeds": 4,
+      "within_rho": 0.054342885739081144,
+      "between_rho": 0.14766956204582968,
+      "snr_rho": 2.7173669568237866,
+      "outlier_rate": 0.0034883720930232558,
+      "weightings": {
+        "equal": {
+          "within": 0.054342885739081144,
+          "between": 0.14766956204582968,
+          "snr": 2.7173669568237866,
+          "total": 0.15735135457077568,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0034883720930232558,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "drop_dead": {
+          "within": 0.054342885739081144,
+          "between": 0.14766956204582968,
+          "snr": 2.7173669568237866,
+          "total": 0.15735135457077568,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0034883720930232558,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_density_profile_equal_volume",
+            "radial_fa_equal_volume",
+            "radial_s2_equal_volume"
+          ]
+        },
+        "scalars_only": {
+          "within": 0.03569391254304785,
+          "between": 0.4114048444690934,
+          "snr": 11.525910586936295,
+          "total": 0.41295036196287527,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0011627906976744186,
+          "blocks": [
+            "log_n",
+            "log_r95"
+          ]
+        },
+        "snr_pruned": {
+          "within": 0.06365708143139429,
+          "between": 0.1694597892772549,
+          "snr": 2.6620728670994493,
+          "total": 0.18102166775901388,
+          "units_per_point": 1.0,
+          "outlier_rate": 0.0034883720930232558,
+          "blocks": [
+            "dbscan_gaslike_fraction",
+            "log_n",
+            "log_r95",
+            "pair_correlation_gofr",
+            "radial_s2_equal_volume"
+          ]
+        }
+      },
+      "block_stats": {
+        "log_r95": {
+          "within": 0.05510642930439188,
+          "between": 0.9103094194863058,
+          "snr": 16.519114574780765,
+          "dims": 1,
+          "block_norm": 1.317021273962747,
+          "dead": false
+        },
+        "log_n": {
+          "within": 0.030940510492532138,
+          "between": 0.900882750165852,
+          "snr": 29.116609125867228,
+          "dims": 1,
+          "block_norm": 1.1634934031994417,
+          "dead": false
+        },
+        "radial_fa_equal_volume": {
+          "within": 2.4352600197140473,
+          "between": 1.7577884340017988,
+          "snr": 0.7218072894771219,
+          "dims": 10,
+          "block_norm": 27.253264540814026,
+          "dead": false
+        },
+        "radial_s2_equal_volume": {
+          "within": 2.0427496194167922,
+          "between": 2.4144883610902528,
+          "snr": 1.1819795916934708,
+          "dims": 10,
+          "block_norm": 21.648872442470996,
+          "dead": false
+        },
+        "radial_density_profile_equal_volume": {
+          "within": 2.5960282216741897,
+          "between": 1.7814093636902704,
+          "snr": 0.6862057002375082,
+          "dims": 10,
+          "block_norm": 85.4911537938205,
+          "dead": false
+        },
+        "dbscan_gaslike_fraction": {
+          "within": 0.5244915050991066,
+          "between": 0.8521503538310848,
+          "snr": 1.624717169956956,
+          "dims": 1,
+          "block_norm": 1.881624758220503,
+          "dead": false
+        },
+        "pair_correlation_gofr": {
+          "within": 1.5508664185180783,
+          "between": 2.687623919067279,
+          "snr": 1.7329822136682946,
+          "dims": 10,
+          "block_norm": 131.347646044814,
+          "dead": false
+        }
+      },
+      "n_anchor_units": 60,
+      "n_lhs_points": 800
+    }
+  ],
+  "best_protocol": "b8_s1_k4",
+  "parameters": [
+    {
+      "parameter": "division_rate",
+      "prior": [
+        0.001,
+        0.2
+      ],
+      "scale": "log",
+      "drives": "population size (log_n), cluster radius (log_r95)",
+      "within": 1.9398314042359015,
+      "between": 28.841417573435404,
+      "snr": 14.868002193621574,
+      "sigmas_moved": 52.155516944135556,
+      "carried_by": [
+        [
+          "log_n",
+          0.59
+        ],
+        [
+          "log_r95",
+          0.195
+        ],
+        [
+          "radial_fa_equal_volume",
+          0.164
+        ]
+      ],
+      "responsive_window": [
+        0.0012083135417147786,
+        0.017088133982921076
+      ],
+      "responsive_prior_fraction": 0.4999999999999999,
+      "levels": [
+        {
+          "value": 0.0012083135417147786,
+          "response": -67.04643456836506
+        },
+        {
+          "value": 0.001764163888711114,
+          "response": -52.01823385203749
+        },
+        {
+          "value": 0.0025757174100817693,
+          "response": -47.046144595624575
+        },
+        {
+          "value": 0.003760603093086395,
+          "response": -27.304884308314502
+        },
+        {
+          "value": 0.00549056180168538,
+          "response": -6.578247938916875
+        },
+        {
+          "value": 0.008016338909455342,
+          "response": -5.105851361426282
+        },
+        {
+          "value": 0.011704028081702313,
+          "response": 8.90820128246958
+        },
+        {
+          "value": 0.017088133982921076,
+          "response": 15.075095142760771
+        },
+        {
+          "value": 0.024949044976641153,
+          "response": 23.019722960775688
+        },
+        {
+          "value": 0.0364261449417814,
+          "response": 28.241127318964473
+        },
+        {
+          "value": 0.05318295896944987,
+          "response": 30.095966727569728
+        },
+        {
+          "value": 0.07764826964991116,
+          "response": 32.416193002484775
+        },
+        {
+          "value": 0.11336815206330896,
+          "response": 33.217015085632994
+        },
+        {
+          "value": 0.16551995247538973,
+          "response": 34.12647510402677
+        }
+      ]
+    },
+    {
+      "parameter": "surface_lambda",
+      "prior": [
+        0.25,
+        8.0
+      ],
+      "scale": "log",
+      "drives": "cell shape; radial FA and S2, which nothing currently drives",
+      "within": 2.2266172173379415,
+      "between": 7.067117551341051,
+      "snr": 3.1739256735786077,
+      "sigmas_moved": 8.44167894232906,
+      "carried_by": [
+        [
+          "pair_correlation_gofr",
+          0.467
+        ],
+        [
+          "log_n",
+          0.357
+        ],
+        [
+          "log_r95",
+          0.138
+        ]
+      ],
+      "responsive_window": [
+        0.3624149277163572,
+        2.0501284239317488
+      ],
+      "responsive_prior_fraction": 0.49999999999999994,
+      "levels": [
+        {
+          "value": 0.28294066181845806,
+          "response": -12.185619638338595
+        },
+        {
+          "value": 0.3624149277163572,
+          "response": -20.81762373997544
+        },
+        {
+          "value": 0.4642124570837629,
+          "response": -4.080923470774517
+        },
+        {
+          "value": 0.5946035575013605,
+          "response": -1.55915040768897
+        },
+        {
+          "value": 0.761619782489978,
+          "response": 4.670784588277595
+        },
+        {
+          "value": 0.9755486420525731,
+          "response": -3.1400259464597267
+        },
+        {
+          "value": 1.2495672708227517,
+          "response": 0.575604042668028
+        },
+        {
+          "value": 1.6005540851619302,
+          "response": 8.052833877819678
+        },
+        {
+          "value": 2.0501284239317488,
+          "response": -0.04715419818183603
+        },
+        {
+          "value": 2.625982210521583,
+          "response": 5.7178522322377425
+        },
+        {
+          "value": 3.363585661014858,
+          "response": 5.573301787528755
+        },
+        {
+          "value": 4.308372103075892,
+          "response": 6.031079630417964
+        },
+        {
+          "value": 5.518536481381618,
+          "response": 4.598273204578895
+        },
+        {
+          "value": 7.068619925980277,
+          "response": 6.610768037890436
+        }
+      ]
+    },
+    {
+      "parameter": "recalc_time",
+      "prior": [
+        2,
+        60
+      ],
+      "scale": "log",
+      "drives": "direction persistence time; S2, FA",
+      "within": 3.0163634979791145,
+      "between": 0.0,
+      "snr": 0.0,
+      "sigmas_moved": 7.329975007770294,
+      "carried_by": [
+        [
+          "pair_correlation_gofr",
+          0.531
+        ],
+        [
+          "radial_fa_equal_volume",
+          0.155
+        ],
+        [
+          "radial_s2_equal_volume",
+          0.142
+        ]
+      ],
+      "responsive_window": [
+        2.0,
+        33.0
+      ],
+      "responsive_prior_fraction": 0.8242274900072224,
+      "levels": [
+        {
+          "value": 2.0,
+          "response": -12.563841728657064
+        },
+        {
+          "value": 3.0,
+          "response": -4.316907300907069
+        },
+        {
+          "value": 4.0,
+          "response": -3.1396357645986237
+        },
+        {
+          "value": 5.0,
+          "response": -0.3662468638256029
+        },
+        {
+          "value": 6.0,
+          "response": 3.917025212303766
+        },
+        {
+          "value": 8.0,
+          "response": -3.2750239288490146
+        },
+        {
+          "value": 10.0,
+          "response": 5.075351008790009
+        },
+        {
+          "value": 12.0,
+          "response": -2.5188332739437964
+        },
+        {
+          "value": 16.0,
+          "response": -4.029189809118281
+        },
+        {
+          "value": 20.0,
+          "response": -1.9093400964140539
+        },
+        {
+          "value": 26.0,
+          "response": -5.213948485485602
+        },
+        {
+          "value": 33.0,
+          "response": 8.05640657040922
+        },
+        {
+          "value": 42.0,
+          "response": 10.738157134415683
+        },
+        {
+          "value": 53.0,
+          "response": 9.546027325880429
+        }
+      ]
+    },
+    {
+      "parameter": "persistence",
+      "prior": [
+        0.01,
+        0.99
+      ],
+      "scale": "lin",
+      "drives": "directional correlation; S2, FA",
+      "within": 2.6177368774640755,
+      "between": 0.0,
+      "snr": 0.0,
+      "sigmas_moved": 2.1259951322625037,
+      "carried_by": [
+        [
+          "pair_correlation_gofr",
+          0.589
+        ],
+        [
+          "radial_s2_equal_volume",
+          0.167
+        ],
+        [
+          "radial_fa_equal_volume",
+          0.131
+        ]
+      ],
+      "responsive_window": [
+        0.045,
+        0.955
+      ],
+      "responsive_prior_fraction": 0.9285714285714286,
+      "levels": [
+        {
+          "value": 0.045,
+          "response": -0.7157330919060829
+        },
+        {
+          "value": 0.11499999999999999,
+          "response": 9.070335056821222
+        },
+        {
+          "value": 0.185,
+          "response": 3.9727287243273253
+        },
+        {
+          "value": 0.255,
+          "response": 0.6293925731025685
+        },
+        {
+          "value": 0.325,
+          "response": -10.633364338560254
+        },
+        {
+          "value": 0.395,
+          "response": -0.49114440553907857
+        },
+        {
+          "value": 0.465,
+          "response": 0.4094552755286528
+        },
+        {
+          "value": 0.535,
+          "response": -10.894159149555962
+        },
+        {
+          "value": 0.605,
+          "response": 1.544651251078663
+        },
+        {
+          "value": 0.675,
+          "response": 0.40031733644553474
+        },
+        {
+          "value": 0.745,
+          "response": 2.73115913426886
+        },
+        {
+          "value": 0.815,
+          "response": -0.6417552809637235
+        },
+        {
+          "value": 0.885,
+          "response": -0.23144585217431352
+        },
+        {
+          "value": 0.955,
+          "response": 4.849562767126588
+        }
+      ]
+    },
+    {
+      "parameter": "adhesion_cl",
+      "prior": [
+        20,
+        200
+      ],
+      "scale": "lin",
+      "drives": "surface tension against the medium; wetting vs compaction",
+      "within": 2.8541848494507334,
+      "between": 0.0,
+      "snr": 0.0,
+      "sigmas_moved": 2.085704763747781,
+      "carried_by": [
+        [
+          "pair_correlation_gofr",
+          0.685
+        ],
+        [
+          "log_n",
+          0.15
+        ],
+        [
+          "radial_fa_equal_volume",
+          0.053
+        ]
+      ],
+      "responsive_window": [
+        168.0,
+        194.0
+      ],
+      "responsive_prior_fraction": 0.1444444444444445,
+      "levels": [
+        {
+          "value": 26.0,
+          "response": 1.2737722876795796
+        },
+        {
+          "value": 39.0,
+          "response": 3.589197013542712
+        },
+        {
+          "value": 52.0,
+          "response": -3.714801204960792
+        },
+        {
+          "value": 65.0,
+          "response": 2.0957673388485274
+        },
+        {
+          "value": 78.0,
+          "response": -13.325662701278562
+        },
+        {
+          "value": 91.0,
+          "response": 1.0217058794611784
+        },
+        {
+          "value": 104.0,
+          "response": -0.26219378609752547
+        },
+        {
+          "value": 116.0,
+          "response": 2.9298674912136975
+        },
+        {
+          "value": 129.0,
+          "response": 3.4696404059810377
+        },
+        {
+          "value": 142.0,
+          "response": -1.2653464507336891
+        },
+        {
+          "value": 155.0,
+          "response": -0.6752209518242485
+        },
+        {
+          "value": 168.0,
+          "response": 1.60070093770263
+        },
+        {
+          "value": 181.0,
+          "response": -2.9225408739623973
+        },
+        {
+          "value": 194.0,
+          "response": 6.185114614427861
+        }
+      ]
+    },
+    {
+      "parameter": "adhesion_cc",
+      "prior": [
+        40,
+        400
+      ],
+      "scale": "lin",
+      "drives": "cohesion; g(r), radial density steepness, gas-like fraction",
+      "within": 1.0680763080812525,
+      "between": 0.0,
+      "snr": 0.0,
+      "sigmas_moved": 1.4292541678757655,
+      "carried_by": [
+        [
+          "pair_correlation_gofr",
+          0.995
+        ],
+        [
+          "radial_s2_equal_volume",
+          0.002
+        ],
+        [
+          "radial_density_profile_equal_volume",
+          0.001
+        ]
+      ],
+      "responsive_window": [
+        79.0,
+        284.0
+      ],
+      "responsive_prior_fraction": 0.5694444444444444,
+      "levels": [
+        {
+          "value": 53.0,
+          "response": 6.347412899189556
+        },
+        {
+          "value": 79.0,
+          "response": 8.210465931212843
+        },
+        {
+          "value": 104.0,
+          "response": -9.591586056983848
+        },
+        {
+          "value": 130.0,
+          "response": 7.62042314408031
+        },
+        {
+          "value": 156.0,
+          "response": 8.570087304715972
+        },
+        {
+          "value": 181.0,
+          "response": 7.516193540743163
+        },
+        {
+          "value": 207.0,
+          "response": 8.977257205342173
+        },
+        {
+          "value": 233.0,
+          "response": -83.89157990719316
+        },
+        {
+          "value": 259.0,
+          "response": 6.712524153359936
+        },
+        {
+          "value": 284.0,
+          "response": 8.40259769071808
+        },
+        {
+          "value": 310.0,
+          "response": 8.590240581734388
+        },
+        {
+          "value": 336.0,
+          "response": 7.443283714437035
+        },
+        {
+          "value": 361.0,
+          "response": 7.4719518905404945
+        },
+        {
+          "value": 387.0,
+          "response": 7.620727908103084
+        }
+      ]
+    }
+  ],
+  "confounding": {
+    "division_rate": {
+      "division_rate": 0.9999999999999999,
+      "adhesion_cc": 0.03511229344859145,
+      "adhesion_cl": 0.40540923156829983,
+      "surface_lambda": 0.7070059455246269,
+      "persistence": 0.38975593912938916,
+      "recalc_time": 0.4509062503084994
+    },
+    "adhesion_cc": {
+      "division_rate": 0.03511229344859145,
+      "adhesion_cc": 1.0000000000000002,
+      "adhesion_cl": 0.552098665621608,
+      "surface_lambda": 0.40834161272745445,
+      "persistence": 0.5119792223699456,
+      "recalc_time": 0.34487473227760174
+    },
+    "adhesion_cl": {
+      "division_rate": 0.40540923156829983,
+      "adhesion_cc": 0.552098665621608,
+      "adhesion_cl": 0.9999999999999999,
+      "surface_lambda": 0.08553924015464928,
+      "persistence": 0.399470482946158,
+      "recalc_time": 0.2794238968497231
+    },
+    "surface_lambda": {
+      "division_rate": 0.7070059455246269,
+      "adhesion_cc": 0.40834161272745445,
+      "adhesion_cl": 0.08553924015464928,
+      "surface_lambda": 1.0000000000000007,
+      "persistence": 0.6960435599490253,
+      "recalc_time": 0.6596388565757101
+    },
+    "persistence": {
+      "division_rate": 0.38975593912938916,
+      "adhesion_cc": 0.5119792223699456,
+      "adhesion_cl": 0.399470482946158,
+      "surface_lambda": 0.6960435599490253,
+      "persistence": 0.9999999999999996,
+      "recalc_time": 0.5152045934311472
+    },
+    "recalc_time": {
+      "division_rate": 0.4509062503084994,
+      "adhesion_cc": 0.34487473227760174,
+      "adhesion_cl": 0.2794238968497231,
+      "surface_lambda": 0.6596388565757101,
+      "persistence": 0.5152045934311472,
+      "recalc_time": 0.9999999999999992
+    }
+  },
+  "n_coordinates": 27,
+  "dead_coordinates": 0
+}
