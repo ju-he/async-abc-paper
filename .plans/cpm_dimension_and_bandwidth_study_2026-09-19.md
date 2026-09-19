@@ -311,3 +311,52 @@ benchmark and a better two-parameter posterior — it is just not a third parame
 **So the decisive-margin-by-dimension route on CPM is closed.** It lives on the 4-D g-and-k instead,
 where rejection ABC's cost to a fixed posterior grows like eps^-d and we are already 48x ahead in eps
 on a 2-D target.
+
+---
+
+# The comparison that actually works — and the one that does not
+
+Matched-budget tolerances on the 4-D g-and-k, streamed from the 2026-07-07 production history
+(first 50,000 arrivals per replicate, k=100 — the same quantity `best_k` rejection reports at):
+
+| method | k-th best loss at 50,000 evaluations |
+|---|---|
+| `rejection_abc` (fixed, `best_k`, job 14262065) | 0.46 |
+| **`async_propulate_abc`** | **0.060 - 0.068** |
+| `abc_smc_baseline` (synchronous) | **0.030 - 0.052** |
+| *`rejection_abc` as the paper ran it* | *9.9 — it made only 100 draws* |
+
+(The production history confirms the prior-sampling defect directly: its `rejection_abc` arm wrote
+**500 rows in total**, 100 per replicate, out of a 50,000 budget.)
+
+## Against rejection ABC the advantage is consistent across dimension
+
+A tolerance ratio is not dimension-free — acceptance scales like eps^d — so the comparable quantity
+is how many rejection draws would be needed to match:
+
+| benchmark | dim | eps advantage | simulations rejection would need |
+|---|---|---|---|
+| Cellular Potts | 2 | 48x | ~48² ≈ **2,300x** |
+| g-and-k | 4 | 7.4x | ~7.4⁴ ≈ **3,000x** |
+
+Two to three orders of magnitude, on both, from two independent measurements. **This is the claim to
+make**, and it is robust to the bandwidth question because the k-th order statistic describes where
+the sampler put its draws, not the bandwidth it reported at.
+
+## Against the synchronous baseline, per-evaluation efficiency is not where we win
+
+On 4-D the synchronous baseline reaches a *tighter* tolerance per evaluation than the asynchronous
+arm (0.030-0.052 against 0.062). The paper already concedes this ("roughly twice as inaccurate on the
+four-dimensional one"); this confirms it at a matched budget rather than at a matched wall clock.
+
+**The strategic error to avoid is conflating the two comparisons.** The method beats *rejection ABC*
+by ~3 orders of magnitude in simulations-to-a-tolerance, in both dimensions. It beats the
+*synchronous baseline* on **throughput**, not on per-evaluation efficiency — which is the paper's
+actual thesis and where the barrier-removal evidence is strongest. Presenting both as one
+"posterior quality" comparison is what makes the case look weaker than it is.
+
+**Open, and cheap to close.** The g-and-k async numbers come from a run with `tol_init: 10.0`. If the
+bandwidth transient degrades *sampling* and not merely reporting within a 50,000-evaluation prefix,
+0.062 is pessimistic and the async-vs-sync gap on 4-D may narrow or reverse. One g-and-k job at
+`tol_init` set from its prior-predictive scale settles it, and it should be settled before any of
+this reaches the paper.
