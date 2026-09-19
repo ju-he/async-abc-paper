@@ -518,3 +518,46 @@ replicates at the shipped `tol_init: 10.0`, mean `cell_volume` contraction is **
 the single validation replicate gave — the defect is erratic as well as harmful. Against the 81-84%
 measured at `tol_init` 0.1, the fix is worth roughly **70 points**, not the 24 quoted earlier from
 one run. The fixed production run (14262214) gives five replicates at 0.1 for the matched comparison.
+
+## Archive size, measured (jobs 14262269/70) — the paper's advice is backwards here
+
+**Reporting k**, one fixed 13,115-evaluation history re-reported at the k-th order statistic:
+
+| k | eps | ESS | division_rate | cell_volume | coverage |
+|---|---|---|---|---|---|
+| 10 | 6.6e-06 | 14 | 92% | **85%** | both |
+| 100 | 6.1e-05 | 123 | 92% | 81% | both |
+| 1000 | 6.7e-04 | 925 | 92% | 75% | both |
+| 3000 | 2.5e-03 | 1383 | 91% | **65%** | both |
+
+ESS tracks k almost exactly (confirming ESS ~ k); contraction on the weak parameter degrades
+monotonically; coverage holds throughout.
+
+**Sampler k**, compared at a fixed reporting k=100 so only the sampler differs:
+
+| sampler k | eps at k=100 | eps at its own k | ESS | division_rate | cell_volume |
+|---|---|---|---|---|---|
+| **30** | **4.6e-05 / 5.3e-05** | 1.4e-05 | 72-102 | **93-94%** | **82-83%** |
+| 100 | 7.8e-05 / 6.3e-05 | 6.3e-05 | 267-351 | 91-93% | 81-84% |
+| 300 | 9.7e-05 / 9.2e-05 | 3.1e-04 | 1846-2110 | 75% | **6-7%** |
+
+**Raising k is actively harmful on this benchmark, through three compounding mechanisms:**
+
+1. **The sampler gets worse.** A larger archive is a broader proposal: eps is 1.6x looser at k=300
+   than at k=30 *at the same budget*. Arithmetic could not have predicted this one.
+2. **The reported bandwidth loosens as k^~1** in this noise-dominated regime — a 5x looser eps.
+3. **`bisect_interval` defaults to k**, so the bandwidth transient is 3x longer at k=300.
+
+Net: `cell_volume` contraction 83% -> 81-84% -> **6-7%** while ESS climbs 85 -> 300 -> 2000. **You buy
+effective particles and destroy the posterior they estimate.** §Limitations' *"raising k raises the
+effective sample proportionally and is the obvious lever"* is backwards here; **k=30 is at least as
+good as k=100 on every quality measure**, at a third of the ESS.
+
+**Confound, stated.** The sweep varied k, which implicitly varied `bisect_interval` too, so the k=300
+collapse mixes all three mechanisms. They are separable now that `bisect_interval` is exposed, and
+worth separating before the paper states a rule. The practical conclusion stands for anyone raising
+k the way the harness currently does.
+
+**What to check next:** coverage at small k (ESS 72-102 is a noisy estimate even if the target is
+sharper), and whether the same ordering holds on 4-D g-and-k, where eps ~ k^0.28 makes the bandwidth
+penalty five times smaller and the advice may well be right.
