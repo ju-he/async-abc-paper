@@ -1508,15 +1508,30 @@ class TestPerMethodInferenceOverrides:
         cfg = {"tol_init": 10.0}
         assert inference_cfg_for_method("rejection_abc", cfg) is cfg
 
-    def test_an_override_for_an_unconfigured_method_is_refused(self):
+    def test_a_misspelled_method_is_refused(self):
         """A typo here silently reverts to the shared value -- which is the
         failure this exists to end, so it has to crash."""
         from async_abc.utils.runner import validate_method_overrides
 
         cfg = {"methods": ["async_propulate_abc"], "inference": {
-            "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}}
-        with pytest.raises(ValueError, match="not in this config's"):
+            "method_overrides": {"rejecton_abc": {"tol_init": 0.02}}}}
+        with pytest.raises(ValueError, match="unknown methods"):
             validate_method_overrides(cfg)
+
+    def test_an_override_for_a_method_not_run_this_time_is_allowed(self):
+        """Sharded runs and tests substitute the method list while keeping the
+        config's inference block; an override that simply does not apply is
+        inert, not wrong."""
+        from async_abc.utils.runner import validate_method_overrides
+
+        validate_method_overrides({"methods": ["async_propulate_abc"], "inference": {
+            "method_overrides": {"rejection_abc": {"tol_init": 0.02}}}})
+
+    def test_a_config_declared_method_counts_as_known(self):
+        from async_abc.utils.runner import validate_method_overrides
+
+        validate_method_overrides({"methods": ["my_custom_method"], "inference": {
+            "method_overrides": {"my_custom_method": {"tol_init": 0.02}}}})
 
     def test_a_valid_override_table_passes_validation(self):
         from async_abc.utils.runner import validate_method_overrides

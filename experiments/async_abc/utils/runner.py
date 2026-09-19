@@ -785,14 +785,27 @@ def inference_cfg_for_method(name: str, inference_cfg: Dict) -> Dict:
 
 
 def validate_method_overrides(cfg: Dict) -> None:
-    """Fail loudly on a ``method_overrides`` entry that names no configured method."""
+    """Fail loudly on a ``method_overrides`` entry that names no known method.
+
+    The check is against the method *registry* plus this config's own list, not
+    against the list alone: callers legitimately substitute the methods to run
+    (sharded runs, tests with stand-in methods) while keeping the config's
+    inference block, and an override for a method that is simply not being run
+    this time is inert, not wrong. What must not pass silently is a name that
+    matches no method at all -- a typo there reverts to the shared value, which
+    is the failure this exists to end.
+    """
     overrides = (cfg.get("inference") or {}).get("method_overrides") or {}
-    unknown = [name for name in overrides if name not in (cfg.get("methods") or [])]
+    if not overrides:
+        return
+    from ..inference.method_registry import METHOD_REGISTRY
+
+    known = set(METHOD_REGISTRY) | set(cfg.get("methods") or [])
+    unknown = [name for name in overrides if name not in known]
     if unknown:
         raise ValueError(
-            f"inference.method_overrides names methods that are not in this config's "
-            f"'methods' list: {sorted(unknown)}; configured methods are "
-            f"{sorted(cfg.get('methods') or [])}"
+            f"inference.method_overrides names unknown methods: {sorted(unknown)}; "
+            f"known methods are {sorted(known)}"
         )
 
 

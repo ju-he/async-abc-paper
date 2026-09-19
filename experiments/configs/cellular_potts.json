@@ -31,7 +31,24 @@
     "perturbation_scale": 0.8,
     "propulate_budget_mode": "total_simulations",
     "kernel": "gaussian",
-    "amis_snapshots": 20
+    "amis_snapshots": 20,
+    "_comment_method_overrides": [
+      "rejection_abc thresholds at tol_init and stops at k accepted, while the",
+      "asynchronous scheduler treats tol_init as a STARTING bandwidth and tightens",
+      "from there. At the shared value this arm accepted ~100% of prior draws and",
+      "stopped after ~100 evaluations, so its reported posterior was the prior.",
+      "The override is the tolerance at which the budget yields k accepted: 2% of prior draws, measured on 2,000 scored draws.",
+      "Measured, not guessed -- see .plans/cpm_dimension_and_bandwidth_study_2026-09-19.md."
+    ],
+    "_comment_rejection": [
+      "rejection_abc reports the k closest of everything it evaluates",
+      "(rejection_mode defaults to best_k), so it needs no tolerance constant and",
+      "reports at the k-th order statistic of its own draws -- the same rule the",
+      "asynchronous arm uses. Before 2026-09-19 it thresholded at the shared",
+      "tol_init, which the asynchronous scheduler needs LOOSE because it treats it",
+      "as a starting bandwidth; at that value this arm accepted most of the prior",
+      "and stopped after ~100 evaluations, reporting a prior sample."
+    ]
   },
   "execution": {
     "n_replicates": 5,

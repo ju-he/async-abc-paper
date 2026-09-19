@@ -1323,7 +1323,11 @@ class TestRejectionAbc:
         assert len(records) == 5
 
     def test_rejection_abc_uses_strict_less_than(self, tmp_path):
-        """A particle with loss == tol_init should NOT be accepted (strict <)."""
+        """A particle with loss == tol_init should NOT be accepted (strict <).
+
+        Threshold mode only. The default `best_k` mode never consults tol_init:
+        it reports the k closest of whatever it evaluated, which is why it needs
+        no tolerance constant."""
         from async_abc.io.paths import OutputDir
         from async_abc.inference.rejection_abc import run_rejection_abc
 
@@ -1337,12 +1341,87 @@ class TestRejectionAbc:
             "max_simulations": 10,
             "k": 10,
             "tol_init": 5.0,
+            "rejection_mode": "threshold",
         }
         records = run_rejection_abc(
             exact_tol_simulate, {"x": (-1.0, 1.0)}, cfg, od, replicate=0, seed=1,
         )
         # loss == tol_init → strict < means none accepted
         assert len(records) == 0
+
+    def test_best_k_reports_the_k_closest_of_everything_evaluated(self, tmp_path):
+        """The default mode needs no tolerance: it spends the budget and keeps
+        the k smallest discrepancies, which is rejection ABC at the tolerance
+        that budget affords."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        od = OutputDir(tmp_path, "rejection_best_k").ensure()
+        seen = {"n": 0}
+
+        def descending(params, seed):
+            seen["n"] += 1
+            return 100.0 - seen["n"]  # later draws are better
+
+        cfg = {**_test_inference_cfg(), "max_simulations": 50, "k": 5,
+               "tol_init": 1e-9}
+        records = run_rejection_abc(descending, {"x": (-1.0, 1.0)}, cfg, od,
+                                    replicate=0, seed=1)
+        assert seen["n"] == 50, "best_k must spend the whole budget"
+        assert len(records) == 5
+        assert sorted(r.loss for r in records) == [50.0, 51.0, 52.0, 53.0, 54.0]
+
+    def test_best_k_emits_records_in_evaluation_order(self, tmp_path):
+        """Selected by loss, emitted as a history: downstream readers treat the
+        record sequence as arrivals."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        od = OutputDir(tmp_path, "rejection_best_k_order").ensure()
+        losses = iter([9.0, 1.0, 8.0, 2.0, 7.0, 3.0])
+
+        cfg = {**_test_inference_cfg(), "max_simulations": 6, "k": 3}
+        records = run_rejection_abc(lambda p, seed: next(losses),
+                                    {"x": (-1.0, 1.0)}, cfg, od, replicate=0, seed=1)
+        assert [r.loss for r in records] == [1.0, 2.0, 3.0]
+        assert [r.attempt_count for r in records] == sorted(
+            r.attempt_count for r in records)
+
+    def test_best_k_never_selects_a_failed_simulation(self, tmp_path):
+        """inf is an infinitely-bad discrepancy, not the loosest acceptable one --
+        it must not become one of the k closest however small the budget."""
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        od = OutputDir(tmp_path, "rejection_best_k_inf").ensure()
+        losses = iter([float("inf"), 4.0, float("inf"), 2.0])
+
+        cfg = {**_test_inference_cfg(), "max_simulations": 4, "k": 3}
+        records = run_rejection_abc(lambda p, seed: next(losses),
+                                    {"x": (-1.0, 1.0)}, cfg, od, replicate=0, seed=1)
+        assert sorted(r.loss for r in records) == [2.0, 4.0]
+
+    def test_an_unknown_rejection_mode_is_refused(self, tmp_path):
+        from async_abc.io.paths import OutputDir
+        from async_abc.inference.rejection_abc import run_rejection_abc
+
+        od = OutputDir(tmp_path, "rejection_bad_mode").ensure()
+        cfg = {**_test_inference_cfg(), "max_simulations": 4, "k": 2,
+               "rejection_mode": "quantile"}
+        with pytest.raises(ValueError, match="must be 'best_k' or 'threshold'"):
+            run_rejection_abc(lambda p, seed: 1.0, {"x": (-1.0, 1.0)}, cfg, od,
+                              replicate=0, seed=1)
+
+    def test_shipped_configs_no_longer_threshold_at_the_shared_tolerance(self):
+        """The regression this mode exists to prevent: at the shared tol_init the
+        arm accepted 86-99% of prior draws and reported a prior sample."""
+        import json
+        from pathlib import Path
+
+        for name in ("gaussian_mean.json", "gandk.json", "cellular_potts.json"):
+            cfg = json.loads((Path(__file__).parents[1] / "configs" / name).read_text())
+            assert "rejection_abc" in cfg["methods"], name
+            assert cfg["inference"].get("rejection_mode", "best_k") == "best_k", name
 
     def test_method_execution_mode_unknown_raises(self):
         """method_execution_mode with an unknown name should raise KeyError."""
