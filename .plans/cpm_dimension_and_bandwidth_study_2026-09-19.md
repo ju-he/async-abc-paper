@@ -164,3 +164,51 @@ other arms are "far below"; against a rejection arm that now sits at sd ~0.09 ar
 gap is a few-fold rather than the roughly forty-fold those numbers imply. The direction still favours
 the method on this benchmark, but the numbers have to be re-derived rather than re-used, and the
 honest framing is much more modest. Re-deriving them belongs with the paper rewrite, not here.
+
+---
+
+# Addendum — Route E, first screen (job 14262057): mis-designed, but informative
+
+3,108 evaluations at 80³ / t=1001, 0.68 node hours, zero failures.
+
+**The two-parameter setup gets stronger at this size**, which is worth having on its own:
+
+| parameter | identifiability at 50³/t=501 | at 80³/t=1001 | confounding with division_rate |
+|---|---|---|---|
+| division_rate | 21.9 | **30.1** | — |
+| cell_volume | 14.0 | **23.9** | **0.08** |
+
+**But the third-direction candidates went the wrong way**, and not because Route E failed:
+
+| candidate | identifiability 50³ → 80³ | confounding 50³ → 80³ |
+|---|---|---|
+| `adhesion_cl` | 1.7 → 1.75 | **0.05 → 0.84** |
+| `persistence` | 2.0 → 1.13 | **0.00 → 0.70** |
+
+**The screen did not test what it was meant to.** Median cell count came out at **76**, barely above
+the 50³/t=501 baseline of ~49 — because the `division_rate` prior was widened *downward*
+([0.0002, 0.2] log) to avoid saturation at the doubled duration, which exactly cancels the point of
+the bigger box. A bigger box does not create cells; the division rate and the duration do. With half
+the prior mass below 5 cells and a tail reaching 2,174, `log_n` dominated every response direction
+(between-theta 0.979 against within-theta 0.017, SNR 56) and dragged both weak parameters onto the
+count axis. `adhesion_cl` is now carried by `log_n` (37%) where at 50³ it was carried by
+`radial_fa_equal_volume` (86%) — the signature of exactly that artifact.
+
+**The corpus calibrates the re-run for free.** Cells at t=1000 against `division_rate`, with fill
+fraction against the box capacity:
+
+| division_rate | median cells | p90 | median fill |
+|---|---|---|---|
+| [0.002, 0.004) | 29 | 52 | 0.03 |
+| [0.004, 0.008) | 78 | 122 | 0.07 |
+| **[0.008, 0.016)** | **234** | 476 | **0.19** |
+| **[0.016, 0.05)** | **388** | 769 | **0.36** |
+| [0.05, 0.2) | 659 | 1398 | 0.62 (p90 0.91 — saturating) |
+
+So the band that gives many cells without filling the box is **[0.008, 0.05]**: 234-388 cells
+against the 50³ baseline's ~49, at 19-36% fill. Job **14262079** re-screens there
+(`division_rate` [0.006, 0.04], `cell_volume` narrowed to [200, 800] so the worst corner — highest
+rate, largest cells — stays near 55% fill rather than saturating).
+
+**Route E is therefore still open, not refuted.** The first screen tested a low-cell-count regime
+with a badly conditioned prior; the second tests the regime the route is actually about.
