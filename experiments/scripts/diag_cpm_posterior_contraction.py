@@ -153,7 +153,8 @@ def replay_reported_posterior(group: Sequence[Dict], names: Sequence[str],
 
 
 def run(results_csv: Path, config_path: Path, *, top_k: int,
-        methods: Sequence[str] | None, prefix: int | None = None) -> Dict:
+        methods: Sequence[str] | None,
+        prefix: Sequence[int] | None = None) -> Dict:
     with open(config_path) as f:
         cfg = json.load(f)
     benchmark_cfg = cfg["benchmark"]
@@ -195,13 +196,31 @@ def run(results_csv: Path, config_path: Path, *, top_k: int,
             sub = theta[finite][best]
             entry["top_k"] = summarise(sub, np.ones(len(sub)), truth, names)
             _print(f"top-{top_k} archive", entry["top_k"], names, forecast)
-        if prefix and len(group) > prefix:
+        for cut in sorted(prefix or []):
+            if len(group) <= cut:
+                continue
             positions, weights = replay_reported_posterior(
-                group, names, inference_cfg, prefix)
-            if len(positions) > 2:
-                entry["prefix"] = summarise(positions, weights, truth, names)
-                _print(f"reported over the first {prefix} arrivals",
-                       entry["prefix"], names, forecast)
+                group, names, inference_cfg, cut)
+            if len(positions) <= 2:
+                continue
+            entry.setdefault("prefix", {})[str(cut)] = summarise(
+                positions, weights, truth, names)
+            _print(f"reported over the first {cut} arrivals",
+                   entry["prefix"][str(cut)], names, forecast)
+            # The archive at the same cut: the sampler's own best-k, which is
+            # what separates "the sampler has not found it yet" from "the
+            # reporting rule has not tightened onto it yet".
+            head = sorted(group, key=lambda r: float(r["sim_end_time"] or r["step"]))[:cut]
+            head_theta = np.array([[float(r[f"param_{n}"]) for n in names] for r in head])
+            head_loss = np.array([float(r["loss"]) for r in head])
+            ok = np.isfinite(head_loss)
+            if ok.sum() > 2:
+                best = np.argsort(head_loss[ok])[:top_k]
+                sub = head_theta[ok][best]
+                entry.setdefault("prefix_top_k", {})[str(cut)] = summarise(
+                    sub, np.ones(len(sub)), truth, names)
+                _print(f"top-{top_k} archive within the first {cut}",
+                       entry["prefix_top_k"][str(cut)], names, forecast)
         print()
         results[f"{method}_rep{replicate}"] = entry
     return {"truth": {n: float(t) for n, t in zip(names, truth)},
@@ -232,9 +251,10 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=100,
                         help="archive size for the unweighted cross-check")
     parser.add_argument("--methods", nargs="*", default=None)
-    parser.add_argument("--prefix", type=int, default=None,
+    parser.add_argument("--prefix", type=int, nargs="*", default=None,
                         help="also replay the reported estimator over the first N "
-                             "arrivals, for a budget-matched comparison")
+                             "arrivals, for a budget-matched comparison; several "
+                             "values trace contraction against budget")
     parser.add_argument("--json", type=Path, default=None,
                         help="also write the numbers here")
     args = parser.parse_args()
