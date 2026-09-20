@@ -561,3 +561,23 @@ k the way the harness currently does.
 **What to check next:** coverage at small k (ESS 72-102 is a noisy estimate even if the target is
 sharper), and whether the same ordering holds on 4-D g-and-k, where eps ~ k^0.28 makes the bandwidth
 penalty five times smaller and the advice may well be right.
+
+---
+
+# Five-replicate confirmation (jobs 14261956 control, 14262214 fixed)
+
+Asynchronous arm, five replicates each, everything identical but `tol_init`:
+
+| | division_rate | cell_volume | ESS | eps (k=100) | coverage |
+|---|---|---|---|---|---|
+| control, `tol_init` 10.0 | 84% +/- 6% | **13% +/- 14%** | 760 | 6.3e-05 | 5/5 |
+| **fixed, `tol_init` 0.1** | **92% +/- 1%** | **81% +/- 1%** | 352 | 7.6e-05 | 5/5 |
+
+**+68 points on the weak parameter, and the between-replicate spread collapses from +/-14% to +/-1%.**
+The shipped setting was erratic as well as wrong, which is why a single validation replicate showed
+58% where the five-replicate mean is 13%. Coverage holds 5/5 in both.
+
+**eps is essentially identical between the two arms** (6.3e-05 against 7.6e-05, within 20%). Same
+sampling, radically different reported posterior — the final confirmation that the bandwidth defect
+was purely a reporting problem and the sampler always found the target. The fixed configuration also
+gives a far more reproducible posterior, which matters for anything reported with error bars.
