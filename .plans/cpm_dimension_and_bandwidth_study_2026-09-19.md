@@ -624,3 +624,35 @@ side of a known boundary rather than results to be excused.
 **Method note for anything downstream:** always filter to `record_kind == 'simulation_attempt'` before
 comparing methods on budget. The mixed-row defect silently favours whichever arm reports accepted
 particles.
+
+---
+
+# FINAL — the CPM production comparison, both arms correctly configured
+
+Five replicates per method, 3600s wall clock each, counting only
+`record_kind == 'simulation_attempt'`:
+
+| | throughput | per-simulation | **equal wall clock** |
+|---|---|---|---|
+| control, `tol_init` 10.0 | 2.35x | 2.51x | **7.06x** |
+| **fixed, `tol_init` 0.1** | 2.37x | 1.44x | **4.09x** |
+
+**Fixing `tol_init` helps the synchronous baseline more than the asynchronous arm** — the baseline's
+eps improves 4.5e-04 -> 3.1e-04 while the asynchronous arm's barely moves (6.3e-05 -> 7.6e-05, within
+replicate noise). That is exactly what should happen: `tol_init` is shared by construction, the
+matched-epsilon baseline starts from it too, and the arm that was suffering more from a bad value
+gains more from a good one.
+
+**So the number to report is 4.09x, not 7.06x.** The larger figure comes from a configuration that
+handicapped the baseline, and using it would be the same class of error as the rejection-ABC defect.
+
+**Two distinct quantities, both needed:**
+
+* **eps** measures where the samplers draw. Asynchronous is **4.09x** ahead at equal wall clock
+  (2.37x throughput x 1.44x per-simulation).
+* **The reported posterior** is what the paper's quality claim rests on, and there the bandwidth fix
+  is not optional: `cell_volume` contraction 13% +/- 14% -> **81% +/- 1%**, coverage 5/5 both ways.
+
+The fix is therefore necessary for our own claim *and* narrows the sampling gap. Both belong in the
+write-up; reporting only the first would be dishonest, and reporting only the second would understate
+the method.
