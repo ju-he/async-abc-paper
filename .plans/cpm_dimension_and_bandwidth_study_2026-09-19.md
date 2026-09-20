@@ -775,7 +775,26 @@ runtime distribution to within 2%.
    drives its straggler factor, which is why the prediction landed. **Predict from the arm's own
    in-run distribution, not from a prior-wide screen.**
 
-**Still open:** the third synchronous replicate; the posterior from this run (read it with
+**Still open:** the posterior from this run (read it with
 `tol_init` 0.04 in mind rather than the 0.1 used — the 80³ prior median discrepancy is 0.200, not
 0.459); and whether the ratio keeps tracking the straggler prediction at higher worker counts, where
 `E[max of P]/E[mean]` grows (predicted 2.11x at P=384 for CV 0.26).
+
+## Completed — all three replicates per arm
+
+| | async | sync | ratio |
+|---|---|---|---|
+| worker utilisation | **97.5%** | 48.6% | **2.01x** (predicted 1.90x) |
+| eps at equal simulations (481) | 0.0224 | 0.0495 | **2.21x** |
+| eps at equal wall clock | **0.00292** | 0.0495 | **16.94x** |
+
+**Do not headline the 16.94x.** It is budget-dependent: at a one-hour budget both arms sit in the
+steep early part of their eps(n) curves, and going from 481 to 988 simulations improved the
+asynchronous arm's eps by 7.7x — an exponent of -2.9. So throughput *compounds* through a steep
+quality curve rather than multiplying, and `fair_convert.py`'s printed multiplicative decomposition
+(2.05 x 2.21 = 4.54) does not reconcile with the measurement for exactly that reason. **Fix that
+script's decomposition line before reusing it.**
+
+**The stable quantity is the 2.01x utilisation/throughput ratio** — it matches the straggler
+prediction and is a property of the workload rather than of the budget. Quote that for the systems
+claim, and quote eps ratios only with their budget stated.
