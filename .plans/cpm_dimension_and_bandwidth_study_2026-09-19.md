@@ -581,3 +581,46 @@ The shipped setting was erratic as well as wrong, which is why a single validati
 sampling, radically different reported posterior — the final confirmation that the bandwidth defect
 was purely a reporting problem and the sampler always found the target. The fixed configuration also
 gives a far more reproducible posterior, which matters for anything reported with error bars.
+
+---
+
+# CORRECTION — the cross-method comparisons were counting the wrong rows
+
+**The defect.** `abc_smc_baseline` emits **two** record kinds: `population_particle` (accepted, so
+pre-filtered to small losses) and `simulation_attempt`. The asynchronous arm emits only attempts.
+Every cross-method comparison above that counted raw CSV rows therefore mixed accepted particles into
+the baseline's "budget" and flattered it. Measured on the CPM control: baseline replicate 0 has 8,077
+rows but a maximum `attempt_count` of 5,777.
+
+**What changes.** Counting only `record_kind == 'simulation_attempt'`:
+
+| benchmark | dim | sim cost | per-simulation | throughput | net at equal wall clock |
+|---|---|---|---|---|---|
+| gaussian_mean | 1 | ~us | async **1.13x worse** | async **3.64x worse** | **~4x worse** |
+| g-and-k | 4 | ~4 ms | async **1.50x better** | async 2.78x worse | **~1.9x worse** |
+| lotka_volterra | 4 | ~1 s | async **1.52x better** | async 1.12x worse | **~1.4x better** |
+| **Cellular Potts** | 2 | ~3.7 s | async **2.51x better** | async **2.35x better** | **~7.06x better** |
+
+Two earlier claims in this document are wrong and are corrected here:
+
+* "the asynchronous arm is 1.2-2x *worse* per evaluation on g-and-k" — **it is 1.50x better**.
+* "3.8x tighter at equal compute on CPM (1.67x throughput x 2.2x per-evaluation)" — **it is 7.06x
+  (2.35x throughput x 2.51x per-simulation)**.
+
+## The mechanism is simulator cost, not dimension
+
+The throughput column is **monotone in cost per simulation**: 3.64x worse at microseconds, 2.78x at
+4 ms, 1.12x at ~1 s, 2.35x *better* at 3.7 s. The asynchronous method pays a roughly fixed
+per-arrival cost — rebuild the proposal, compute the weight, update the archive — which dominates a
+4 ms simulation and vanishes against a 3.7 s one. **The crossover is around 1-3 s per simulation**,
+and every benchmark falls on the side its cost predicts.
+
+The *sampler* meanwhile is better per simulation on three of four benchmarks and only marginally
+worse on the 1-D analytic one. **The losses are not a sampling deficiency; they are coordination
+overhead spent on simulations too cheap to justify it.** That is the paper's own thesis with a
+measured crossover instead of an assertion, and it reframes g-and-k and gaussian_mean as the correct
+side of a known boundary rather than results to be excused.
+
+**Method note for anything downstream:** always filter to `record_kind == 'simulation_attempt'` before
+comparing methods on budget. The mixed-row defect silently favours whichever arm reports accepted
+particles.
