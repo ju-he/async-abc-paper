@@ -741,3 +741,41 @@ Assets built for this: `sim_config_80`, `config_builder_params_80` (seeding re-c
 a distance but the per-block IQR scaling and block norms do not), a fresh 4-seed reference verified
 at `motilityamount[9]=1400` / volume 400 / `rnd() <= 0.015` giving 415-459 cells at 33% fill, and
 `experiments/jobs/cpm_reference.sh` since reference generation had no batch path.
+
+---
+
+# RESULT — the 80³ comparison (job 14262841): the prediction holds, and the 50³ claim was inflated
+
+Three asynchronous replicates and two of three synchronous (the third does not change the reading),
+3600s per method-replicate, ~170s per evaluation against 13.4s at 50³.
+
+| | async util | sync util | **measured ratio** | **predicted from runtime CV** |
+|---|---|---|---|---|
+| 50³ (13.4s/eval) | 99.8% | 42.8% | **2.33x** | 1.27x — **misses by 1.8x** |
+| **80³ (170s/eval)** | **97.5%** | **50.2%** | **1.94x** | **1.90x — holds to 2%** |
+
+Throughput counted independently from simulations agrees: 988 against 498 per replicate = 1.98x.
+
+**The excess at 50³ was pyABC's fixed per-generation overhead.** At 12x the simulation cost it has
+amortised away, and what remains is barrier idle — matching the straggler factor computed from the
+runtime distribution to within 2%.
+
+**Three consequences.**
+
+1. **The 50³ systems claim is inflated.** Its 2.33x is mostly implementation overhead, not the
+   barrier. The defensible number at realistic cost is **~1.94x** — smaller, but attributable to the
+   mechanism the paper claims, which is worth more than a larger number resting on a competitor's
+   generation bookkeeping. Any CPM systems figure quoted from the 50³ runs needs this caveat.
+2. **The predictive model is validated.** Straggler factor from the runtime distribution predicted
+   1.90x; measurement gave 1.94x. So **the advantage can be predicted from timing data alone, with no
+   baseline run** — which is exactly what a production project with an unknown posterior and no
+   compute to waste on a reference needs.
+3. **In-run runtime CV is 0.13 (async) and 0.23 (sync)**, below the prior-wide 0.26 measured on the
+   screening corpus, because the sampler concentrates as it runs. The synchronous arm's 0.23 is what
+   drives its straggler factor, which is why the prediction landed. **Predict from the arm's own
+   in-run distribution, not from a prior-wide screen.**
+
+**Still open:** the third synchronous replicate; the posterior from this run (read it with
+`tol_init` 0.04 in mind rather than the 0.1 used — the 80³ prior median discrepancy is 0.200, not
+0.459); and whether the ratio keeps tracking the straggler prediction at higher worker counts, where
+`E[max of P]/E[mean]` grows (predicted 2.11x at P=384 for CV 0.26).
