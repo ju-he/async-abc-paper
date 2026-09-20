@@ -656,3 +656,69 @@ handicapped the baseline, and using it would be the same class of error as the r
 The fix is therefore necessary for our own claim *and* narrows the sampling gap. Both belong in the
 write-up; reporting only the first would be dishonest, and reporting only the second would understate
 the method.
+
+---
+
+# The benchmark is a calibration instrument, not a scaled-down production run
+
+Production Cellular Potts simulations take **hours** on many cores. The micro-spheroids here take
+**3.7s**. That choice is deliberate and correct — inference is on synthetic data, so these runs exist
+only to evaluate the method against a known truth — but it has consequences the write-up must state
+rather than let a reader assume CPM-at-3.7s represents CPM.
+
+## Worker utilisation says the coordination overhead is already gone
+
+Measured on the fixed production run: **asynchronous 99.8%**, synchronous **42.8%**, giving 2.33x
+(against the 2.37x throughput ratio counted independently). So at 3.7s per simulation there is *no*
+per-arrival overhead left for larger simulations to amortise. Making simulations uniformly slower
+changes nothing.
+
+## But the benchmark is homogeneous, and that IS an artefact of its size
+
+| setup | mean runtime | **CV** | max/median | corr(runtime, cell count) |
+|---|---|---|---|---|
+| 50³ t=501 — what we benchmark | 13.4s | **0.05** | 2.3x | — |
+| 80³ t=1001, calibrated prior | 38.5s | **0.26** | 2.4x | **+0.99** |
+| 80³ t=1001, wide prior | 33.3s | **0.47** | 4.5x | **+0.99** |
+
+Runtime is **0.99-correlated with cell count**. At micro scale runtime is dominated by fixed overhead
+(grid setup, I/O) so cell count barely matters; scale up and the dynamics dominate, runtime tracks
+cell count, and cell count spans orders of magnitude across the prior. **The homogeneity is a
+property of the size we chose, not of the model.**
+
+## Which means we are currently measuring the wrong mechanism
+
+The straggler factor `E[max of P]/E[mean]` — the *structural* barrier cost, and the ceiling on the
+advantage — computed from each measured runtime distribution:
+
+| runtime distribution | P=100 | P=384 |
+|---|---|---|
+| 50³ micro (CV 0.05) | **1.27x** | 1.48x |
+| 80³ calibrated (CV 0.26) | 1.90x | 2.11x |
+| 80³ wide prior (CV 0.47) | **2.90x** | 3.26x |
+
+**Our measured 2.33x at 50³ sits against a straggler ceiling of only 1.27x.** So most of the current
+advantage is pyABC's fixed per-generation overhead and population/worker quantisation — precisely the
+components that *shrink* as simulations get slower — rather than barrier idle, which is the claim the
+paper makes. A reviewer could reasonably say the CPM systems result is an implementation artefact.
+
+Scaling the benchmark up fixes both halves at once: the advantage rises (1.27x -> 2.90x structural)
+**and** becomes attributable to the barrier.
+
+## Two things this gives the production project
+
+* **The benchmark's role should be stated explicitly**: a calibration instrument establishing the
+  method against a known truth, so production runs on unknown posteriors can be trusted. That is a
+  sound division of labour, but only if the cost and heterogeneity gap is stated.
+* **The advantage can be predicted from timing data alone.** The straggler factor is a pure function
+  of the runtime distribution, which production runs already log. Measure the CV, read off
+  `E[max of P]/E[mean]`, and that is the ceiling — **no baseline run required**. That answers the
+  "I cannot afford a wasteful reference at production scale" problem directly, and the
+  validate-cheap-extrapolate-via-measured-mechanism structure is itself worth writing up.
+
+## Recommended next experiment
+
+Async vs synchronous at **80³ / t=1001 with a wide division prior** (CV 0.47, ~33s per simulation).
+Needs new 80³ assets and a regenerated reference; roughly 3 node hours. It moves the measured
+mechanism from "pyABC per-generation overhead" to "barrier idle". **Not started — it changes what the
+CPM benchmark is, so it is a decision rather than a detail.**
