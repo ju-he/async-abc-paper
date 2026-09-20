@@ -1,0 +1,13 @@
+{
+  "feature_metadata": {
+    "log_r95": {},
+    "log_n": {}
+  },
+  "feature_space_model": "experiments/assets/cellular_potts/sims_feature_space_model_size_80.json",
+  "reference_data": "experiments/data/cpm_reference_80",
+  "lambda_dict": {},
+  "standardization_factors": {},
+  "sim_datahandler_kwargs": {
+    "scale_factor": 1
+  }
+}

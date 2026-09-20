@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Two-parameter CPM at 80^3 / t=1001 -- the cost-and-heterogeneity scaled setup.",
+    "Priors from the Route-E screen (job 14262079), which measured identifiability",
+    "46.2 for cell_volume and 15.6 for division_rate here against 14.0 and 21.9 at",
+    "50^3, with confounding 0.15. The division band gives 234-388 cells at 19-36%",
+    "box fill -- 6.4x the 50^3 population with nothing saturating.",
+    "Truths are the screen's centres."
+  ],
+  "parameters": {
+    "division_rate": {
+      "path": "define_functions.division_cond_cancer[1]",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "physical_range": [
+        0.006,
+        0.04
+      ],
+      "scale": "log"
+    },
+    "cell_volume": {
+      "path": "CellsInSilico.volume.default.value",
+      "range": [
+        0.0,
+        1.0
+      ],
+      "physical_range": [
+        200,
+        800
+      ],
+      "scale": "log"
+    }
+  },
+  "fixed": {
+    "motility": {
+      "path": "CellsInSilico.orientation.motilityamount[9]",
+      "value": 1400
+    }
+  }
+}
