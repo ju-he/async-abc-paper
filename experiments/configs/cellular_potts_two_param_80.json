@@ -1,0 +1,80 @@
+{
+  "_comment": [
+    "Cost-and-heterogeneity scaled CPM: 80^3 / t=1001, ~33s per simulation against",
+    "3.7s at 50^3. The point is the MECHANISM, not just the cost.",
+    "",
+    "At 50^3 the measured advantage is 2.33x but the straggler ceiling is only",
+    "1.27x (runtime CV 0.05), so most of it is pyABC per-generation overhead --",
+    "which shrinks at production scale -- rather than barrier idle, which is what",
+    "the paper claims. Runtime correlates 0.99 with cell count, and at 80^3 the CV",
+    "rises to 0.26-0.47, putting the straggler ceiling at 1.90-2.90x. This run",
+    "measures which mechanism actually dominates when the simulation is realistic.",
+    "",
+    "Assets are all 80^3 variants; the feature-space model is REFITTED on the 80^3",
+    "corpus because the shipped one was fitted where log_n ~ log(50) against",
+    "log(313) here. Priors and truths are the Route-E screen's calibrated band",
+    "(job 14262079): identifiability 46.2 / 15.6, confounding 0.15, 313 cells",
+    "median at 24% box fill.",
+    "",
+    "tol_init 0.1 carried over from the 50^3 sweep; the block-normalised distance",
+    "should be on a similar scale, and the companion prior corpus checks it."
+  ],
+  "experiment_name": "cellular_potts_two_param_80",
+  "benchmark": {
+    "name": "cellular_potts",
+    "nastja_config_template": "experiments/assets/cellular_potts/sim_config_80.json",
+    "config_builder_params": "experiments/assets/cellular_potts/config_builder_params_80.json",
+    "distance_metric_params": "experiments/assets/cellular_potts/distance_metric_params_size_80.json",
+    "parameter_space": "experiments/assets/cellular_potts/parameter_space_division_volume_80.json",
+    "reference_data_path": "experiments/data/cpm_reference_80",
+    "output_dir": "experiments/data/cpm_sims",
+    "engine_backend": "cis",
+    "seed_param_name": "random_seed",
+    "seed_param_path": "Settings.randomseed",
+    "true_division_rate": 0.015,
+    "true_params_scale": "physical",
+    "true_cell_volume": 400,
+    "n_replicates_per_evaluation": 4,
+    "average_reference_replicates": true
+  },
+  "methods": [
+    "async_propulate_abc",
+    "abc_smc_baseline"
+  ],
+  "inference": {
+    "max_simulations": 2000,
+    "n_workers": 48,
+    "k": 100,
+    "tol_init": 0.1,
+    "n_generations": 1000,
+    "max_wall_time_s": 3600,
+    "scheduler_type": "acceptance_rate",
+    "perturbation_scale": 0.8,
+    "propulate_budget_mode": "total_simulations",
+    "kernel": "gaussian",
+    "amis_snapshots": 20
+  },
+  "execution": {
+    "n_replicates": 3,
+    "base_seed": 0
+  },
+  "plots": {
+    "posterior": true,
+    "archive_evolution": true,
+    "corner": true,
+    "tolerance_trajectory": true,
+    "quality_vs_time": true
+  },
+  "analysis": {
+    "target_wasserstein": 2.0
+  },
+  "paper": {
+    "experiment_role": "validity",
+    "method_comparison_roles": {
+      "async_propulate_abc": "proposed_async_method",
+      "pyabc_smc": "external_framework_reference",
+      "rejection_abc": "small_model_reference",
+      "abc_smc_baseline": "main_sync_baseline"
+    }
+  }
+}
