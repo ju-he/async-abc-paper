@@ -722,3 +722,22 @@ Async vs synchronous at **80³ / t=1001 with a wide division prior** (CV 0.47, ~
 Needs new 80³ assets and a regenerated reference; roughly 3 node hours. It moves the measured
 mechanism from "pyABC per-generation overhead" to "barrier idle". **Not started — it changes what the
 CPM benchmark is, so it is a decision rather than a detail.**
+
+## 80³ setup validated (job 14262842, 1000 prior draws, 0 failures)
+
+* **162.7s per evaluation** against 13.4s at 50³ — a **12x** cost increase (better than the 8x
+  estimated from volume x duration).
+* Prior median discrepancy **0.200** against 0.459 at 50³. `tol_init: 0.1` is therefore ~1/2 of the
+  median here rather than the ~1/5 the 50³ sweep recommended; same order, so the comparison run is
+  sound, but **0.04 is the rule-consistent value** and the posterior from job 14262841 should be read
+  with that in mind.
+* The fair 48-rank rejection baseline is **stronger at 80³**: at 2% acceptance `cell_volume` 73%
+  (against 58% at 50³) and `division_rate` 86% (against 89%), coverage at every level. Consistent with
+  the screen's identifiability jump (46.2 against 14.0 for `cell_volume`).
+
+Assets built for this: `sim_config_80`, `config_builder_params_80` (seeding re-centred to 40),
+`parameter_space_division_volume_80`, a two-scalar feature-space model **refitted on the 80³ corpus**
+(the shipped one was fitted where log_n ~ log(50) against log(313) here — a location shift cancels in
+a distance but the per-block IQR scaling and block norms do not), a fresh 4-seed reference verified
+at `motilityamount[9]=1400` / volume 400 / `rnd() <= 0.015` giving 415-459 cells at 33% fill, and
+`experiments/jobs/cpm_reference.sh` since reference generation had no batch path.
