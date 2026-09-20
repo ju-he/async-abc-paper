@@ -1,0 +1,2 @@
+experiment_name,elapsed_s,estimated_full_s,estimated_full_unsharded_s,estimated_full_sharded_wall_s,aggregate_compute_s,total_n_simulations,mean_sims_per_worker_s,test_mode,run_mode,timestamp
+cellular_potts_two_param,38514.459,,,,,,,False,full,2026-09-20T01:38:07
