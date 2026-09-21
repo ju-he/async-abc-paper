@@ -93,6 +93,12 @@ def _eps_at(sub: pd.DataFrame, n: int) -> float:
     return float(np.median(vals)) if vals else float("nan")
 
 
+def _eps_final(sub: pd.DataFrame) -> float:
+    """Median over replicates of the k-th order statistic at each replicate's own final count."""
+    vals = [float(g.loc[g["n"].idxmax(), "eps"]) for _, g in sub.groupby("replicate")]
+    return float(np.median(vals)) if vals else float("nan")
+
+
 def summarise(c: pd.DataFrame) -> pd.DataFrame:
     out = []
     for name, (_, dim) in BENCHMARKS.items():
@@ -105,7 +111,7 @@ def summarise(c: pd.DataFrame) -> pd.DataFrame:
         n_a = per_rep[per_rep.method == "async"].n_sims.median()
         n_s = per_rep[per_rep.method == "sync"].n_sims.median()
         n_match = int(min(n_a, n_s))
-        eps_a_full, eps_s_full = _eps_at(a, int(n_a)), _eps_at(s, int(n_s))
+        eps_a_full, eps_s_full = _eps_final(a), _eps_final(s)
         eps_a_m, eps_s_m = _eps_at(a, n_match), _eps_at(s, n_match)
         out.append(dict(benchmark=name, dim=dim,
                         sim_cost_s=float(per_rep.sim_s.median()),
@@ -132,7 +138,11 @@ def main() -> None:
         summ.to_csv(vdir / "matched_eps_summary.csv", index=False)
         print(f"vendored {vdir}/matched_eps_{{curves,summary}}.csv")
     else:
-        summ = pd.read_csv(vdir / "matched_eps_summary.csv")
+        # The summary is a pure function of the vendored curves; recompute it so a
+        # change of definition here never leaves a stale summary behind.
+        c = pd.read_csv(vdir / "matched_eps_curves.csv")
+        summ = summarise(c)
+        summ.to_csv(vdir / "matched_eps_summary.csv", index=False)
     pd.set_option("display.width", 250)
     print(summ.to_string(index=False, float_format=lambda x: f"{x:.3g}"))
 
