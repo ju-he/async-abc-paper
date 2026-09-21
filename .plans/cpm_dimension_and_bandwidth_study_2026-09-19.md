@@ -919,3 +919,32 @@ the straggler rank finishes its 1/16 share — exactly the twin's timing), which
 limited arm remains the throughput reference. Table `tab:twin` gets a third posterior row, the
 limitation item about the missing matched-budget control goes away, and Tier C1 of the
 remediation plan is closed.
+
+---
+
+# CORRECTION — the cost crossover is milliseconds, not seconds (2026-09-21, `tab_matched_eps`)
+
+The "CORRECTION — the cross-method comparisons were counting the wrong rows" section above gave
+Lotka–Volterra a simulator cost of ~1 s and placed the throughput crossover at 1–3 s per
+simulation. The 1 s was the *heterogeneity benchmark's* injected base delay; Lotka–Volterra's
+simulations take **4 ms** (mean `sim_end − sim_start`, `make_matched_eps_table.py`, arrival order,
+`simulation_attempt` rows only, five replicates, medians):
+
+| benchmark | dim | cost / sim | throughput async/sync | per-simulation (ε at matched n) | equal wall clock |
+|---|---|---|---|---|---|
+| gaussian_mean | 1 | 0.13 ms | 0.28 | 0.78 | 0.22 |
+| g-and-k | 4 | 1.7 ms | 0.46 | 1.06 | 0.86 |
+| lotka_volterra | 4 | 4.2 ms | 0.96 | 1.30 | 1.30 |
+| cellular_potts (50³, fixed) | 2 | 13.5 s | 2.39 | 1.60 | 4.63 |
+
+Both ratios are monotone in the cost of a simulation. **Throughput parity is reached at about
+4 ms per simulation and the net (equal-wall-clock) advantage turns positive between 2 and 4 ms**;
+by 13 s the asynchronous arm is 2.4x on throughput and 1.6x per simulation. This is a stronger
+boundary statement than the one in the plan (C3), and it is what the paper should make.
+
+Two definitional notes. "Per-simulation" here is ε at n = the smaller arm's *full* count (the
+whole run of the slower arm), not at a 50,000-draw prefix as in the earlier g-and-k analysis
+(1.50x there, 1.06x here): the asynchronous ε(n) curve on g-and-k is flatter than the baseline's,
+so the per-simulation lead depends on where it is read, and the curves (`fig_eps_curves`) are the
+honest object. And the synchronous baseline's evaluation counts per replicate vary a lot on
+g-and-k (medians used throughout).
