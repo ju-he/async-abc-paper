@@ -475,7 +475,62 @@ The same cost sets the scaling boundary on a cheap simulator. On Lotka--Volterra
 \end{figure}
 
 \subsection{The reported posterior: calibration, recovery, and what limits it (C4)}\label{sec:results-posterior}
-[to be written]
+
+\paragraph{Calibration.} Table~\ref{tab:sbc} gives simulation-based calibration of the reported full-history estimator ($1000$ trials, matched simulation budget). On the one-dimensional Gaussian mean it tracks the nominal level at every level ($0.51/0.80/0.90/0.94$); the synchronous baseline under-covers at every level ($0.35/0.63/0.75/0.83$), and with a Monte Carlo standard error of ${\pm}0.007$--$0.016$ per entry that ordering is resolvable, not noise. On a bimodal target ($y_i\sim\mathcal N(\theta^2,\sigma^2)$, the case a top-$k$ archive is most at risk of collapsing onto one mode) the archive retains both modes in $86\%$ of trials and coverage is $0.50/0.82/0.91/0.96$. On the four-dimensional g-and-k model the estimator is \emph{conservative}: $0.62/0.91/0.96/0.99$ for the location parameter and similarly for the others. That is a reporting-support effect, not a weighting failure: the top-$k$ archive alone would under-cover ($0.85/0.89$ at the $0.90/0.95$ levels), the full history over-covers, coverage rises monotonically through nominal as the reported support grows from one to the other, and doubling the simulation budget leaves it unchanged. A sweep of the archive size and snapshot buffer on a $d$-dimensional Gaussian target (Appendix~\ref{app:moved}) finds the buffer saturating at $S=5$ in every dimension and the archive size mattering, non-monotonically, with a genuinely miscalibrated region at $d=8$, $k=50$; $k=100$ is within $7\%$ of the fastest archive and the best calibrated of those swept.
+
+\begin{table}[t]
+\caption{Simulation-based calibration of the reported posterior ($1000$ trials; empirical coverage of central intervals at the nominal levels; Monte Carlo standard error ${\pm}0.007$--$0.016$). The g-and-k row is the location parameter; the other three behave alike. Nominal is best.}\label{tab:sbc}
+\centering
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+Target & Method & 0.50 & 0.80 & 0.90 & 0.95 \\
+\midrule
+Gaussian mean (1-D)     & asynchronous & 0.51 & 0.80 & 0.90 & 0.94 \\
+                        & synchronous baseline & 0.35 & 0.63 & 0.75 & 0.83 \\
+Bimodal $\mathcal N(\theta^2,\sigma^2)$ (1-D) & asynchronous & 0.50 & 0.82 & 0.91 & 0.96 \\
+g-and-k (4-D), parameter $A$ & asynchronous, full history & 0.62 & 0.91 & 0.96 & 0.99 \\
+                        & asynchronous, top-$k$ archive & --- & --- & 0.85 & 0.89 \\
+\botrule
+\end{tabular}
+\end{table}
+
+\paragraph{Recovery against a reference posterior.} Where a reference exists, Fig.~\ref{fig:reported-recovery} scores each method on the posterior it reports, replayed over wall-clock prefixes. On the Gaussian mean the asynchronous estimator sits at $W_1=0.008$--$0.016$ from the analytic posterior at every checkpoint, the baseline's final population at $0.019$--$0.028$ (uniformly weighted; its history was not kept), and a fairly budgeted rejection sampler's best $100$ of $20{,}000$ draws at $0.011$ --- on a one-dimensional target with that many draws, rejection is as good as the reported estimator, and the advantage of an adaptive proposal is a story of dimension and cost, not of the analytic case. On the four-dimensional g-and-k the order reverses: the baseline ends at $0.029$, the asynchronous estimator at $0.069$, rejection at $0.47$. The lower panels say why. The reported posterior's effective sample size is $237$--$303$ at every checkpoint of the Gaussian run while the history grows from $10^5$ to $1.3\times10^6$ particles, and a controlled sweep puts $\mathrm{ESS}/k$ between $1.9$ and $3.6$ over $k\in\{50,100,200\}$ and $n$ up to $8\times10^4$: reporting at the tightest bandwidth reached, while that bandwidth is set by ESS-retention bisection against the archive, leaves an effective support of a few multiples of $k$ however many particles are evaluated. In one dimension that support is small and stable; in four it is small and erratic --- $7$ to $2987$ at the same wall clock across replicates --- and accuracy follows it (log--log correlation $-0.80$ with $W_1$). The four-dimensional deficit is intermittent weight degeneracy, not bias, and the ceiling binds exactly when the target is identified enough for the bandwidth to tighten.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_reported_recovery.pdf}
+\caption{What the reported estimator recovers, and with how many effective particles. Each method is scored on the posterior it reports --- the asynchronous method's retroactive AMIS estimator replayed over the prefix completed by each checkpoint, the synchronous baseline's last completed generation (uniformly weighted; no history was kept), rejection ABC's $100$ best draws of its budget --- against the analytic posterior (a) and the g-and-k reference posterior (b). Top: $W_1$, median and inter-quartile range over five replicates. Bottom: the effective sample size of the reported posterior, with the evaluated-particle count dotted; the history grows by more than an order of magnitude and the effective sample does not follow it.}\label{fig:reported-recovery}
+\end{figure}
+
+\paragraph{A known truth on the real simulator.} On the two-parameter Cellular Potts setup all three methods recover the truth (Fig.~\ref{fig:cpm-posterior}, Table~\ref{tab:cpm-production}). The division rate is well identified by every method ($91$--$92\%$ contraction against the prior); the cell volume separates them: $81\%\pm1\%$ for the asynchronous estimator, $72\%\pm4\%$ for the baseline's last generation with pyABC's weights, $67\%$ for the best $100$ of $13{,}000$ rejection draws, with the truth inside the central $90\%$ interval of every replicate of every method. The asynchronous estimator is the tightest and carries the largest effective sample ($352$ against the baseline's $65$ of $100$).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.62\linewidth]{figures/fig_cpm_corner.pdf}
+\caption{Cellular Potts posterior (division rate, cell volume) on the fixed production run, replicate $0$: the asynchronous AMIS estimator ($500$ resampled draws), the synchronous baseline's last completed generation with pyABC's weights ($500$ resampled draws), and the $100$ best of $13{,}000$ rejection draws on $48$ ranks. Axes are the log-uniform prior coordinates ticked in physical units; dashed lines mark the truth. Every method recovers the division rate; the asynchronous estimator is the tightest on the cell volume.}\label{fig:cpm-posterior}
+\end{figure}
+
+\begin{table}[t]
+\caption{Cellular Potts $50^3$, five replicates per method, $3600$\,s on $48$ workers (means ${\pm}$ s.d.\ for contraction, medians otherwise). The first row is the asynchronous method with the shipped starting bandwidth ($10$, a thousand times the prior-predictive median discrepancy), the rest the production configuration ($0.1$). Rejection ABC is $13{,}000$ prior draws on all $48$ ranks, keeping the best $100$. Contraction is $1-\mathrm{sd}/\mathrm{sd}_{\mathrm{prior}}$; coverage counts replicates whose central $90\%$ interval holds the truth.}\label{tab:cpm-production}
+\centering
+\small
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+ & simulations & utilisation & $\epsilon_{(100)}$, end & division rate & cell volume & covered & ESS \\
+\midrule
+Asynchronous, $\epsilon_0=10$   & 13{,}300 & 99.8\% & $6.3\times10^{-5}$ & $84\pm6\%$ & $13\pm14\%$ & 5/5, 5/5 & 760 \\
+Asynchronous, $\epsilon_0=0.1$  & 12{,}900 & 99.8\% & $7.6\times10^{-5}$ & $92\pm1\%$ & $81\pm1\%$ & 5/5, 5/5 & 352 \\
+Synchronous baseline, $\epsilon_0=0.1$ & 5{,}400 & 42.8\% & $3.1\times10^{-4}$ & $91\pm1\%$ & $72\pm4\%$ & 5/5, 5/5 & 65 \\
+Rejection ABC, best $100$ of $13{,}000$ & 13{,}000 & --- & $2.9\times10^{-3}$ & $91\%$ & $67\%$ & yes, yes & 100 \\
+\botrule
+\end{tabular}
+\end{table}
+
+\paragraph{The starting bandwidth.} The first row of Table~\ref{tab:cpm-production} is the same sampler with the starting bandwidth the benchmark shipped with, $\epsilon_0=10$, and it reports $13\%\pm14\%$ on the cell volume --- erratic as well as poor. The sampler's draws are the same in both rows (the end tolerance is $6.3\times10^{-5}$ against $7.6\times10^{-5}$); what differs is the bandwidth the estimator reports at. The schedule walks down from $\epsilon_0$ at a bounded rate, one halving per search and one search per $k$ arrivals, so on an expensive simulator that transient is the whole run: at $\epsilon_0=10$ the bandwidth had not moved after $3000$ evaluations and ended $321\times$ above the tolerance the run's own draws supported; at $0.1$ it ends $2\times$ above it. On a simulator that affords millions of evaluations the transient is invisible, which is why the cheap benchmarks never showed it; it binds in exactly the regime the method is for. The rule that transfers is to set $\epsilon_0$ from a quantity measurable before the run and without the truth, the prior-predictive median discrepancy ($0.46$ here, from $2000$ prior draws): about a fifth of it. The retroactive alternative --- re-reporting a stored history at the $k$-th order statistic of its own losses, at no simulation cost --- reaches the same posterior ($93\%/85\%$ on replicate $0$) and is the check we apply, but an a priori setting is the less contestable fix.
+
+\paragraph{The archive size.} The effective sample size is a few multiples of $k$, so raising $k$ looks like the obvious lever; it is not a free one. Re-reporting one history at the order statistic for $k=10$ to $1000$ moves the cell-volume contraction monotonically from $85\%$ to $78\%$ with coverage held, because the reported bandwidth loosens with $k$. Running the sampler with $k=300$ is worse than that arithmetic: the bandwidth search interval defaults to $k$, so the schedule never left $\epsilon_0$ in an hour and the cell volume came out at $7\%$; with $k=30$ contraction matches $k=100$ but one of two replicates misses the truth on the division rate. On the cheap benchmarks the picture differs --- the bandwidth loosens only as $k^{0.28}$ on the four-dimensional g-and-k, and $k=100$ is Pareto-optimal for throughput and calibration on Lotka--Volterra (Appendix~\ref{app:moved}) --- so the archive size is a benchmark-dependent choice, to be made by checking calibration and the bandwidth the schedule reaches, not by a rule. The two settings together bound what the estimator delivers: the starting bandwidth decides whether the reported posterior reaches what the draws support within the budget, and the archive size decides how many effective particles it reports there. Where a production run cannot afford a calibration run, both are readable from its own history after the fact.
+
+The $80^3$ configuration is the reminder that both bind harder as simulations get more expensive: at a one-hour budget of about $1000$ evaluations every method reports a weak posterior there ($50\%/15\%$ asynchronous, $52\%/11\%$ baseline, $78\%/53\%$ for the best $100$ of $1000$ prior draws), and we use that size for the systems measurement of \S\ref{sec:results-barrier} only.
 
 \section{Discussion}\label{sec:discussion}
 The results support the three claims. Asynchronous execution helps most where it should: under a persistent straggler and under runtime heterogeneity, the generation barrier is the dominant cost and removing it preserves throughput that the synchronous baseline loses. For homogeneous, near-instantaneous simulators at large worker counts the asynchronous coordination overhead does not pay off: the multi-node Lotka--Volterra points, where the fair synchronous baseline overtakes the asynchronous method, make this honest boundary explicit. On the realistic Cellular Potts workload (the cost-bearing regime the design targets) the method scales almost linearly while the synchronous baseline, held at the generation barrier even when given a matching population, scales only sub-linearly --- at a small measured cost in posterior quality on that benchmark ($\S$\ref{sec:results-validity}), on a metric that penalizes the concentration the extra throughput buys.
