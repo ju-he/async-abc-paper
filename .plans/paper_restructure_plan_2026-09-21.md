@@ -161,3 +161,21 @@ Done, vendored, scripted (`experiments/scripts/`):
 Running: `make_matched_eps_table.py --refresh` (streams the three big campaigns; feeds tab:matched-eps and fig_crossover).
 
 Still to do before prose: `make_crossover_fig.py` (from the matched-ε summary); config-table rows for the CPM setups; the 50³ `fig_cpm_util`/scaling caption caveat (no regeneration needed); reported-recovery sync rows stay uniformly weighted (no histories kept) and the text must say so.
+
+## Regeneration complete (2026-09-21, later)
+
+All "before prose" items are done and committed (33778d6 … 342f77e). Added since the status
+above: `tab_cpm_knobs` (tol_init / k / re-report), the C1 arm in `tab_twin`, `tab_matched_eps` +
+`fig_eps_curves` + `fig_crossover`. **C3 changes:** the boundary is ~4 ms per simulation
+(throughput parity at Lotka–Volterra's 4 ms, net-positive between 2 and 4 ms), not 1–3 s — the
+study log's LV cost was wrong. State C3 as "milliseconds", and note that per-simulation efficiency
+also rises monotonically with cost (0.78 → 1.60).
+
+Figure/table inventory for the main text (final): F1 fig_predictor · F2 fig_straggler_throughput ·
+F3 fig_hetero_quality · F4 fig_crossover · F5 fig_scaling_combined (caveated caption) ·
+F6 fig_reported_recovery · F7 fig_cpm_corner · F8 fig_eps_curves (fig_cpm_eps with rejection → SI).
+T1 benchmarks (+cost, +CV) · T2 tab_twin merged (+predicted, +matched-budget posterior row) ·
+T3 tab_matched_eps summary · T4 SBC condensed · T5 tab_cpm_production. SI: tab_cpm_knobs,
+twin_cpm_decomposition, fig_cpm_eps, plus everything moved.
+
+Writing order: abstract + §1 + §6 (vocabulary), then §7 by claim, then §3–5, then §8–10, then SI.
