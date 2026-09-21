@@ -225,3 +225,22 @@ Still open:
   because thm:clt cites ass:stab(ii). §6 ≈1250 vs 800, §1 ≈760 vs 600; total main text ≈9.4k
   words, inside the 9–10k budget, so this is optional.
 - Submission checklist for S&C: author block, funding, acknowledgements, data deposit.
+
+## External reviews (2026-09-21, after commit 07364d5)
+
+Codex (GPT-5.6-Sol, xhigh) and a fresh Claude Fable subagent reviewed the manuscript
+independently with the same brief. Both: **major revision**. Reports and a verified digest with
+a suggested order of work: `.plans/reviews/{codex-gpt56sol,claude-fable,digest}-2026-09-21.md`.
+The three largest findings: the 50³ twin/scaling runs and the theory diagnostics are on the
+retired (division rate, motility) setup, undisclosed; the reported estimator is collapsed on the
+heterogeneity campaign for every arm (async full-history W1 up to 2.1 vs archive 0.02); the
+measured C1 ratios are not the straggler factor E[max]/μ the abstract defines.
+
+## Review response pass (2026-09-21, later)
+
+All seven digest items worked through (see `.plans/reviews/digest-2026-09-21.md`, section
+"Resolution"). Two findings from the raw records changed the paper's story: the twin's
+reported-posterior collapse is the per-rank bandwidth-search throttle (re-reporting at ε₍₁₀₀₎
+restores it; new `make_twin_rereport.py` + two vendored CSVs; Tables 3/4 lower blocks), and the
+C3 boundary was measured with 48 ranks spread 12 per node over four nodes (Appendix D corrected).
+Compiles clean, 62 pp. Open items (a)–(g) listed in the digest.
