@@ -280,7 +280,7 @@ def draw(frames):
         rej = sub[sub["method"] == REJECT].sort_values("wall_time")
         if len(rej):
             ax_w.text(0.97, 0.94,
-                      f"Rejection ABC: $W_1\\approx{rej['w1_median'].iloc[-1]:.2f}$",
+                      f"Rejection ABC: $W_1\\approx{rej['w1_median'].iloc[-1]:.3g}$",
                       transform=ax_w.transAxes, ha="right", va="top",
                       color=ps.COLORS["rejection"], fontsize=6.5)
 
@@ -305,7 +305,60 @@ def draw(frames):
     return fig
 
 
+def refresh_rejection(rerun_root: Path) -> None:
+    """Replace the rejection-ABC rows of the vendored frames with the best-k reruns.
+
+    The rejection arm of the 2026-07-07 campaign thresholded at the shared
+    ``tol_init`` and so accepted essentially every draw (a prior sampler, see
+    ``rejection_abc.py``). It was re-run alone in ``best_k`` mode (jobs
+    14262064/14262065): spend the same budget, keep the k=100 best. Those
+    records hold only the accepted set, so the rejection curve is its final
+    value at every checkpoint, exactly as the figure already drew it.
+    """
+    frames = fd.load_vendored("fig_reported_recovery")
+    summary, per_rep = frames["reported_recovery"], frames["reported_recovery_per_replicate"]
+    new_rows = []
+    for name in BENCHMARKS:
+        exp = rerun_root / f"rerun_{name}_rej" / f"{name}_rejection_rerun"
+        if not exp.exists():
+            print(f"[{name}] no rerun under {exp}; keeping the vendored rejection rows")
+            continue
+        cfg = json.loads((exp / "data" / "metadata.json").read_text())["config"]
+        params = BENCHMARKS[name]["params"]
+        reference = _reference(name, cfg["benchmark"], len(params))
+        df = pd.read_csv(exp / "data" / "raw_results.csv")
+        df = df[df["method"] == REJECT]
+        times = sorted(summary[(summary.benchmark == name) & (summary.method == ASYNC)]["wall_time"].unique())
+        for rep, g in df.groupby("replicate"):
+            vals = g[[f"param_{p}" for p in params]].to_numpy(float)
+            w1 = weighted_w1(vals, None, reference)
+            for t in times:
+                new_rows.append({"benchmark": name, "method": REJECT, "replicate": int(rep), "wall_time": float(t),
+                                 "n_records": int(len(g)), "w1": float(w1), "ess": float(len(g)), "ess_fraction": 1.0})
+        print(f"[{name}] rejection best-k: {df.groupby('replicate').size().to_dict()} accepted per replicate", flush=True)
+    new = pd.DataFrame(new_rows)
+    per_rep = pd.concat([per_rep[~((per_rep.method == REJECT) & per_rep.benchmark.isin(new.benchmark.unique()))], new],
+                        ignore_index=True)
+    agg = (new.groupby(["benchmark", "method", "wall_time"])
+              .agg(w1_median=("w1", "median"), w1_q1=("w1", lambda s: s.quantile(0.25)),
+                   w1_q3=("w1", lambda s: s.quantile(0.75)), ess_median=("ess", "median"),
+                   ess_fraction_median=("ess_fraction", "median"), n_records_median=("n_records", "median"),
+                   n_replicates=("w1", "size")).reset_index())
+    summary = pd.concat([summary[~((summary.method == REJECT) & summary.benchmark.isin(new.benchmark.unique()))], agg],
+                        ignore_index=True).sort_values(["benchmark", "method", "wall_time"])
+    frames = {"reported_recovery": summary, "reported_recovery_per_replicate": per_rep}
+    ps.apply()
+    saved = ps.save_paper_figure(draw(frames), "fig_reported_recovery", data=frames)
+    print(f"wrote {saved['pdf']}")
+    for name in new.benchmark.unique():
+        row = agg[(agg.benchmark == name)].iloc[-1]
+        print(f"  {name}: rejection W1 to reference {row.w1_median:.3g} [{row.w1_q1:.3g}, {row.w1_q3:.3g}]")
+
+
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--refresh-rejection":
+        refresh_rejection(Path(sys.argv[2]))
+        sys.exit(0)
     fd.run("fig_reported_recovery", __doc__, aggregate, draw,
            metadata={"estimator": "each method's own reported posterior",
                      "target": "analytic posterior (not a point mass at the truth)",
