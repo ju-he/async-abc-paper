@@ -179,3 +179,15 @@ T3 tab_matched_eps summary · T4 SBC condensed · T5 tab_cpm_production. SI: tab
 twin_cpm_decomposition, fig_cpm_eps, plus everything moved.
 
 Writing order: abstract + §1 + §6 (vocabulary), then §7 by claim, then §3–5, then §8–10, then SI.
+
+## Rewrite status (2026-09-21, end)
+
+Full first pass of the new structure is in the tex and committed (5214deb … f3bee0d): abstract,
+§1, §3 trims (+ε₀ rule), §4 short (CLT/r → Appendix A), §5 (+twin, +best-k), §6, §7.1–7.4, §8
+(four rules), §9 (bullets), §10, Appendix A (theory), E (CPM setup), F (additional results).
+Compiles clean (no undefined refs). 59 pages with SI.
+
+Next: a cold read for consistency — §2 (background/related work still long), the method
+comparison table's prose, Appendix D protocol (mentions of old figures), captions of moved
+figures; then figure polish (fig_predictor size/labels, fig_crossover label overlap); then the
+abstract ≤250-word check for S&C and the keywords.
