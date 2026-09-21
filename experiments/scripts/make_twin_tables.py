@@ -40,6 +40,9 @@ import pandas as pd
 SCRATCH = Path(os.environ.get(
     "ASYNC_ABC_SCRATCH", "/home/juhe/remotes/scratch/herold2/async-abc"))
 STRAGGLER_ROOT = SCRATCH / "twin2_20260729"
+# C1: the asynchronous arm re-run simulation-limited at exactly the twin's
+# evaluation count per slowdown, same seeds (2026-09-21, jobs 14264451-55).
+STRAGGLER_MATCHED_ROOT = SCRATCH / "twin3_20260921"
 HETERO_ROOT = SCRATCH / "heterotwin_20260730"
 CPM_TWIN = SCRATCH / "cpmtwin_20260729" / "scaling_cpm_twin" / "data"
 CPM_ASYNC = SCRATCH / "rerun_20260707" / "scaling_cpm" / "data"
@@ -66,15 +69,20 @@ def _median_by(frame: pd.DataFrame, index: str, columns: str, values: str) -> pd
 def straggler() -> pd.DataFrame:
     """Asynchronous arm + both twin granularities on the straggler benchmark."""
     arms = [
-        ("async", "straggler_async_wall", None),
-        ("twin_fine", "straggler_twin", 1),      # one barrier per W=16 evaluations
-        ("twin_coarse", "straggler_twinB", 7),   # per 7W=112, ~ the baseline's population of 100
+        ("async", STRAGGLER_ROOT, "straggler_async_wall", None, False),
+        ("twin_fine", STRAGGLER_ROOT, "straggler_twin", 1, True),      # one barrier per W=16 evaluations
+        ("twin_coarse", STRAGGLER_ROOT, "straggler_twinB", 7, True),   # per 7W=112, ~ the baseline's population of 100
+        # Same evaluation count as the twin at each slowdown, barrier off: its
+        # posterior columns are the matched-budget control; its throughput is
+        # not meaningful (per-rank generation counts end the run with the
+        # straggler rank, exactly as the twin's do).
+        ("async_matched", STRAGGLER_MATCHED_ROOT, "straggler_async_sim", None, True),
     ]
     rows = []
-    for arm, stem, barrier_every in arms:
+    for arm, root, stem, barrier_every, per_factor in arms:
         for factor in FACTORS:
-            # The async arm is one run over all factors; the twin arms are per-factor.
-            sub = STRAGGLER_ROOT / (stem if barrier_every is None else f"{stem}_f{factor}")
+            # The wall-limited async arm is one run over all factors; the others are per-factor.
+            sub = root / (f"{stem}_f{factor}" if per_factor else stem)
             path = sub / "data" / "throughput_vs_slowdown_summary.csv"
             if not path.exists():
                 raise SystemExit(f"missing {path}")
@@ -92,7 +100,7 @@ def straggler() -> pd.DataFrame:
     thr = _median_by(frame, "slowdown_factor", "arm", "throughput_sims_per_s")
     print("\ntab:twin -- median throughput (sims/s of active wall-clock):")
     print(thr.round(2).to_string())
-    print("\nratios (async / twin):")
+    print("\nratios (async / twin; the async_matched arm's throughput is not a throughput):")
     for arm in ("twin_fine", "twin_coarse"):
         print(f"  {arm:12}", "  ".join(
             f"{f}x={thr.loc[f, 'async'] / thr.loc[f, arm]:.0f}" for f in thr.index))
