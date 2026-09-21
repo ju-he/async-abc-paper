@@ -798,3 +798,124 @@ script's decomposition line before reusing it.**
 **The stable quantity is the 2.01x utilisation/throughput ratio** — it matches the straggler
 prediction and is a property of the workload rather than of the budget. Quote that for the systems
 claim, and quote eps ratios only with their budget stated.
+
+---
+
+# The 50³ twin re-read (2026-09-21): the barrier costs 1.2x, the rest is simulation duration
+
+Table `tab:twin-cpm` reports the barrierized twin 1.9x (48-192 workers) to 2.8x (384) slower than the
+asynchronous arm and attributes both the factor and the twin's 25-54% replicate spread to the barrier.
+Decomposing throughput = utilisation x (1 / mean simulation duration) from the stored records
+(`cpmtwin_20260729/scaling_cpm_twin`, async arm from `rerun_20260707/scaling_cpm`, same seeds):
+
+| W | throughput ratio | utilisation ratio | twin/async mean sim duration | twin per-generation E[max]/E[mean] |
+|---|---|---|---|---|
+| 48 | 1.91x | **1.18x** | 1.63x | 1.21 |
+| 96 | 1.87x | **1.19x** | 1.59x | 1.28 |
+| 192 | 1.86x | **1.21x** | 1.52x | 1.21 |
+| 384 | 2.82x | **1.21x** | 2.33x | 1.29 |
+
+The product reproduces the throughput ratio to two decimals in every row.
+
+* **The barrier's own cost is 1.18-1.21x at every scale**, and it equals the per-generation straggler
+  factor measured inside the twin (1.2-1.3) — the same `E[max of P]/E[mean]` model that predicted
+  the 80³ result (1.90 predicted, 2.01 measured). At 50³ the in-run runtime CV is ~0.10 (async
+  arm, every replicate, every W), so the ceiling is ~1.2x and the twin sits on it.
+* **The remaining 1.5-2.3x is the twin's simulations being longer**, not idle: async simulations take
+  5.1-5.3 s in every replicate at every W (CV 0.09-0.16), *including its first N arrivals* (5.0-5.3 s),
+  so it is not a sampling-phase effect. Twin simulations take 6.2-36 s with replicate-to-replicate
+  swings of 3.5x and CV up to 1.0, and no parameter correlation (|r| <= 0.5, mostly ~0.1-0.3). Same
+  simulator, same prior, same seeds. Candidates: barrier-synchronised I/O bursts (all W workers start
+  simulations simultaneously after each barrier; nastja writes to scratch), or filesystem load at the
+  time of the run (the twin was collected over retries after hangs). Even the fastest twin replicate
+  is 1.3x slower and 2.5x noisier than every async replicate, which points to a systematic component
+  on top of environmental noise — but the data cannot attribute it, and the paper must not.
+* **The "unpredictability" finding is wrong as stated.** Utilisation (0.83-0.85) and the per-generation
+  straggler factor are constant across the twin's replicates; what varied was simulation cost. The
+  paper's mechanism ("a generation inherits the cost of its most expensive parameter draw") is exactly
+  the quantity that did *not* vary.
+
+**Consequences.** The contributions bullet's "1.9-2.8x on the Cellular Potts workload" becomes
+"1.2x at 50³ (barrier idle, on the straggler ceiling) and 2.0x at 80³". The 50³ pyABC gap (2.33x
+at W=48, ~5x at 384) is 1.2-1.5x barrier plus pyABC's fixed per-generation overhead, which
+amortises away at 80³. And the systems story now has one organising quantity across every
+workload: **the barrier costs the straggler factor of the in-run runtime distribution**, verified by
+the twin at 50³ (1.2 predicted / 1.18-1.21 measured), by pyABC at 80³ (1.90 / 2.01), and — to be
+computed from the stored records — by the injected straggler/heterogeneity twins.
+
+Script: session scratchpad `twin_allW.py`; worth promoting to `experiments/scripts/` when the twin
+table is regenerated.
+
+---
+
+# The barrier's cost is predictable from the asynchronous arm's timing alone (2026-09-21)
+
+One model, no sync/twin data used in the prediction: a generation of W evaluations takes the
+maximum of its W effective per-evaluation durations (recorded duration + the per-evaluation
+coordination overhead measured on the asynchronous arm), so `T_sync_pred = W / E[max_W]`; the
+asynchronous arm's throughput is measured. Compared against the barrierized twin (fine granularity)
+on every workload we have:
+
+| workload | level | W | ratio predicted | ratio measured | pred/meas |
+|---|---|---|---|---|---|
+| straggler | 5x / 10x / 20x | 16 | 102 / 202 / 401 | 103 / 202 / 402 | **0.995 / 0.997 / 0.999** |
+| straggler | 0x / 1x | 16 | 1.0 / 20 | 80 / 48 | 0.01 / 0.42 — barrier *latency* dominates a 4 ms workload; the model has no latency term (the paper's existing reading) |
+| heterogeneity | σ = 0 / 0.5 / 1.0 | 48 | 1.00 / 2.77 / 6.34 | 1.06 / 2.79 / 6.61 | **0.94 / 0.99 / 0.96** |
+| heterogeneity | σ = 1.5 / 2.0 | 48 | 14.0 / 35.4 | 16.6 / 29.6 | 0.84 / 1.19 — E[max_48] of LN(0,2) is 147 s, set by rare draws; the twin has 10 generations per replicate (one drew 993 s), so the *measurement* is noisy here |
+| CPM 50³ | W = 48 / 96 / 192 | | 1.26 / 1.30 / 1.32 | 1.18 / 1.19 / 1.21 (utilisation) | 1.07–1.09 |
+| CPM 50³ | W = 384 | | 2.34 | 1.21 | 1.93 — the async sample at 384 ranks carries a contention tail (rep 4 CV 0.29) the twin's generations did not show |
+| CPM 80³ | W = 48 | | 1.90 | 2.01 | 0.95 |
+
+Two definitions mattered and are worth stating in the paper:
+
+* **Use recorded busy time per worker, not span.** On the straggler benchmark the asynchronous arm's
+  rank 0 spends its span ingesting ~3,000 arrivals/s from the other ranks — an asynchrony-only cost
+  that a barrierized generation never pays. Busy time (2.000 s at 20x) + the fast workers' overhead
+  (3.6 ms) predicts the twin to 0.1%.
+* **The timing sample must be uncensored.** The asynchronous heterogeneity arm ran a 60 s budget and
+  drops evaluations that finish after it, so its empirical durations are truncated at 60 s and the
+  bootstrap E[max] is biased low by 2–4x at σ ≥ 1.5. The injected law is known, so the parametric
+  E[max] is exact; for a real workload one needs a timing sample longer than the tail.
+
+This is the organising figure for the systems claim (proposed Fig. 1): predicted against measured on
+log–log from 1.2x to 400x, with the two failure regimes annotated (latency-bound: cost-free
+simulator with no straggler; contention at 384 ranks). Rows in the session scratchpad
+`predictor_rows2.csv`; script archived at `.plans/predictor_twin_from_async_timing.py` (promote to
+`experiments/scripts/make_predictor_fig.py` with vendored data when the figure is built).
+
+---
+
+# C1 — the matched-budget straggler twin (2026-09-21, jobs 14264451–55)
+
+The asynchronous arm re-run *simulation-limited* at exactly the twin's evaluation count per
+slowdown, same seeds (`straggler_async_sim_f{0,1,5,10,20}.json`, `twin3_20260921/`), 16 workers,
+five replicates. Reported (full-history AMIS) posterior, W1 to the analytic posterior, median
+[min, max] over replicates:
+
+| slowdown | evaluations | async, matched budget | twin fine (every W) | twin coarse (every 112) | async wall-limited (~1M evals) |
+|---|---|---|---|---|---|
+| 0x | 75,104 | 0.015 [0.008, 0.022] | 0.011 | 0.012 | 0.010 |
+| 1x | 44,512 | 0.013 [0.008, 0.016] | 0.008 | 0.011 | 0.013 |
+| 5x | 12,304 | 0.011 [0.009, 0.019] | 0.015 | 0.009 | 0.011 |
+| 10x | 6,304 | **0.008** [0.007, 0.012] | **0.737** | 0.016 | 0.011 |
+| 20x | 3,200 | **0.070** [0.008, 0.134] | **1.729** | 1.067 | 0.009 |
+
+(The earlier `twin_20260729/straggler_async_sim` run gives the 20,000-evaluation rung: 0.010–0.015
+at every slowdown.)
+
+**The twin's collapse is the barrier, not the budget.** At 6,304 evaluations the barrier-free arm
+is at 0.008 against the fine twin's 0.737; at 3,200 it is 0.070 against 1.729 (and 1.067 for the
+coarse twin). Same propagator, same seeds, same number of evaluations — only whether a worker
+waits. The paper's current hedge ("we do not read this as the barrier corrupting the estimator,
+because the two arms are not at a matched budget") can be replaced by the measured statement.
+Mechanism worth stating carefully: under a barrier every generation's W proposals come from one
+frozen archive state, so the AMIS denominator sees W identical proposal snapshots per generation
+and far fewer distinct ones over the run; the asynchronous arm's proposals are spread over a
+continuously updating archive. At 3,200 evaluations the asynchronous estimator is itself noisy
+(k = 100 on a 3,200-record history: 0.008–0.134), which is the honest caveat.
+
+**Throughput in these runs is not meaningful** (per-rank generation counts make the run end when
+the straggler rank finishes its 1/16 share — exactly the twin's timing), which is why the wall-
+limited arm remains the throughput reference. Table `tab:twin` gets a third posterior row, the
+limitation item about the missing matched-budget control goes away, and Tier C1 of the
+remediation plan is closed.
