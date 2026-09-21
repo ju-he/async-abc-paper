@@ -428,10 +428,51 @@ Predicted from asynchronous timing    & $1.26\times$ & $1.30\times$ & $1.32\time
 \paragraph{What the barrier does to the estimator.} The twin's throughput is not the only thing the barrier costs. Scored on the estimator this paper reports, against the analytic posterior, the twin's posterior collapses once the straggler binds --- $W_1=0.74$ at $10\times$ and $1.73$ at $20\times$ with a barrier every $W$, $1.07$ at $20\times$ with a barrier every $112$ --- while the wall-limited asynchronous arm stays at $0.009$--$0.013$ throughout (Table~\ref{tab:twin}, lower block). Those arms are not at a matched budget, so we re-ran the asynchronous method at exactly the twin's simulation count and seeds. At $6{,}304$ evaluations it reports $0.008$ against the twin's $0.74$; at $3{,}200$, $0.070$ (replicate range $0.008$--$0.134$) against $1.73$. Same propagator, same seeds, same number of evaluations: the collapse is the barrier's. Under a barrier every generation's $W$ proposals are drawn from one frozen archive state, so the balance-heuristic denominator sees $W$ copies of each proposal and far fewer distinct ones over the run; the asynchronous arm's proposals are spread over an archive that updates with every arrival. At $3{,}200$ evaluations the asynchronous estimator is itself noisy ($k=100$ on a short history), which is the honest caveat, and it is an order of magnitude from the twin.
 
 \subsection{Throughput converts into a tighter tolerance (C2)}\label{sec:results-converts}
-[to be written]
+
+Throughput is instrumental; what a practitioner buys is the tolerance the run reaches. Table~\ref{tab:matched-eps} reads that off every benchmark with the one quantity that compares samplers on a common footing, the tolerance $\epsilon_{(100)}(n)$ at which exactly $100$ of a method's own draws would be accepted after $n$ simulations (\S\ref{sec:experiments-metrics}), and Fig.~\ref{fig:eps-curves} shows the curves it is read from. Read at the same $n$ --- the synchronous arm's own count --- the asynchronous sampler is more efficient per simulation on three of the four benchmarks ($1.06\times$ on g-and-k, $1.30\times$ on Lotka--Volterra, $1.6\times$ on Cellular Potts) and $0.78\times$ on the one-dimensional analytic target, the only benchmark on which it is worse per draw; the ratio rises with the cost of a simulation. The throughput ratio rises with it too, so on the two benchmarks where both exceed one the two multiply into the net effect at equal wall clock: $1.3\times$ on Lotka--Volterra and $4.1\times$ on Cellular Potts. The curves add what a single budget cannot: on the two cheap benchmarks the asynchronous and synchronous curves have the same slope, so the per-simulation ratio is a constant factor, whereas on Cellular Potts both adaptive samplers steepen well beyond the $n^{-1}$ that rejection ABC follows in this noise-dominated regime, so their advantage over it widens with every doubling of the budget.
+
+\begin{table}[t]
+\caption{Tolerance at a matched budget on every benchmark ($k=100$ order statistic of each method's own discrepancies; five replicates; medians; completed simulations only). Per-simulation: $\epsilon$ of the synchronous arm over the asynchronous arm at the synchronous arm's own simulation count. Equal wall clock: the same ratio at the end of both runs. Both rise with the cost of a simulation.}\label{tab:matched-eps}
+\centering
+\begin{tabular}{@{}lrrccc@{}}
+\toprule
+Benchmark & cost/sim & simulations (async / sync) & throughput & per-simulation & equal wall clock \\
+\midrule
+Gaussian mean   & $0.1$\,ms & $1.31$M / $4.61$M & $0.28\times$ & $0.78\times$ & $0.24\times$ \\
+g-and-k         & $2$\,ms   & $1.75$M / $3.81$M & $0.46\times$ & $1.06\times$ & $0.88\times$ \\
+Lotka--Volterra & $4$\,ms   & $1.51$M / $1.56$M & $0.96\times$ & $1.30\times$ & $1.30\times$ \\
+Cellular Potts  & $13$\,s   & $12{,}900$ / $5{,}400$ & $2.39\times$ & $1.6\times$ & $4.09\times$ \\
+\botrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.85\linewidth]{figures/fig_eps_curves.pdf}
+\caption{Tolerance against simulations spent, $\epsilon_{(100)}(n)$, asynchronous against the matched synchronous baseline on every benchmark (medians and replicate range over five replicates; the slope over the last decade of $n$ in the legend). The vertical gap at equal $n$ is the per-simulation efficiency, the horizontal extent is what the wall clock bought. On Lotka--Volterra $98\%$ of simulations return the extinction fallback, so $\epsilon_{(100)}$ sits on that plateau until about $5000$ draws have produced $100$ survivors; the plateau is cut off.}\label{fig:eps-curves}
+\end{figure}
+
+\paragraph{Cellular Potts, both arms fixed.} On the real simulator the decomposition is measured on the fixed production run (Table~\ref{tab:cpm-production}): the asynchronous arm completes $2.4\times$ the simulations of the baseline in the same hour ($99.8\%$ worker utilisation against $42.8\%$), reaches a $1.5\times$ tighter tolerance at the baseline's own simulation count, and ends $4.1\times$ tighter at equal wall clock ($7.6\times10^{-5}$ against $3.1\times10^{-4}$). A fairly resourced rejection sampler --- $13{,}000$ prior draws on all $48$ ranks, the same number of simulations as one asynchronous replicate --- reaches $2.9\times10^{-3}$, $39\times$ looser. The control run with the shipped starting bandwidth gives $7.1\times$ at equal wall clock rather than $4.1\times$, and the difference is a warning about matched comparisons: the starting bandwidth is shared by construction, and fixing it improved the baseline's tolerance more than ours ($4.5\to3.1\times10^{-4}$ against $6.3\to7.6\times10^{-5}$), so the larger figure rests on a handicapped baseline and we do not use it. At $80^3$ the same run gives $2.1\times$ the simulations and $2.1\times$ per simulation, and a $17\times$ tighter tolerance at equal wall clock; we quote the first two and not the third, because at a one-hour budget both arms sit on the steep early part of their curves (doubling the asynchronous arm's $481$ simulations to $988$ tightened its tolerance $7.7\times$), and a ratio that depends on the budget that sharply is not a property of the method.
+
+\paragraph{The synthetic instance.} The heterogeneity study shows the same conversion where the runtime law is known (Fig.~\ref{fig:hetero-quality}): at a fixed $60$\,s budget on the Gaussian benchmark the synchronous baseline completes fewer simulations as $\sigma$ grows and its posterior-mean error to the analytic posterior climbs from ${\approx}0.05$ to ${\approx}0.28$, while the asynchronous arm completes several-fold more and holds ${\approx}0.007$--$0.011$.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_hetero_quality.pdf}
+\caption{Inference per unit wall clock under runtime heterogeneity (Gaussian mean, analytic posterior, $48$ workers, $60$\,s budget, five replicates; bands are inter-quartile ranges). Left: posterior-mean error to the analytic posterior against the runtime spread $\sigma$. Right: simulations completed within the budget. The barrier starves the synchronous baseline as $\sigma$ grows; the asynchronous method's error stays flat.}\label{fig:hetero-quality}
+\end{figure}
 
 \subsection{Where the advantage turns on (C3)}\label{sec:results-boundary}
-[to be written]
+
+The asynchronous method pays a roughly fixed cost per arrival --- rebuild the $\mathcal{O}(k)$ proposal, weight the arrival against $S{+}1$ proposal snapshots, update the archive, and exchange the arrival with every other worker --- and that cost is what decides where it pays. Figure~\ref{fig:crossover} plots the throughput and per-simulation ratios of Table~\ref{tab:matched-eps} against the cost of one simulation. Both are monotone in that cost: the throughput ratio is $0.28\times$ at $0.1$\,ms, $0.46\times$ at $2$\,ms, $0.96\times$ at $4$\,ms and $2.4\times$ at $13$\,s, so parity is reached at about $4$\,ms per simulation and the net advantage at equal wall clock turns positive between $2$ and $4$\,ms. Below that the two cheap benchmarks are the measured wrong side of the line: on the Gaussian mean the asynchronous method finishes with a tolerance $4\times$ looser than the baseline's at equal wall clock, not because it samples worse --- per simulation it is within $0.78\times$ --- but because the baseline completes $3.5\times$ more simulations of a $0.1$\,ms simulator. Where the simulations are that cheap a barrier costs nothing worth removing.
+
+The same cost sets the scaling boundary on a cheap simulator. On Lotka--Volterra ($4$\,ms) an instrumented run puts a worker inside the simulator $25\%$ of its time at $48$ workers, $8\%$ at three nodes and $2\%$ at six (Appendix~\ref{app:moved}): the exchange of every arrival with every worker grows with the worker count, so aggregate throughput peaks on one node ($6240$ simulations per second at $48$ workers) and declines across fully packed multi-node jobs, and a synchronous baseline given a population equal to the worker count overtakes it beyond three nodes (Fig.~\ref{fig:scaling}, left). Enlarging the archive tenfold moves that crossover in to a single node, because the per-arrival proposal reconstruction is $\mathcal{O}(k)$. On Cellular Potts the same coordination is invisible: at $13$\,s per evaluation the asynchronous method tracks linear scaling to eight nodes (Fig.~\ref{fig:scaling}, right). The rule this gives a practitioner is simple. Above a few milliseconds per simulation the barrier is the larger cost and its removal pays by the straggler factor of the workload; below it, the coordination is, and a generation-staged sampler with a population sized to the machine is the better tool.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.55\linewidth]{figures/fig_crossover.pdf}
+\caption{Throughput ratio and per-simulation efficiency of the asynchronous method over the matched synchronous baseline, against the cost of one simulation, one point per benchmark (Table~\ref{tab:matched-eps}). Both rise monotonically with the cost; throughput parity is reached at about $4$\,ms per simulation.}\label{fig:crossover}
+\end{figure}
 
 \subsection{The reported posterior: calibration, recovery, and what limits it (C4)}\label{sec:results-posterior}
 [to be written]
