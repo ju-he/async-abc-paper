@@ -810,3 +810,59 @@ handler whose `sim_dir` carries the connection is closed, and no warning is logg
 
 **Found by** running the two-parameter CPM setup end to end locally, where the warning appeared four
 times (once per reference seed) in an otherwise clean log.
+
+---
+
+## Synchronous rows of the two-parameter CPM records had their parameter columns swapped (2026-09-21)
+
+**Symptom.** In `raw_results.csv` of the two-parameter Cellular Potts runs (control 14261956,
+fixed 14262214, 80³ 14262841) every `abc_smc_baseline` row — attempts and population particles —
+carried `param_division_rate` and `param_cell_volume` exchanged. Its generation-0 population was
+already "concentrated" at 0.40 ± 0.07 (a prior sample cannot be), its final population showed 93%
+contraction on `cell_volume` with the truth outside the 90% interval in 5/5 replicates, and the
+identifiability pattern was the reverse of the asynchronous arm's and rejection ABC's. pyABC's own
+SQLite history and the raw worker traces both hold the correct assignment.
+
+**Cause.** `RecordWriter.write` rebuilt the column order from *each batch's* first record and gave
+it to a fresh `csv.DictWriter`, while the file header had been written once by the first batch.
+The asynchronous arm's params dicts are in config order (`division_rate, cell_volume`); the
+baseline's come back alphabetically (its attempts pass through a `sort_keys=True` JSON trace and
+its populations through `history.get_distribution`), so its rows were emitted in
+`cell_volume, division_rate` order under a `division_rate, cell_volume` header. `to_csv_row`
+itself is by name; the DictWriter is positional in its own fieldnames. Only benchmarks whose
+config order differs from alphabetical are exposed — g-and-k (A,B,g,k), Lotka–Volterra
+(theta1–4), Gaussian (1-D) and the old CPM pair (division_rate, motility) are all identical in both
+orders and were checked clean (population rows match attempts, ranges match the prior).
+
+**Fix.** `RecordWriter` pins its fieldnames to the file header (read back from an existing file,
+else fixed by the first batch), lays every later batch out under it by name, and refuses a batch
+whose parameter *names* differ. Tests: `TestRecordWriterColumnOrderIsPinnedByTheHeader`.
+
+**Repair.** `experiments/scripts/repair_two_param_cpm_records.py` un-swaps the stored synchronous
+rows of the three runs and proves every repaired population generation equal to the pyABC
+history's, then re-vendors the gzipped CSVs. Verified 5+5+3 replicates, every generation.
+
+**Blast radius.** Anything that read the synchronous arm's *parameters* from those three CSVs:
+the CPM production table built earlier today (contraction/coverage rows for `sync`, now
+regenerated) and nothing in the paper yet (its CPM section predates these runs). Loss-only
+quantities (eps, throughput, utilisation) were never affected.
+
+## pyABC population weights were silently dropped from the stored records (2026-09-21)
+
+**Symptom.** `population_particle` rows of every synchronous run carry `weight` empty, so every
+score of "the baseline's last generation" (reported-recovery figure, twin tables, the CPM table)
+treated the population as uniformly weighted.
+
+**Cause.** `weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None` in both pyABC record
+builders; `History.get_distribution` returns the weights as a numpy array, which has no `.iloc`.
+
+**Fix.** `population_weight(weights, pos)` in `pyabc_sampler.py` accepts arrays, Series and
+`None`; both builders use it. Test: `TestPopulationWeight`.
+
+**Data.** The weights are recoverable wherever the SQLite history survives: the three two-parameter
+CPM runs (extracted to `experiments/data/cpm_two_param_validation/pyabc_populations.csv.gz` by the
+repair script, with distances and epsilons) and the CPM scaling campaign. The gaussian_mean,
+g-and-k and Lotka–Volterra campaigns kept no history, so their baseline populations stay
+uniformly weighted; measured on the CPM runs the weighting moves `cell_volume` contraction by
+about 3–4 points (74% weighted against 78% uniform) and coverage not at all, and ESS is 63–93 of
+100 (one replicate 16).

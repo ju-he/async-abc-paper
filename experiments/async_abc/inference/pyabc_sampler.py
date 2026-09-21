@@ -352,6 +352,21 @@ class SeededMappingSampler(_MappingSamplerBase):
         return sample, nr_simulations
 
 
+
+def population_weight(weights, pos: int):
+    """The ``pos``-th population weight as pyABC hands it back, or ``None``.
+
+    ``History.get_distribution`` returns the weights as a numpy array. The
+    record builders used to accept only a pandas Series (``hasattr(w, "iloc")``)
+    and wrote ``None`` for anything else, so every stored synchronous population
+    lost its importance weights and was later scored uniformly (2026-09-21).
+    """
+    if weights is None:
+        return None
+    if hasattr(weights, "iloc"):
+        return float(weights.iloc[pos])
+    return float(weights[pos])
+
 def _pyabc_parallel_safe(simulate_fn) -> bool:
     """Return whether a benchmark can be shipped to parallel pyABC workers."""
     owner = getattr(simulate_fn, "__self__", None)

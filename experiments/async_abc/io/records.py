@@ -202,7 +202,18 @@ class RecordWriter:
 
     def __init__(self, path: Union[str, Path]) -> None:
         self.path = Path(path)
-        self._header_written = self.path.exists() and self.path.stat().st_size > 0
+        # The column order is pinned by the file's header -- read back from an
+        # existing file, or fixed by the first batch written. Every later batch
+        # is laid out under that header by column NAME. Recomputing the order
+        # per batch (the previous behaviour) silently permuted the parameter
+        # columns of any batch whose dict order differed from the first one:
+        # pyABC hands parameters back alphabetically, the propagator in config
+        # order, so on a benchmark where the two differ every synchronous row
+        # landed with its parameters swapped (2026-09-21, two-parameter CPM).
+        self._fieldnames: Optional[List[str]] = None
+        if self.path.exists() and self.path.stat().st_size > 0:
+            with open(self.path, newline="") as f:
+                self._fieldnames = next(csv.reader(f))
 
     def write(self, records: List[ParticleRecord]) -> None:
         """Append *records* to the CSV.
@@ -216,20 +227,30 @@ class RecordWriter:
         if not records:
             return
 
-        # Determine parameter column order from the first record
-        param_keys = list(records[0].params.keys())
-        fieldnames = (
+        batch_fieldnames = (
             _PREFIX_COLS
-            + [f"param_{k}" for k in param_keys]
+            + [f"param_{k}" for k in records[0].params.keys()]
             + _SUFFIX_COLS
         )
-
-        mode = "a" if self._header_written else "w"
+        if self._fieldnames is None:
+            self._fieldnames = batch_fieldnames
+            mode = "w"
+        else:
+            if set(batch_fieldnames) != set(self._fieldnames):
+                raise ValueError(
+                    f"Records for {self.path} carry parameter columns "
+                    f"{sorted(c for c in batch_fieldnames if c.startswith('param_'))} "
+                    f"but the file header has "
+                    f"{sorted(c for c in self._fieldnames if c.startswith('param_'))}"
+                )
+            mode = "a"
+        param_keys = [
+            c.removeprefix("param_") for c in self._fieldnames if c.startswith("param_")
+        ]
         with open(self.path, mode, newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            if not self._header_written:
+            writer = csv.DictWriter(f, fieldnames=self._fieldnames)
+            if mode == "w":
                 writer.writeheader()
-                self._header_written = True
             for rec in records:
                 writer.writerow(_record_to_row(rec, param_keys))
 

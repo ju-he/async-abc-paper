@@ -19,6 +19,7 @@ from ..utils.seeding import canonical_param_key, canonical_param_key_json, stabl
 from ._attempt_trace import attempt_records_from_events, instrument_simulate, load_attempt_events
 from ._pyabc_history import history_observable_frame
 from .pyabc_sampler import (
+    population_weight,
     CommWorldMap,
     build_pyabc_sampler,
     resolve_pyabc_client_max_jobs,
@@ -216,7 +217,7 @@ def _run_abc_smc_baseline_with_sampler(
                     "Could not match pyABC population particle to any traced simulation attempt. "
                     "This indicates incomplete attempt tracing or parameter-key mismatch."
                 )
-            weight_val = float(w.iloc[pos]) if hasattr(w, "iloc") else None
+            weight_val = population_weight(w, pos)
             records.append(ParticleRecord(
                 method="abc_smc_baseline",
                 replicate=replicate,

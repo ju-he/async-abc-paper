@@ -187,3 +187,59 @@ class TestRecordWriter:
         assert loaded.record_kind is None
         assert loaded.time_semantics is None
         assert loaded.attempt_count is None
+
+
+class TestRecordWriterColumnOrderIsPinnedByTheHeader:
+    """A later batch whose params dict is ordered differently must still land by name.
+
+    The synchronous baseline hands its parameters back alphabetically (they come
+    through a ``sort_keys=True`` JSON trace) while the propagator uses config
+    order. The writer used to rebuild the column order from each batch and give
+    it to a fresh DictWriter under the header of the first batch, which permuted
+    every later row's parameters on a benchmark where the two orders differ
+    (two-parameter Cellular Potts, 2026-09-21).
+    """
+
+    def test_second_batch_in_another_key_order_is_written_by_name(self, tmp_output_dir):
+        from async_abc.io.records import load_records
+
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record(method="async", params={"division_rate": 0.1, "cell_volume": 0.9})])
+        writer.write([make_record(method="sync", params={"cell_volume": 0.2, "division_rate": 0.8})])
+        with open(path) as f:
+            header = f.readline().strip().split(",")
+        assert header.index("param_division_rate") < header.index("param_cell_volume")
+        by_method = {r.method: r for r in load_records(path)}
+        assert by_method["async"].params == {"division_rate": 0.1, "cell_volume": 0.9}
+        assert by_method["sync"].params == {"division_rate": 0.8, "cell_volume": 0.2}
+
+    def test_reopened_writer_keeps_the_existing_header_order(self, tmp_output_dir):
+        from async_abc.io.records import load_records
+
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        RecordWriter(path).write([make_record(method="a", params={"division_rate": 0.1, "cell_volume": 0.9})])
+        RecordWriter(path).write([make_record(method="b", params={"cell_volume": 0.2, "division_rate": 0.8})])
+        by_method = {r.method: r for r in load_records(path)}
+        assert by_method["b"].params == {"division_rate": 0.8, "cell_volume": 0.2}
+
+    def test_a_batch_with_different_parameter_names_is_refused(self, tmp_output_dir):
+        tmp_output_dir.mkdir(parents=True)
+        path = tmp_output_dir / "results.csv"
+        writer = RecordWriter(path)
+        writer.write([make_record(params={"division_rate": 0.1, "cell_volume": 0.9})])
+        with pytest.raises(ValueError, match="parameter columns"):
+            writer.write([make_record(params={"division_rate": 0.1, "motility": 0.9})])
+
+
+class TestPopulationWeight:
+    def test_numpy_array_series_and_none(self):
+        import numpy as np
+        import pandas as pd
+        from async_abc.inference.pyabc_sampler import population_weight
+
+        assert population_weight(np.array([0.25, 0.75]), 1) == pytest.approx(0.75)
+        assert population_weight(pd.Series([0.25, 0.75]), 0) == pytest.approx(0.25)
+        assert population_weight(None, 0) is None
