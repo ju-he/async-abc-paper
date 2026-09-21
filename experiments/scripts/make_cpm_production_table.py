@@ -18,9 +18,9 @@ Per (run, method, replicate):
   bandwidth at which exactly k of its draws would be accepted. This is the
   cross-method quantity, because it describes where the sampler put its draws
   and not the bandwidth it happened to report at.
-* ``eps_matched`` -- the same statistic over the first ``n_match`` arrivals,
-  ``n_match`` being the synchronous arm's mean simulation count in that run, so
-  that throughput and per-simulation efficiency can be separated.
+* ``eps_matched`` -- the same statistic over the first ``n_match`` arrivals of
+  *both* arms, ``n_match`` being the synchronous arm's median simulation count in
+  that run, so that throughput and per-simulation efficiency can be separated.
 * ``contraction_*`` / ``covered_*`` / ``ess`` -- the reported posterior:
   the retroactive AMIS estimator (``posterior_weight``) for the asynchronous
   method, the final population for the synchronous baseline, the k=100 best
@@ -124,7 +124,7 @@ def replicate_rows(root: Path) -> pd.DataFrame:
         df = _read(root, spec)
         att = df[df["record_kind"] == "simulation_attempt"].copy()
         att["dur"] = att["sim_end_time"] - att["sim_start_time"]
-        n_match = int(att[att["method"] == "abc_smc_baseline"].groupby("replicate").size().mean())
+        n_match = int(att[att["method"] == "abc_smc_baseline"].groupby("replicate").size().median())
         for method, short in METHODS.items():
             for rep, g in att[att["method"] == method].groupby("replicate"):
                 g = g.sort_values("sim_end_time")
@@ -193,7 +193,7 @@ def print_table(rep: pd.DataFrame, summ: pd.DataFrame) -> None:
         a = summ[(summ.run == run) & (summ.method == "async")].iloc[0]
         s = summ[(summ.run == run) & (summ.method == "sync")].iloc[0]
         thr = a.n_sims_median / s.n_sims_median
-        per = s.eps_full_median / a.eps_matched_median
+        per = s.eps_matched_median / a.eps_matched_median
         wall = s.eps_full_median / a.eps_full_median
         print(f"\n[{run}] throughput async/sync {thr:.2f}x; per-simulation (eps at matched n) {per:.2f}x; "
               f"eps at equal wall clock {wall:.2f}x; utilisation {a.utilisation_mean:.1%} vs {s.utilisation_mean:.1%} "
