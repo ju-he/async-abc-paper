@@ -191,3 +191,37 @@ Next: a cold read for consistency — §2 (background/related work still long), 
 comparison table's prose, Appendix D protocol (mentions of old figures), captions of moved
 figures; then figure polish (fig_predictor size/labels, fig_crossover label overlap); then the
 abstract ≤250-word check for S&C and the keywords.
+
+## Cold read and figure polish (2026-09-21, later still)
+
+Done (uncommitted at the end of the session that did it):
+- Consistency: running head `\methodname` is now "generation-free ABC" (was "asynchronous
+  steady-state ABC"); §2.4 look-ahead discussion halved (§2 ≈ 560 words); §3.6 comparison-table
+  prose cut to three sentences; §3.4 stored-record fields now point at eq:history; §6.5 no longer
+  says the scaling results are supplement-only; the runtime-CV bases are separated (in-run vs
+  prior-wide: intro/discussion say "0.05 to above 0.2", §7.1 flags the 0.10 as the scaling runs');
+  the "2.1× at 384 workers" is attributed to the 80³ runtime spread everywhere it appears (§7.1,
+  fig:scaling caption, limitations); the twin-table pointer for the wall-limited W1 fixed; stale
+  phrases removed from the proofs ("item (iv)"), the assumption-status table ("Limitation (iv)")
+  and the protocol ("reproducible up to MPI arrival order", "resumes from the next generation");
+  Appendix D benchmark notes rewritten for the two-parameter CPM setup (they still described
+  division rate + motility with the whitened morphology discrepancy); config table gains the 80³
+  row and a barrierized-twin row (T); Appendix F: LV cost 2 → 4 ms (two places), four
+  cross-references re-pointed (§7.1 → §7.3, coupling study, ks-sweep), three redundant
+  `\paragraph` headers dropped.
+- The CPM per-simulation ratio is standardised on **1.6×** (tab:matched-eps rule: each
+  replicate matched at its own count). The production-table rule (match at the baseline's median
+  count) gives 1.54, which the abstract/intro/§7.2/conclusion had rounded to 1.5.
+- Abstract 292 → 249 words; six keywords (Springer asks for 4–6; no MSC codes needed).
+- fig_predictor: legend below the axes, ratio tick labels, 0.6\linewidth. fig_crossover: legend
+  upper left, per-benchmark label offsets, parity label, headroom. Tables benchmarks /
+  matched-eps / cpm-production reflowed (were 228 / 30 / 127 pt overfull; the all-5/5 coverage
+  column of tab:cpm-production is now a caption sentence). Log clean: no overfull boxes, no
+  undefined references; 58 pages.
+
+Still open:
+- §4 is ≈1000 words in the main text against the plan's ≈500: Assumption 5(ii) (the CLT rate
+  condition) and the r-accounting paragraph could move to Appendix A, which needs re-labelling
+  because thm:clt cites ass:stab(ii). §6 ≈1250 vs 800, §1 ≈760 vs 600; total main text ≈9.4k
+  words, inside the 9–10k budget, so this is optional.
+- Submission checklist for S&C: author block, funding, acknowledgements, data deposit.

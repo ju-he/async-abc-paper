@@ -33,6 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import FuncFormatter, NullFormatter
 
 import _figdata as fd
 from async_abc.plotting import paper_style as ps
@@ -58,7 +59,7 @@ def draw(frames):
              .agg(pred=("ratio_pred", "median"), meas=("ratio_meas", "median"),
                   meas_lo=("ratio_meas", "min"), meas_hi=("ratio_meas", "max"))
              .reset_index())
-    fig, ax = plt.subplots(figsize=ps.fig_size(0.55, aspect=0.8))
+    fig, ax = plt.subplots(figsize=ps.fig_size(0.6, aspect=1.12))
     lo, hi = 0.7, 700
     ax.plot([lo, hi], [lo, hi], color=ps.COLORS["reference"], ls=(0, (5, 3)), lw=0.8, zorder=1)
     palette = [ps.COLORS["async"], ps.COLORS["sync"], ps.COLORS["rejection"], ps.COLORS.get("prior", "0.35")]
@@ -78,11 +79,17 @@ def draw(frames):
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
     ax.set_aspect("equal")
+    ratio_fmt = FuncFormatter(lambda v, _: f"{v:g}$\\times$")
+    for axis in (ax.xaxis, ax.yaxis):
+        axis.set_major_formatter(ratio_fmt)
+        axis.set_minor_formatter(NullFormatter())
     ax.set_xlabel("predicted from asynchronous timing, $T_{\\mathrm{async}}/T_{\\mathrm{sync}}$")
     ax.set_ylabel("measured against the barrierized arm")
     ax.grid(True, ls=":", lw=0.4, alpha=0.6)
-    ax.legend(frameon=False, loc="upper left", fontsize="small", handlelength=1.2)
-    fig.tight_layout()
+    handles, labels = ax.get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=2, fontsize="small",
+               handlelength=1.2, columnspacing=1.2, bbox_to_anchor=(0.5, 0.0))
+    fig.tight_layout(rect=(0, 0.17, 1, 1))
     return fig
 
 
