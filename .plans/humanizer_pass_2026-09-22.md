@@ -90,3 +90,25 @@ barrier's.", "The posterior does not follow.", "The target is."); "prove" for th
 
 Integrity after these: cites, labels, display math, bare numbers unchanged; refs -2 (the
 dropped sentence) with App F's sec:results-posterior -> tab:twin-hetero; compile clean, 50 pp.
+
+## Blind readability judgment and re-merge (same day)
+
+Before (7705529) vs after (8e419e8), labels A/B by coin flip (A = before), judges confined to a
+folder with only the two versions and a shared brief. Reports:
+`.plans/reviews/codex-readability-blind-2026-09-22.md` (Codex gpt-5.6-sol xhigh: **after**, 97/100,
+every section except the unchanged Limitations) and
+`.plans/reviews/claude-readability-blind-2026-09-22.md` (fresh Claude subagent: **after**, 85/100).
+Both also credited the after version with accuracy fixes (§6.2 LV, §6.3 0.78x, Jensen >=,
+"scored exactly", hedges).
+
+Where both preferred the before version: passages the pass had over-split. Re-merged: §2 AMIS
+"instead" moved next to the sentence it contrasts; §3 S=20 evidence attached with "because"; §6.1
+out-of-domain configurations back to one colon list; §6.2 colon + "by contrast" restored; §6.4
+archive-size evidence back to one semicolon list under "raising k is not free:"; Conclusion's three
+sampler sentences to two. Tokens identical to 8e419e8; compile clean, 50 pp.
+
+Open from the judges, not applied: both want a qualifier that the asynchronous part of factor (d)
+enters only through Assumption 4 (the Claude judge notes "(c) and (d) are bounded rather than
+measured" now implicitly covers an assumed component); Codex wants the §6.4 heterogeneity sentence
+back (the user dropped it; the Claude judge offers a corrected version); Codex calls "The target
+is." a fragment (kept as a deliberate authorial move).
