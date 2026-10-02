@@ -72,9 +72,8 @@ def draw(frames):
 
     # single-node -> multi-node boundary sits between 48 (1 node) and 128 (3 nodes)
     ax.axvline(1.5, color=ps.COLORS["reference"], lw=0.8, ls="--", zorder=5)
-    ax.annotate("single node $\\to$ multi-node", xy=(1.5, 52), xytext=(1.6, 52),
-                fontsize=6, color=ps.COLORS["reference"], rotation=90,
-                va="center", ha="left")
+    # (The 'single node -> multi-node' label used to sit here, rotated across
+    # the 128-worker bar; the tick labels carry the node counts, so it is gone.)
 
     ax.set_xticks(x)
     ax.set_xticklabels([f"{w}\n({NODES[w]} node{'s' if NODES[w] > 1 else ''})" for w in WORKERS])

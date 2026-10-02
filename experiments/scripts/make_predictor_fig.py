@@ -62,7 +62,7 @@ def draw(frames):
     fig, ax = plt.subplots(figsize=ps.fig_size(0.6, aspect=1.12))
     lo, hi = 0.7, 700
     ax.plot([lo, hi], [lo, hi], color=ps.COLORS["reference"], ls=(0, (5, 3)), lw=0.8, zorder=1)
-    palette = [ps.COLORS["async"], ps.COLORS["sync"], ps.COLORS["rejection"], ps.COLORS.get("prior", "0.35")]
+    palette = ps.WORKLOADS
     for (wl, st), color in zip(STYLE.items(), palette):
         sub = med[med["workload"] == wl]
         inside = sub[[(wl, l) not in OUTSIDE for l in sub["level"]]]

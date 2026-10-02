@@ -1,0 +1,12 @@
+% A10 integrated figure, KIT colours (thesis; fig:algorithm-strip): horizontal with the step spine between the rows, bullets, gray bands (= a10_MBG). Switches for a10_body.tikz (V vertical, B bullets, G bands).
+\documentclass[tikz,border=1pt]{standalone}
+\usepackage{newtxtext,newtxmath}
+\usepackage{graphicx}
+\usetikzlibrary{arrows.meta,calc,backgrounds}
+\definecolor{async}{HTML}{009682}% KIT green
+\definecolor{sync}{HTML}{4664AA}% KIT blue
+\def\panelsdir{../out_kit}
+\def\variantV{0}\def\variantM{1}\def\variantB{1}\def\variantG{1}
+\begin{document}
+\input{a10_body.tikz}
+\end{document}

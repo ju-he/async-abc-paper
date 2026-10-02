@@ -88,10 +88,12 @@ def rank_fig(ranks):
     ax.set_xlabel("normalized rank statistic")
     ax.set_ylabel(f"count ({n_trials} trials)")
     ax.set_xlim(0, 1)
-    ax.set_ylim(bottom=0)
+    # pyABC piles up at both extremes along the top, so the legend goes on the
+    # floor; the extra headroom keeps the top spikes off the frame.
+    ax.set_ylim(0, 215)
     ax.grid(True, axis="y", ls=":", lw=0.4, alpha=0.6)
     # Legend inside the axes so the tight bbox matches fig_sbc_coverage (review II.7.b.3).
-    ax.legend(frameon=True, loc="upper center", ncol=1, handlelength=1.6, fontsize=6)
+    ax.legend(frameon=False, loc="lower center", ncol=2, handlelength=1.6, fontsize=6, columnspacing=1.0)
     fig.tight_layout()
     return fig
 

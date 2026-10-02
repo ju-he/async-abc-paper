@@ -79,7 +79,7 @@ def _predictor(ax, df):
     lo, hi = 0.7, 700
     ax.plot([lo, hi], [lo, hi], color="0.45", ls=(0, (5, 3)), lw=0.8, zorder=1)
     # Workloads, not methods: keep clear of the async/sync colours of (a) and (b).
-    palette = ["#000000", "#CC79A7", "#009E73", "#56B4E9"]
+    palette = ps.WORKLOADS
     for (wl, st), color in zip(STYLE.items(), palette):
         sub = med[med["workload"] == wl]
         inside = sub[[(wl, l) not in OUTSIDE for l in sub["level"]]]

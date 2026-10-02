@@ -24,6 +24,7 @@ The rules it encodes:
   from the repository alone (Declarations promise), independent of
   purge-prone cluster scratch.
 """
+import os
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -32,19 +33,41 @@ import matplotlib
 # sn-jnl \textwidth = 372 pt at 72.27 pt/in.
 TEXTWIDTH_IN = 372.0 / 72.27
 
-# Okabe–Ito. Async and sync are additionally distinguished by marker and
-# linestyle everywhere (grayscale print, CVD redundancy).
-COLORS = {
-    "async": "#0072B2",  # blue
-    "sync": "#D55E00",  # vermillion
-    "rejection": "#009E73",  # bluish green
-    "reference": "#000000",  # truth/reference lines
-    "neutral": "#999999",  # grid variants, secondary annotations
+# Colour scheme, chosen at import time from ABC_FIG_SCHEME so that scripts
+# which copy COLORS into module-level tables see the right one:
+#   okabe (default)  Okabe–Ito, the paper's scheme; figures land in figures/.
+#   kit              KIT corporate colours (KIT green for the asynchronous
+#                    sampler), the thesis's scheme; figures land in figures/kit/.
+# Async and sync are additionally distinguished by marker and linestyle
+# everywhere (grayscale print, CVD redundancy).
+SCHEME = os.environ.get("ABC_FIG_SCHEME", "okabe")
+_SCHEMES = {
+    "okabe": {
+        "async": "#0072B2",  # blue
+        "sync": "#D55E00",  # vermillion
+        "rejection": "#009E73",  # bluish green
+        "reference": "#000000",  # truth/reference lines
+        "neutral": "#999999",  # grid variants, secondary annotations
+        # Workloads of the predictor panel: never a method colour.
+        "workloads": ["#000000", "#CC79A7", "#009E73", "#56B4E9"],
+    },
+    "kit": {
+        "async": "#009682",  # KIT green  (thesis \definecolor{KITgreen})
+        "sync": "#4664AA",  # KIT blue   (thesis \definecolor{KITblue})
+        "rejection": "#DF9B1B",  # KIT orange
+        "reference": "#000000",
+        "neutral": "#999999",
+        "workloads": ["#000000", "#A3107C", "#DF9B1B", "#23A1E0"],  # black, KIT purple, orange, cyan
+    },
 }
+if SCHEME not in _SCHEMES:
+    raise SystemExit(f"ABC_FIG_SCHEME={SCHEME!r}: expected one of {sorted(_SCHEMES)}")
+COLORS = {k: v for k, v in _SCHEMES[SCHEME].items() if k != "workloads"}
+WORKLOADS = list(_SCHEMES[SCHEME]["workloads"])
 
 LABELS = {
     "async": "Asynchronous (ours)",
-    "sync": "Synchronous baseline",
+    "sync": "pyABC",
     "rejection": "Rejection ABC",
 }
 
@@ -84,6 +107,8 @@ RC = {
 # Repository-anchored output locations.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 FIGURES_DIR = _REPO_ROOT / "latex" / "sn-article-template" / "figures"
+if SCHEME != "okabe":
+    FIGURES_DIR = FIGURES_DIR / SCHEME
 DATA_DIR = _REPO_ROOT / "experiments" / "data" / "paper_figures"
 
 

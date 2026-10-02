@@ -125,8 +125,8 @@ TMLR_ONLY = [
         "\n",
     ),
     (
-        r"All arms run over MPI on JUWELS (Appendix~\ref{app:protocol}).",
-        r"All arms run over MPI on JUWELS (Appendix~\ref{app:protocol}). All three comparators are samplers of the same estimator class; a neural simulation-based-inference baseline would change the estimator rather than the barrier, and its rounds would wait for their slowest simulation as generations do (\S\ref{sec:background}).",
+        r"All three run over MPI on JUWELS (Appendix~\ref{app:protocol}).",
+        r"All three run over MPI on JUWELS (Appendix~\ref{app:protocol}). All three comparators are samplers of the same estimator class; a neural simulation-based-inference baseline would change the estimator rather than the barrier, and its rounds would wait for their slowest simulation as generations do (\S\ref{sec:background}).",
     ),
 ]
 

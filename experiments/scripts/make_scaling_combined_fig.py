@@ -120,8 +120,10 @@ def _panel_lv(ax, df: pd.DataFrame) -> None:
     x = np.arange(len(workers))
     i48 = workers.index(48)
     ax.axvline(i48 + 0.5, color=ps.COLORS["neutral"], lw=0.8, ls=":", zorder=0)
-    ax.annotate("single node $\\to$ multi-node", xy=(i48 + 0.5, 0), xytext=(i48 + 0.4, 30),
-                fontsize=6, color=ps.COLORS["neutral"], rotation=90, va="bottom", ha="center")
+    # One label per side of the divider, each short enough to stay below the
+    # curves (the single label spanned the panel height and crossed both).
+    ax.text(i48 + 0.42, 30, "single node", fontsize=6, color=ps.COLORS["neutral"], rotation=90, va="bottom", ha="right")
+    ax.text(i48 + 0.58, 30, "multi-node", fontsize=6, color=ps.COLORS["neutral"], rotation=90, va="bottom", ha="left")
     hi_all = []
     for method in ("async", "sync"):
         _, med, lo, hi = _series(df, "lv", method)
@@ -169,7 +171,7 @@ def _panel_cpm(ax, df: pd.DataFrame) -> None:
     if s_med[-1] > 0:
         # Speedup label placed in the gap between the two curves at max scale.
         ax.annotate(f"{a_med[-1] / s_med[-1]:.0f}$\\times$",
-                    xy=(workers[-1] * 0.62, float(np.sqrt(a_med[-1] * s_med[-1]))),
+                    xy=(workers[-1] * 0.8, float(np.sqrt(a_med[-1] * s_med[-1]))),
                     color=ps.COLORS["async"], fontsize=8, ha="center", va="center")
 
 

@@ -27,7 +27,7 @@ NAME = "fig_crossover"
 LABEL = {"gaussian_mean": "Gaussian mean (1-D)", "gandk": "g-and-k (4-D)",
          "lotka_volterra": "Lotka–Volterra (4-D)", "cellular_potts": "Cellular Potts (2-D)"}
 # (dx, dy) in points and horizontal alignment, chosen so no label crosses a curve or the legend.
-OFFSET = {"gaussian_mean": (6, -10, "left"), "gandk": (-6, 4, "right"),
+OFFSET = {"gaussian_mean": (6, -10, "left"), "gandk": (6, -10, "left"),
           "lotka_volterra": (6, -10, "left"), "cellular_potts": (-6, 4, "right")}
 
 
@@ -42,18 +42,19 @@ def draw(frames):
     ax.plot(df["sim_cost_s"], df["throughput_ratio"], marker=ps.MARKERS["async"], color=ps.COLORS["async"],
             ls="-", label="throughput ratio (equal wall clock)")
     ax.plot(df["sim_cost_s"], df["per_simulation_ratio"], marker=ps.MARKERS["sync"], color=ps.COLORS["sync"],
-            ls="--", label="per-simulation efficiency, $\\epsilon_{\\mathrm{sync}}/\\epsilon_{\\mathrm{async}}$ (matched $n$)")
+            ls="--", label="per-simulation efficiency (matched $n$)")
     for _, r in df.iterrows():
         dx, dy, ha = OFFSET.get(r.benchmark, (4, -10, "left"))
         ax.annotate(LABEL.get(r.benchmark, r.benchmark), (r.sim_cost_s, r.throughput_ratio),
                     textcoords="offset points", xytext=(dx, dy), ha=ha, fontsize=6.5, color="0.25")
-    ax.text(0.985, 1.0, "parity", transform=ax.get_yaxis_transform(), ha="right", va="bottom",
+    ax.text(0.985, 1.06, "parity", transform=ax.get_yaxis_transform(), ha="right", va="bottom",
             fontsize=6.5, color=ps.COLORS["reference"])
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(0.15, 8.0)
+    # Headroom above the Cellular Potts point keeps its label clear of the legend.
+    ax.set_ylim(0.18, 9.0)
     ax.set_xlabel("cost of one simulation (s)")
-    ax.set_ylabel("ratio, async over sync")
+    ax.set_ylabel("ratio, ours over pyABC")
     ax.grid(True, ls=":", lw=0.4, alpha=0.6)
     ax.legend(frameon=False, loc="upper left", fontsize="small")
     fig.tight_layout()

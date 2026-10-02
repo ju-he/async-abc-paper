@@ -14,6 +14,10 @@ if [[ $what == all || $what == py ]]; then
   for s in py/ga2_predictor_panel.py py/a8_algorithm_panels.py py/a9_pmc_panels.py py/a3_straggler_factor.py py/a5_fidelity_ratio.py py/a2_cumulative_completions.py; do
     echo "== $s"; $PY "$s" || echo "!! $s failed (continuing)"
   done
+  # The strip's panels once more in the thesis's KIT scheme (-> out_kit/).
+  for s in py/a8_algorithm_panels.py py/a9_pmc_panels.py; do
+    echo "== $s (kit)"; ABC_FIG_SCHEME=kit $PY "$s" || echo "!! $s (kit) failed (continuing)"
+  done
 fi
 
 if [[ $what == all || $what == tikz ]]; then

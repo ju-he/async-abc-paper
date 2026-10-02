@@ -279,9 +279,12 @@ def draw(frames):
 
         rej = sub[sub["method"] == REJECT].sort_values("wall_time")
         if len(rej):
-            ax_w.text(0.97, 0.94,
+            # Gaussian panel: pyABC's last marker sits in the top-right corner, so
+            # the note goes bottom-right; g-and-k: the bottom-right holds pyABC.
+            ty, tva = (0.05, "bottom") if col == 0 else (0.94, "top")
+            ax_w.text(0.97, ty,
                       f"Rejection ABC: $W_1\\approx{rej['w1_median'].iloc[-1]:.3g}$",
-                      transform=ax_w.transAxes, ha="right", va="top",
+                      transform=ax_w.transAxes, ha="right", va=tva,
                       color=ps.COLORS["rejection"], fontsize=6.5)
 
         a = sub[sub["method"] == ASYNC].sort_values("wall_time")
@@ -298,10 +301,13 @@ def draw(frames):
         for ax in (ax_w, ax_e):
             ax.set_yscale("log")
             ax.grid(True, ls=":", lw=0.4, alpha=0.6)
-        if col == 0:
-            ax_w.legend(frameon=False, loc="lower left", handlelength=1.6)
 
-    fig.tight_layout()
+    # The Gaussian panel's lower-left corner, where the legend used to sit, is
+    # where the asynchronous curve and its band run; share one legend below.
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=2,
+               bbox_to_anchor=(0.5, -0.01), handlelength=1.6)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     return fig
 
 

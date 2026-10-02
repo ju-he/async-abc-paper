@@ -1,0 +1,11 @@
+{
+  "git_hash": "7393064",
+  "timestamp": "2026-10-02T20:36:21.063305",
+  "pdf": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_reported_recovery.pdf",
+  "png": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_reported_recovery.png",
+  "figure": "fig_reported_recovery",
+  "vendored_data_dir": "/home/juhe/bwSyncShare/Code/async-abc-paper/experiments/data/paper_figures/fig_reported_recovery",
+  "estimator": "each method's own reported posterior",
+  "target": "analytic posterior (not a point mass at the truth)",
+  "async_replay": "ABCPMC.extract_posterior over the wall-clock prefix"
+}

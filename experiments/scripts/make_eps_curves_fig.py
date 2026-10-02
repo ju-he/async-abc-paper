@@ -50,9 +50,11 @@ def draw(frames):
             if s.empty:
                 continue
             med = s.groupby("n")["eps"].agg(["median", "min", "max"])
-            ax.fill_between(med.index, med["min"], med["max"], color=ps.COLORS[key], alpha=0.15, lw=0)
-            ax.plot(med.index, med["median"], color=ps.COLORS[key], ls=ps.LINESTYLES[key],
-                    label=f"{ps.LABELS[key]} ($n^{{{_exponent(s):+.2f}}}$)")
+            # Replicate range as a light band under the median line: on Lotka-
+            # Volterra the range spans decades and a denser band hid the line.
+            ax.fill_between(med.index, med["min"], med["max"], color=ps.COLORS[key], alpha=0.10, lw=0, zorder=1)
+            ax.plot(med.index, med["median"], color=ps.COLORS[key], ls=ps.LINESTYLES[key], lw=1.4, zorder=3,
+                    label=ps.LABELS[key])
         ax.set_xscale("log")
         ax.set_yscale("log")
         if bench == "lotka_volterra":
@@ -63,10 +65,22 @@ def draw(frames):
         ax.set_title(title, fontsize=7.5, loc="left")
         ax.set_xlabel("simulations, $n$")
         ax.grid(True, ls=":", lw=0.4, alpha=0.6)
-        ax.legend(frameon=False, fontsize=6.5, loc="upper right", handlelength=1.8)
+        # Every curve runs from the top-left corner to the bottom-right one, and
+        # a two-entry legend with exponents is wider than the clear corner, so
+        # the exponents sit as coloured text in the empty top-right corner and
+        # the method key is shared below the figure.
+        for i, key in enumerate(("sync", "async")):
+            s = sub[sub["method"] == key]
+            if s.empty:
+                continue
+            ax.text(0.97, 0.94 - 0.11 * i, f"$n^{{{_exponent(s):+.2f}}}$", transform=ax.transAxes,
+                    ha="right", va="top", fontsize=6.5, color=ps.COLORS[key])
     for ax in (axes[0], axes[2]):
         ax.set_ylabel("$\\epsilon_{(100)}$")
-    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, frameon=False, loc="lower center", ncol=2,
+               bbox_to_anchor=(0.5, -0.01), handlelength=1.8)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     return fig
 
 

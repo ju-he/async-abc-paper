@@ -1,0 +1,13 @@
+{
+  "git_hash": "7393064",
+  "timestamp": "2026-10-02T20:29:52.846389",
+  "pdf": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_barrier.pdf",
+  "png": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_barrier.png",
+  "figure": "fig_barrier",
+  "vendored_data_dir": null,
+  "sources": [
+    "fig_straggler_throughput",
+    "fig_hetero_idle",
+    "fig_predictor"
+  ]
+}

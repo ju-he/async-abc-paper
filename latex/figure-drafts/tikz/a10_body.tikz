@@ -7,7 +7,7 @@
 %   \variantG  0 no backgrounds                        1 alternating gray bands per step
 %   \variantM  (horizontal only) 1 puts the step spine 1-6 between the rows: PMC above with its
 %              labels and rail above, ours below (default 0)
-% Panels: ../out/a9s_panel_c.pdf (row/column a, ABC-PMC) and ../out/a8s_panel_c.pdf
+% Panels: \panelsdir/a9s_panel_c.pdf (row/column a, ABC-PMC) and \panelsdir/a8s_panel_c.pdf
 % (b, ours), 1.6 cm. Fonts 7 pt. One return arrow per method; the dotted path is
 % the bootstrap rule is stated as text (no arrow).
 \begin{tikzpicture}[font=\small,>=Stealth,
@@ -57,6 +57,7 @@
 \def\returnBV{$\theta^\star$ to a free worker; $\rho^\star$ arrives later: append $(\theta^\star,\rho^\star,\epsilon_{\tau^\star},\tau^\star,w^\star)$, $\tau^\star=n$}
 
 \ifdefined\variantM\else\def\variantM{0}\fi
+\ifdefined\panelsdir\else\def\panelsdir{../out}\fi
 \ifnum\variantV=0
 \ifnum\variantM=1
 %% ================================ horizontal with the step spine between the rows
@@ -69,22 +70,19 @@
 \pgfmathsetmacro{\ys}{\ya-1.25}
 \pgfmathsetmacro{\yb}{\ys-1.75}
 \pgfmathsetmacro{\railb}{\yb-0.8-\raildepth-0.35}
-\ifnum\variantG=1
-  \foreach \c in {1,3,5} { \fill[black!7] ({\dx*(\c-1)-1.0},\raila+0.75) rectangle ({\dx*(\c-1)+1.0},\railb-0.5); }
-\fi
 %% row (a): title, rail, labels above the panels
 \node[ttl,text=sync!85!black,anchor=south west] at (-0.8,\raila+0.32) {(a) textbook hard-threshold ABC-PMC: one update per generation};
-\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}}; }
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{\panelsdir/a9s_panel_\c.pdf}}; }
 \draw[->,sync,line width=0.9pt] (a6.east) -- ++(0.7,0) |- (-1.3,\raila) |- (a1.west);
 \draw[sync,line width=2.8pt] (5.0,\raila-0.22) -- (5.0,\raila+0.22);
 \node[note=left,anchor=north west] at (-0.8,\raila-0.1) {\returnA};
 \node[note=left,anchor=north west] at (5.2,\raila-0.1) {\barrierA};
 \foreach \c/\t in \labelsA {
   \ifnum\variantB=1
-    \node[f,text width=1.95cm,anchor=south] at ($(a\c.north)+(0,0.08)$) {\t};
+    \node[f,text width=1.95cm,anchor=south] (la\c) at ($(a\c.north)+(0,0.08)$) {\t};
   \else
     \pgfmathsetmacro{\off}{mod(\c,2)==0 ? 1.2 : 0.08}
-    \node[f,anchor=south] at ($(a\c.north)+(0,\off)$) {\t};
+    \node[f,anchor=south] (la\c) at ($(a\c.north)+(0,\off)$) {\t};
   \fi
 }
 \foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,sync,line width=0.9pt] (a\c) -- (a\d); }
@@ -96,15 +94,28 @@
 %% row (b): title, panels, labels below, rail below
 \node[ttl,text=async!85!black,anchor=north west] at (-0.8,\ys-0.4) {(b) generation-free (ours): one update per arrival};
 \node[note=right,anchor=north east] at (11.5,\ys-0.4) {\bootB};
-\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}}; }
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{\panelsdir/a8s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsB {
   \ifnum\variantB=1
-    \node[f,text width=1.95cm,anchor=north] at ($(b\c.south)+(0,-0.08)$) {\t};
+    \node[f,text width=1.95cm,anchor=north] (lb\c) at ($(b\c.south)+(0,-0.08)$) {\t};
   \else
     \pgfmathsetmacro{\off}{mod(\c,2)==0 ? -1.2 : -0.08}
-    \node[f,anchor=north] at ($(b\c.south)+(0,\off)$) {\t};
+    \node[f,anchor=north] (lb\c) at ($(b\c.south)+(0,\off)$) {\t};
   \fi
 }
+\ifnum\variantG=1
+  % Gray step bands, drawn once the label boxes exist: they span the tallest
+  % row-(a) label top to the lowest row-(b) label bottom (plus 3pt), so the
+  % titles, rails and notes above and below stay outside them.
+  \xdef\bandtop{-10000}\xdef\bandbot{10000}
+  \foreach \c in {1,...,6} {
+    \path (la\c.north); \pgfgetlastxy{\tx}{\ty}; \pgfmathsetmacro{\m}{max(\bandtop,\ty)} \xdef\bandtop{\m}
+    \path (lb\c.south); \pgfgetlastxy{\tx}{\ty}; \pgfmathsetmacro{\m}{min(\bandbot,\ty)} \xdef\bandbot{\m}
+  }
+  \begin{scope}[on background layer]
+    \foreach \c in {1,3,5} { \fill[black!7] ({\dx*(\c-1)-1.0},{\bandtop pt+3pt}) rectangle ({\dx*(\c-1)+1.0},{\bandbot pt-3pt}); }
+  \end{scope}
+\fi
 \foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,async,line width=0.9pt] (b\c) -- (b\d); }
 \draw[->,async,line width=0.9pt] (b6.east) -- ++(0.7,0) |- (-1.3,\railb) |- (b1.west);
 \node[note=left,anchor=north west] at (-0.8,\railb-0.1) {\returnB};
@@ -122,7 +133,7 @@
 \foreach \c/\t in \namesList { \node[hd] at ({\dx*(\c-1)},0.3) {\c\ \ \t}; }
 %% row (a)
 \node[ttl,text=sync!85!black,anchor=south west] at (-0.8,-0.45) {(a) textbook hard-threshold ABC-PMC: one update per generation};
-\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}}; }
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{\panelsdir/a9s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsA {
   \ifnum\variantB=1
     \node[f,text width=1.95cm,anchor=north] at ($(a\c.south)+(0,-0.08)$) {\t};
@@ -139,7 +150,7 @@
 %% row (b)
 \node[ttl,text=async!85!black,anchor=south west] at (-0.8,\yb+1.05) {(b) generation-free (ours): one update per arrival};
 \node[note=right,anchor=south east] at (11.5,\yb+1.05) {\bootB};
-\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}}; }
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{\panelsdir/a8s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsB {
   \ifnum\variantB=1
     \node[f,text width=1.95cm,anchor=north] at ($(b\c.south)+(0,-0.08)$) {\t};
@@ -168,8 +179,8 @@
 }
 %% panels and texts
 \foreach \c in {1,...,6} {
-  \node[inner sep=0pt] (a\c) at (-2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}};
-  \node[inner sep=0pt] (b\c) at ( 2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}};
+  \node[inner sep=0pt] (a\c) at (-2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{\panelsdir/a9s_panel_\c.pdf}};
+  \node[inner sep=0pt] (b\c) at ( 2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{\panelsdir/a8s_panel_\c.pdf}};
 }
 \foreach \c/\t in \labelsA { \node[f,text width=3.1cm,align=right,anchor=east] at (-2.95,{-(\c-1)*\rowh}) {\t}; }
 \foreach \c/\t in \labelsB { \node[f,text width=3.1cm,align=left,anchor=west]  at ( 2.95,{-(\c-1)*\rowh}) {\t}; }

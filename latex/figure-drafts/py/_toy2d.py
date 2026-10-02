@@ -50,7 +50,9 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 from async_abc.plotting import paper_style as ps  # noqa: E402
 
-OUT = HERE.parent / "out"
+# Panels follow the figure colour scheme (ABC_FIG_SCHEME); a non-default scheme
+# writes next to the default one so the TikZ wrappers can pick either set.
+OUT = HERE.parent / ("out" if ps.SCHEME == "okabe" else f"out_{ps.SCHEME}")
 STAR = "#111111"
 REF_SIZE = 1.25  # inches; marker areas below are given for this panel size
 TAG_FS = 7
