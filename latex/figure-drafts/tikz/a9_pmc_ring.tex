@@ -1,0 +1,59 @@
+% Additional illustration 9: ABC-PMC with a quantile schedule (Del Moral et
+% al. 2012; Lenormand et al. 2013; pyABC's default) and a hard threshold
+% (Beaumont et al. 2009), drawn as the same six-panel ring as a8 (python:
+% ../py/a9_pmc_panels.py), so each position can be read against ours:
+% population instead of history, a hard threshold instead of a smooth
+% bandwidth, weights carried over instead of re-formed, propose-simulate-
+% accept one at a time until N are kept instead of one draw, the weight after
+% acceptance against one proposal instead of before simulation against the
+% mixture, and the generation dependency (the next proposal needs the
+% complete population) on the closing arrow. Not the paper's experimental
+% baseline, which is pyABC with the matched smooth-kernel acceptor.
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{newtxtext,newtxmath}
+\usepackage{graphicx}
+\usetikzlibrary{arrows.meta,calc}
+\definecolor{sync}{HTML}{D55E00}
+
+\begin{document}
+\begin{tikzpicture}[font=\small,>=Stealth,
+  lab/.style={font=\footnotesize,text=black!85,align=center,inner sep=1pt},
+  note/.style={font=\scriptsize,text=black!75,align=#1,inner sep=1pt},
+  key/.style={font=\footnotesize,text=black!85,align=left,inner sep=1pt,text width=6.1cm}]
+\pgfmathsetmacro{\R}{3.4}
+\def\panelw{2.4cm}
+\foreach \i in {1,...,6} {
+  \pgfmathsetmacro{\ang}{90-60*(\i-1)}
+  \node[inner sep=0pt] (p\i) at (\ang:\R) {\includegraphics[width=\panelw]{../out/a9_panel_\i.pdf}};
+  \node[circle,fill=sync,text=white,font=\scriptsize\bfseries,inner sep=1.5pt,minimum size=11pt] at ($(p\i.north west)+(0.05,-0.05)$) {\i};
+}
+%% one title + one discriminating formula per step
+\node[lab,anchor=south] at ($(p1.north)+(0,0.1)$)
+  {\textbf{population $t$}\\ $P_t=\{(\theta_i,\rho_i,\omega^{(t)}_i)\}_{i\le N}$};
+\node[lab,anchor=south] at ($(p2.north)+(0.45,0.1)$)
+  {\textbf{hard threshold}\\ $\epsilon_{t+1}=\mathrm{quantile}_\alpha\{\rho_i\}$\\ archive $=$ whole population};
+\node[lab,anchor=north] at ($(p3.south)+(0.45,-0.1)$)
+  {\textbf{weights carried over}\\ $\omega^{(t)}_i$ from the last generation\\ $\Sigma_t=2\,\widehat{\mathrm{Cov}}_{\omega^{(t)}}(P_t)$};
+\node[lab,anchor=north] at ($(p4.south)+(0,-0.1)$)
+  {\textbf{proposal}\\ $q_t=\sum_{i\le N}\omega^{(t)}_i\,K_{\Sigma_t}(\,\cdot-\theta_i)$};
+\node[lab,anchor=north] at ($(p5.south)+(-0.45,-0.1)$)
+  {\textbf{propose, simulate, accept}\\ $\theta^\star\sim q_t$, $\rho^\star\sim p(\rho\mid\theta^\star)$\\ keep if $\rho^\star<\epsilon_{t+1}$; one at a time};
+\node[lab,anchor=south] at ($(p6.north)+(-0.45,0.1)$)
+  {\textbf{population $t+1$}\\ $\omega^{(t+1)}_i\propto\pi(\theta_i)/q_t(\theta_i)$\\ the $N$ kept; the rest discarded};
+%% the loop
+\foreach \i/\j in {1/2,2/3,3/4,4/5,5/6} { \draw[->,sync,line width=1.1pt] (p\i) -- (p\j); }
+\node[note=left,anchor=west] at (-2.75,0) {repeat until\\ $N$ kept ($M$ draws)};
+%% closing arrow with the generation dependency on it
+\draw[->,sync,line width=1.1pt] (p6) -- (p1);
+\coordinate (m) at ($(p6)!0.5!(p1)$);
+\draw[sync,line width=2.8pt] ($(m)+(-0.18,0.31)$) -- ($(m)+(0.18,-0.31)$);
+\node[note=left,anchor=north west] at (-1.5,2.12) {barrier: $q_{t+1}$ waits\\ for the $N$-th acceptance};
+%% center
+\node[align=center,font=\footnotesize,text=black!60] at (0.4,-0.6) {one generation,\\one update};
+%% caption stand-in
+\node[key,anchor=north east] at (-0.15,-6.0) {%
+  \textbf{Caption stand-in.} One generation of ABC-PMC with a quantile schedule (Del Moral et al. 2012; Lenormand et al. 2013; pyABC's default) and a hard threshold (Beaumont et al. 2009), on the same 2-D toy as our ring ($N=12$, $\alpha=0.5$). \emph{Not} the paper's experimental baseline, which is pyABC with the matched smooth-kernel acceptor (\S5.2, App.~C). Point size $=\omega$; dashed ellipse $=$ acceptance region $\rho<\epsilon_{t+1}$ (noiseless toy); inset in (2): the indicator $\mathbf 1[\rho<\epsilon_{t+1}]$ over $\rho$, ticks $=\rho_i$ of $P_t$; crosses $=$ rejected, discarded.};
+\node[key,anchor=north west] at (0.15,-6.0) {%
+  (5) the loop in progress after the first 12 candidates (kept: filled; the black star is being simulated). (6) after all $M=48$: the $N$ kept form $P_{t+1}$, weighted against the one proposal $q_t$ and normalized. The generation dependency: $q_{t+1}$ needs the complete, weighted $P_{t+1}$, so the next proposal waits for the $N$-th acceptance (bar). pyABC instead closes a generation on the first $N$ finishers and discards latecomers.};
+\end{tikzpicture}
+\end{document}

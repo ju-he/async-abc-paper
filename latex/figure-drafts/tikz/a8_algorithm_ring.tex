@@ -1,0 +1,63 @@
+% Additional illustration 8: the single-arrival update as a ring of six
+% parameter-space panels (python: ../py/a8_algorithm_panels.py). One title and
+% one discriminating formula per step next to its panel; definitions, the
+% return, the bootstrap rule and the glyph legend in the caption stand-in
+% beneath. Labels of the diagonal panels sit above/below them so the picture
+% stays within the 372 pt text width at nominal font sizes. The workers node
+% carries the asynchrony: our candidate goes to a free worker, and arrivals
+% from all workers enter the history in any order.
+\documentclass[tikz,border=4pt]{standalone}
+\usepackage{newtxtext,newtxmath}
+\usepackage{graphicx}
+\usetikzlibrary{arrows.meta,calc}
+\definecolor{async}{HTML}{0072B2}
+
+\begin{document}
+\begin{tikzpicture}[font=\small,>=Stealth,
+  lab/.style={font=\footnotesize,text=black!85,align=center,inner sep=1pt},
+  note/.style={font=\scriptsize,text=black!75,align=#1,inner sep=1pt},
+  key/.style={font=\footnotesize,text=black!85,align=left,inner sep=1pt,text width=6.1cm}]
+\pgfmathsetmacro{\R}{3.4}
+\def\panelw{2.4cm}
+\foreach \i in {1,...,6} {
+  \pgfmathsetmacro{\ang}{90-60*(\i-1)}
+  \node[inner sep=0pt] (p\i) at (\ang:\R) {\includegraphics[width=\panelw]{../out/a8_panel_\i.pdf}};
+  \node[circle,fill=async,text=white,font=\scriptsize\bfseries,inner sep=1.5pt,minimum size=11pt] at ($(p\i.north west)+(0.05,-0.05)$) {\i};
+}
+%% one title + one discriminating formula per step
+\node[lab,anchor=south] at ($(p1.north)+(0,0.1)$)
+  {\textbf{history} $\mathcal H_n$};
+\node[lab,anchor=south] at ($(p2.north)+(0.45,0.1)$)
+  {\textbf{bandwidth, archive}\\ $A_n=\mathrm{Top}_k(\rho)$\\ $\epsilon_n\!\downarrow$, smooth $K_{\epsilon_n}$};
+\node[lab,anchor=north] at ($(p3.south)+(0.45,-0.1)$)
+  {\textbf{adaptation weights}\\ $\tilde W_j\propto w_j\,K_{\epsilon_n}(\rho_j)$\\ $\Sigma_n=s\,\widehat{\mathrm{Cov}}_{\tilde W}(A_n)$};
+\node[lab,anchor=north] at ($(p4.south)+(0,-0.1)$)
+  {\textbf{proposal}\\ $q_n=\sum_{j\in A_n}\tilde W_j\,K_{\Sigma_n}(\,\cdot-\theta_j)$};
+\node[lab,anchor=north] at ($(p5.south)+(-0.45,-0.1)$)
+  {\textbf{one draw}\\ $\theta^\star=\theta_J+L_nz$\\ $J\sim\tilde W$, $z\sim\mathcal N(0,I)$};
+\node[lab,anchor=south] at ($(p6.north)+(-0.45,0.1)$)
+  {\textbf{proposal-time weight}\\ $w^\star=\pi(\theta^\star)\big/\bar q^{\mathrm{on}}_n(\theta^\star)$\\ stored, never reported};
+%% the loop
+\foreach \i/\j in {1/2,2/3,3/4,4/5,5/6} { \draw[->,async,line width=1.1pt] (p\i) -- (p\j); }
+\draw[->,black!65,line width=1.1pt] (p6) -- (p1);
+\node[note=left,anchor=north west] at (-1.5,2.12) {$\theta^\star$ to a free worker};
+%% the workers: our candidate goes out, arrivals from all workers come in
+\node[draw=black!45,fill=black!5,rounded corners=2pt,inner sep=3pt,font=\scriptsize,align=center] (wb) at (3.9,5.6)
+  {$W$ workers\\ $\rho\sim p(\rho\mid\theta)$};
+\draw[->,black!50,line width=0.6pt] ($(wb.south)+(-0.3,0)$) -- ($(p1.east)+(0,0.8)$);
+\draw[->,black!50,line width=0.6pt] ($(wb.south)+(0.05,0)$) -- ($(p1.east)+(0,0.5)$);
+\node[note=left,anchor=north west] at ($(p1.east)+(0.15,0.42)$) {arrivals,\\ any order};
+%% bootstrap: while |H_n| < k the call returns a uniform prior draw straight to a worker
+\draw[->,black!50,dashed,line width=0.7pt] ($(p1.north east)+(-0.2,0)$) -- ($(wb.west)+(0,-0.1)$)
+  node[pos=0.55,above left=-1pt,note=center] {bootstrap};
+%% center
+\node[align=center,font=\footnotesize,text=black!60] at (0.4,-0.6) {one arrival,\\one update};
+%% caption stand-in (goes into the figure caption in the paper)
+\node[key,anchor=north east] at (-0.15,-6.0) {%
+  \textbf{Caption stand-in.} One propagator call on the evaluated history (2-D toy: box prior, $k=12$). Gray shade $=\rho_i$ (light: far); point size $=$ weight; gray contours $=$ stored snapshots $q_s$; inset in (2): the kernel $K_{\epsilon_n}(\rho)$ over $\rho$, ticks $=\rho_j$ of the archive (no acceptance boundary).\par\smallskip
+  (1) $\mathcal H_n=\{(\theta_i,\rho_i,\epsilon_i,\tau_i,w_i)\}_{i\le n}$; every worker's result lands here, in any order. (2) $\epsilon_n=\min(\epsilon_{\mathrm{hist}},\epsilon_{\mathrm{sched}})$ (Alg.~1 l.~1), $A_n$ (l.~5). (3) $\Sigma_n=L_nL_n^{\!\top}$ (l.~5--6). (4)--(5) l.~6.};
+\node[key,anchor=north west] at (0.15,-6.0) {%
+  (6) $\bar q^{\mathrm{on}}_n=\frac{1}{1+|\mathcal S|}\bigl[q_n+\sum_{s\in\mathcal S}q_s\bigr]$ (l.~7); afterwards $q_n$ is pushed into the ring buffer $\mathcal S$ every \texttt{amis\_interval} calls. $w^\star$ is stored with the particle and never reported: the reported posterior reweights every particle of $\mathcal H_n$ (eq.~posterior-estimator).\par\smallskip
+  Return: $\theta^\star$ goes to a free worker; when $\rho^\star$ arrives, $(\theta^\star,\rho^\star,\epsilon_n,\tau^\star{=}n,w^\star)$ is appended. Dashed: while $|\mathcal H_n|<k$ the call returns a uniform prior draw with $w^\star=1$ straight to a worker (l.~2--3).};
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,192 @@
+% Body of the A10 comparison figure, shared by the variant wrappers
+% (a10_H*.tex, a10_V*.tex) and by a10_algorithm_strip.tex. The wrapper sets
+% three switches before \input:
+%   \variantV  0 horizontal (two rows, six columns)   1 vertical (steps 1-6 as the
+%              centre spine, PMC left, ours right: rail, text, panel, spine, panel, text, rail)
+%   \variantB  0 formulas under/beside each panel      1 plain-language bullets
+%   \variantG  0 no backgrounds                        1 alternating gray bands per step
+%   \variantM  (horizontal only) 1 puts the step spine 1-6 between the rows: PMC above with its
+%              labels and rail above, ours below (default 0)
+% Panels: ../out/a9s_panel_c.pdf (row/column a, ABC-PMC) and ../out/a8s_panel_c.pdf
+% (b, ours), 1.6 cm. Fonts 7 pt. One return arrow per method; the dotted path is
+% the bootstrap rule is stated as text (no arrow).
+\begin{tikzpicture}[font=\small,>=Stealth,
+  f/.style={font=\scriptsize,text=black!85,align=center,inner sep=1pt},
+  hd/.style={font=\scriptsize\bfseries,text=black!70,align=center,inner sep=1pt},
+  ttl/.style={font=\scriptsize\bfseries,align=center,inner sep=1pt},
+  note/.style={font=\scriptsize,text=black!75,align=#1,inner sep=1pt},
+  num/.style={circle,fill=black!55,text=white,font=\scriptsize\bfseries,inner sep=1.5pt,minimum size=11pt}]
+\def\pw{1.6cm}
+%% ------------------------------------------------------------ texts
+\def\namesList{1/{state},2/{tolerance $\epsilon$},3/{weights, $\Sigma$},4/{proposal},5/{draw},6/{weight}}
+\ifnum\variantB=1
+  \def\labelsA{%
+    1/{the current population only; earlier generations are discarded},
+    2/{next threshold: a quantile of the population's discrepancies; accept or reject},
+    3/{weights carried over from the last generation; covariance from them},
+    4/{one mixture proposal over the whole population},
+    5/{propose, simulate, accept or reject, one candidate at a time, until $N$ are kept},
+    6/{the kept are weighted against that one proposal, after acceptance}}
+  \def\labelsB{%
+    1/{every particle ever evaluated, with its stored bandwidth and weight},
+    2/{the $k$ best form the archive; a smooth kernel of width $\epsilon_n$, which only ever tightens},
+    3/{archive weights: stored weight times kernel weight; covariance from them},
+    4/{one mixture proposal over the archive, rebuilt at every call},
+    5/{one candidate: a parent drawn by weight, then perturbed},
+    6/{weighted against the mixture of all proposals used so far, before it is simulated}}
+\else
+  \def\labelsA{%
+    1/{$P_t$: $(\theta_i,\rho_i,\omega^{(t)}_i)$\\ gen.\ $<t$ discarded},
+    2/{$\epsilon_{t+1}=\mathrm{quantile}_\alpha\{\rho_i\}_{i\le N}$\\ hard: keep $\rho<\epsilon_{t+1}$},
+    3/{$\Sigma_t=2\,\widehat{\mathrm{Cov}}_{\omega^{(t)}}(\{\theta_i\})$\\ weights carried over},
+    4/{$q_t=\sum_{i\le N}\omega^{(t)}_i\,K_{\Sigma_t}(\,\cdot-\theta_i)$},
+    5/{$\theta^\star\sim q_t$, simulate,\\ keep if $\rho^\star<\epsilon_{t+1}$;\\ one at a time, until $N$ kept},
+    6/{$\omega^{(t+1)}\propto\pi/q_t$\\ after acceptance}}
+  \def\labelsB{%
+    1/{$\mathcal H_n$: all $n$ so far\\ $(\theta_i,\rho_i,\epsilon_i,\tau_i,w_i)$},
+    2/{$A_n=\mathrm{Top}_k(\rho)$\\ $\epsilon_n$ non-increasing, smooth $K_{\epsilon_n}$},
+    3/{$\tilde W_j\propto w_j\,K_{\epsilon_n}(\rho_j)$\\ $\Sigma_n=s\,\widehat{\mathrm{Cov}}_{\tilde W}(A_n)$},
+    4/{$q_n=\sum_{j\in A_n}\tilde W_j\,K_{\Sigma_n}(\,\cdot-\theta_j)$},
+    5/{$\theta^\star=\theta_J+L_nz$, $J\sim\tilde W$\\ one candidate},
+    6/{$w^\star=\pi/\bar q^{\mathrm{on}}_n$ at $\theta^\star$}}
+\fi
+\def\returnA{$P_{t+1}$: the $N$ kept, weighted; the rejected are discarded}
+\def\barrierA{barrier: $q_{t+1}$ needs the complete $P_{t+1}$}
+\def\returnB{$\theta^\star$ to a free worker; $\rho^\star$ arrives later, among other workers' results: append $(\theta^\star,\rho^\star,\epsilon_{\tau^\star},\tau^\star,w^\star)$, $\tau^\star=n$}
+\def\bootB{$|\mathcal H_n|<k$: prior draw, $w^\star\!=\!1$, no $\epsilon$ stamp}
+\def\returnBV{$\theta^\star$ to a free worker; $\rho^\star$ arrives later: append $(\theta^\star,\rho^\star,\epsilon_{\tau^\star},\tau^\star,w^\star)$, $\tau^\star=n$}
+
+\ifdefined\variantM\else\def\variantM{0}\fi
+\ifnum\variantV=0
+\ifnum\variantM=1
+%% ================================ horizontal with the step spine between the rows
+%% top to bottom: title (a), rail (a) with its notes, labels (a), panels (a), spine 1-6,
+%% title (b), panels (b), labels (b), rail (b) with its note
+\def\dx{2.0}
+\ifnum\variantB=1 \def\raildepth{1.75} \else \def\raildepth{2.45} \fi
+\pgfmathsetmacro{\ya}{0}
+\pgfmathsetmacro{\raila}{\ya+0.8+\raildepth+0.45}
+\pgfmathsetmacro{\ys}{\ya-1.25}
+\pgfmathsetmacro{\yb}{\ys-1.75}
+\pgfmathsetmacro{\railb}{\yb-0.8-\raildepth-0.35}
+\ifnum\variantG=1
+  \foreach \c in {1,3,5} { \fill[black!7] ({\dx*(\c-1)-1.0},\raila+0.75) rectangle ({\dx*(\c-1)+1.0},\railb-0.5); }
+\fi
+%% row (a): title, rail, labels above the panels
+\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,\raila+0.32) {(a) textbook hard-threshold ABC-PMC: one update per generation};
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}}; }
+\draw[->,sync,line width=0.9pt] (a6.east) -- ++(0.7,0) |- (-1.3,\raila) |- (a1.west);
+\draw[sync,line width=2.8pt] (5.0,\raila-0.22) -- (5.0,\raila+0.22);
+\node[note=left,anchor=north west] at (-0.8,\raila-0.1) {\returnA};
+\node[note=left,anchor=north west] at (5.2,\raila-0.1) {\barrierA};
+\foreach \c/\t in \labelsA {
+  \ifnum\variantB=1
+    \node[f,text width=1.95cm,anchor=south] at ($(a\c.north)+(0,0.08)$) {\t};
+  \else
+    \pgfmathsetmacro{\off}{mod(\c,2)==0 ? 1.2 : 0.08}
+    \node[f,anchor=south] at ($(a\c.north)+(0,\off)$) {\t};
+  \fi
+}
+\foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,sync,line width=0.9pt] (a\c) -- (a\d); }
+%% spine between the rows
+\foreach \c/\t in \namesList {
+  \node[num] at ({\dx*(\c-1)-0.75},\ys) {\c};
+  \node[hd,anchor=west] at ({\dx*(\c-1)-0.5},\ys) {\t};
+}
+%% row (b): title, panels, labels below, rail below
+\node[ttl,text=async!85!black,anchor=north west] at (-0.8,\ys-0.4) {(b) generation-free (ours): one update per arrival};
+\node[note=right,anchor=north east] at (11.5,\ys-0.4) {\bootB};
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}}; }
+\foreach \c/\t in \labelsB {
+  \ifnum\variantB=1
+    \node[f,text width=1.95cm,anchor=north] at ($(b\c.south)+(0,-0.08)$) {\t};
+  \else
+    \pgfmathsetmacro{\off}{mod(\c,2)==0 ? -1.2 : -0.08}
+    \node[f,anchor=north] at ($(b\c.south)+(0,\off)$) {\t};
+  \fi
+}
+\foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,async,line width=0.9pt] (b\c) -- (b\d); }
+\draw[->,async,line width=0.9pt] (b6.east) -- ++(0.7,0) |- (-1.3,\railb) |- (b1.west);
+\node[note=left,anchor=north west] at (-0.8,\railb-0.1) {\returnB};
+\else
+%% ================================================================ horizontal
+\def\dx{2.0}
+\ifnum\variantB=1 \def\raildepth{2.05} \else \def\raildepth{2.45} \fi
+\pgfmathsetmacro{\ya}{-1.35}
+\pgfmathsetmacro{\raila}{\ya-0.8-\raildepth}
+\pgfmathsetmacro{\yb}{\raila-2.0}
+\pgfmathsetmacro{\railb}{\yb-0.8-\raildepth}
+\ifnum\variantG=1
+  \foreach \c in {1,3,5} { \fill[black!7] ({\dx*(\c-1)-1.0},0.62) rectangle ({\dx*(\c-1)+1.0},\railb-0.55); }
+\fi
+\foreach \c/\t in \namesList { \node[hd] at ({\dx*(\c-1)},0.3) {\c\ \ \t}; }
+%% row (a)
+\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,-0.45) {(a) textbook hard-threshold ABC-PMC: one update per generation};
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}}; }
+\foreach \c/\t in \labelsA {
+  \ifnum\variantB=1
+    \node[f,text width=1.95cm,anchor=north] at ($(a\c.south)+(0,-0.08)$) {\t};
+  \else
+    \pgfmathsetmacro{\off}{mod(\c,2)==0 ? -1.2 : -0.08}
+    \node[f,anchor=north] at ($(a\c.south)+(0,\off)$) {\t};
+  \fi
+}
+\foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,sync,line width=0.9pt] (a\c) -- (a\d); }
+\draw[->,sync,line width=0.9pt] (a6.east) -- ++(0.7,0) |- (-1.3,\raila) |- (a1.west);
+\draw[sync,line width=2.8pt] (5.0,\raila-0.22) -- (5.0,\raila+0.22);
+\node[note=left,anchor=north west] at (-0.8,\raila-0.1) {\returnA};
+\node[note=left,anchor=north west] at (5.2,\raila-0.1) {\barrierA};
+%% row (b)
+\node[ttl,text=async!85!black,anchor=south west] at (-0.8,\yb+1.05) {(b) generation-free (ours): one update per arrival};
+\node[note=right,anchor=south east] at (11.5,\yb+1.05) {\bootB};
+\foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}}; }
+\foreach \c/\t in \labelsB {
+  \ifnum\variantB=1
+    \node[f,text width=1.95cm,anchor=north] at ($(b\c.south)+(0,-0.08)$) {\t};
+  \else
+    \pgfmathsetmacro{\off}{mod(\c,2)==0 ? -1.2 : -0.08}
+    \node[f,anchor=north] at ($(b\c.south)+(0,\off)$) {\t};
+  \fi
+}
+\foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,async,line width=0.9pt] (b\c) -- (b\d); }
+\draw[->,async,line width=0.9pt] (b6.east) -- ++(0.7,0) |- (-1.3,\railb) |- (b1.west);
+\node[note=left,anchor=north west] at (-0.8,\railb-0.1) {\returnB};
+
+\fi
+\else
+%% ================================================================== vertical
+\def\rowh{2.0}
+\pgfmathsetmacro{\ytop}{1.25}
+\pgfmathsetmacro{\ybot}{-5*\rowh-0.8-0.35}
+\ifnum\variantG=1
+  \foreach \r in {1,3,5} { \fill[black!7] (-6.45,{-(\r-1)*\rowh-\rowh/2}) rectangle (6.45,{-(\r-1)*\rowh+\rowh/2}); }
+\fi
+%% spine
+\foreach \c/\t in \namesList {
+  \node[num] at (0,{-(\c-1)*\rowh+0.3}) {\c};
+  \node[hd] at (0,{-(\c-1)*\rowh-0.2}) {\t};
+}
+%% panels and texts
+\foreach \c in {1,...,6} {
+  \node[inner sep=0pt] (a\c) at (-2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{../out/a9s_panel_\c.pdf}};
+  \node[inner sep=0pt] (b\c) at ( 2.0,{-(\c-1)*\rowh}) {\includegraphics[width=\pw]{../out/a8s_panel_\c.pdf}};
+}
+\foreach \c/\t in \labelsA { \node[f,text width=3.1cm,align=right,anchor=east] at (-2.95,{-(\c-1)*\rowh}) {\t}; }
+\foreach \c/\t in \labelsB { \node[f,text width=3.1cm,align=left,anchor=west]  at ( 2.95,{-(\c-1)*\rowh}) {\t}; }
+\foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} {
+  \draw[->,sync,line width=0.9pt] (a\c) -- (a\d);
+  \draw[->,async,line width=0.9pt] (b\c) -- (b\d);
+}
+%% titles
+\node[ttl,text=sync!85!black,anchor=south,text width=4.2cm] at (-4.15,\ytop+1.0) {(a) textbook hard-threshold ABC-PMC: one update per generation};
+\node[ttl,text=async!85!black,anchor=south,text width=4.2cm] at ( 4.15,\ytop+1.0) {(b) generation-free (ours): one update per arrival};
+%% return rails: out of panel 6 at the bottom, up the outside, back into panel 1 from the top
+\draw[->,sync,line width=0.9pt] (a6.south) |- (-6.3,\ybot) |- (-2.0,\ytop) -- (a1.north);
+\draw[sync,line width=2.8pt] (-4.3,\ybot-0.22) -- (-4.3,\ybot+0.22);
+\node[note=center,anchor=north,text width=4.2cm] at (-4.15,\ybot-0.3) {\barrierA};
+\node[note=center,anchor=south,text width=4.2cm] at (-4.15,\ytop+0.3) {\returnA};
+\draw[->,async,line width=0.9pt] (b6.south) |- (6.3,\ybot) |- (2.0,\ytop) -- (b1.north);
+\node[note=center,anchor=south,text width=4.2cm] at (4.15,\ytop+0.3) {\returnBV};
+\node[note=center,anchor=north,text width=4.2cm] at (4.15,\ybot-0.3) {\bootB, straight to a worker};
+\fi
+\end{tikzpicture}

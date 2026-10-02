@@ -229,3 +229,7 @@ latex/sn-article-template/figures/*_meta.json
 # see experiments/data/cpm_screening/README.md.
 experiments/data/cpm_screening/*/corpus/
 experiments/data/cpm_screening/*/assets/
+
+# figure drafts: fetched record subsets (39 MB, re-fetch with py/fetch_records.sh) and TikZ build logs
+latex/figure-drafts/data/
+latex/figure-drafts/out/*.buildlog
