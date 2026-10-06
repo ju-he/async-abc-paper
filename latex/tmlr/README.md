@@ -1,16 +1,20 @@
 # TMLR version of the paper
 
-`tmlr-article.tex` is **generated** from the Springer source
-`../sn-article-template/sn-article.tex` by `make_tmlr_version.py`. Do not edit
-it by hand: edit the Springer file (or the script) and re-run
+`tmlr-article.tex` is the manuscript (target venue decided 2026-10-06). Edit it
+directly, locally or on the TMLR Overleaf project; `../overleaf.py tmlr
+push|pull` keeps the two in sync (see `../README.md`). Build with
 
-    python3 make_tmlr_version.py && latexmk -pdf tmlr-article.tex
+    latexmk -pdf tmlr-article.tex
 
-The script fails loudly if an anchor it rewrites is no longer found in the
-source, so a Springer edit that moves one shows up here as an error rather
-than as a silently wrong TMLR file.
+Until 2026-10-06 this file was generated from the Springer source
+`../sn-article-template/sn-article.tex` by `make_tmlr_version.py`. The
+generator was retired when the TMLR version became the working copy (last
+version of both at commit 75dd007; `git show 75dd007:latex/tmlr/make_tmlr_version.py`).
+The Springer version is frozen at that state and no longer maintained.
 
-## What the script changes (everything else is verbatim)
+## How this version differs from the frozen Springer manuscript
+
+(What the generator used to change; everything else was verbatim at 75dd007.)
 
 - sn-jnl scaffolding -> TMLR: `\documentclass[10pt]{article}` + `\usepackage{tmlr}`;
   `\title[short]{}` / `\author*` / `\affil` / `\abstract{}` / `\keywords{}` ->

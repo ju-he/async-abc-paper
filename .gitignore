@@ -220,6 +220,9 @@ latex/**/*.out
 latex/**/*.fdb_latexmk
 latex/**/*.fls
 
+# local clone of the Overleaf project, managed by latex/overleaf.py
+latex/.overleaf/
+
 # paper-figure rasterization/provenance byproducts (PDFs are the committed deliverable;
 # vendored input data lives under experiments/data/paper_figures/)
 latex/sn-article-template/figures/*.png
