@@ -303,3 +303,22 @@ Deviations from the plan worth knowing:
   (J. Math. Biol. 76:1673-1697); Hirashima, Rens & Merks 2017 (Dev. Growth Differ.
   59(5):329-339).
 - Overleaf not pushed (needs the user's token interactively).
+
+## 9. Step 12, the prose pass (run 2026-10-06, same day)
+
+Run with the `prose-pipeline` skill; full record in `reviews/2026-10-06-tmlr-prose/` (config,
+ledger, per-round proposals with status and reason, both reviewers' reports per stage). Five
+commits on `campaign-tooling`, b4d3ab5..8967514:
+
+| stage | edits applied | reviewers' verdicts |
+|---|---:|---|
+| humanizer voice pass (academic-humanizer, voice-only brief) | 38 | blinded A/B: both reviewers prefer the edited text by a moderate margin (Claude AI-likeness 3 -> 2, codex 6 -> 2) |
+| round 1 (50 proposals, batch triage, all items) | 35 (2 reverted, 2 reworded after split verdicts) | AI-likeness Claude 4, codex 8 before the round |
+| round 2 (38 proposals, batch triage, all items) | 29 (2 reverted) | Claude 3, codex 5 before the round; both verifiers advise stopping |
+
+Kept by author decision and fed to the reviewers as rejected: the two short lines
+"Identifiability does." and "The posterior does not follow.", the four italic Discussion rule
+titles, "the method a practitioner would run" (5.2), the Appendix F "lifts" sentence, the
+"Measured, in part." heading, "binds"/"sits at the threshold"/"turns on" as policy verbs.
+Word count 20,970 -> 20,694 (texcount-free `wc -w` on the .tex); 41 pages. Open: one
+read-through of Appendix A and 3.1 for rhythm where the splits left runs of short sentences.

@@ -13,7 +13,7 @@
   as the more conservative, per the round-1 verification)
 - apply: 31 applied, 0 failed; build clean, 40 pages (41 before)
 - stop rule: the Claude reviewer writes it would stop; this is the last evaluation round
-- commit: 0b6d5df (round applied at 60cfcff; verification fixes in this commit)
+- commit: 8967514 (round applied at 60cfcff; verification fixes in this commit)
 
 ## Verification
 
