@@ -281,8 +281,8 @@ Removes a restated result so the paragraph ends on the two things not yet said (
 - category: duplication
 - severity: L
 - source: claude
-- status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- status: reverted
+- reason: batch triage 2026-10-06 (all items; user choice) | reverted by hand (deletion): both verifiers flagged the dropped "6" token; codex asked for the revert
 - allow-token-change: yes
 - token-note: deletes a duplicated caveat; the "6" is "step 6", and the caveat with the step reference stays in 3.5
 
@@ -409,8 +409,8 @@ States how $r$ relates to the theorems (it enters them) rather than "is carried"
 - category: readability
 - severity: L
 - source: claude
-- status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- status: reverted
+- reason: batch triage 2026-10-06 (all items; user choice) | codex verifier: regressed (two causal links chained before the display)
 
 **Before**
 ```text
