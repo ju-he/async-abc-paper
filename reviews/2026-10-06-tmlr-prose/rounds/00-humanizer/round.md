@@ -32,4 +32,4 @@ for "raising k is not free". Both reviewers independently flagged the "headroom"
 Decision: the edited file stays; three sentences adjusted (see report, "Post-A/B adjustments");
 the four small single-reviewer dissents are left for the evaluation rounds to re-propose if they
 recur. Codex's sandbox could not write its file; codex_review.sh captured the report via -o.
-- commit: 1d9e2cd
+- commit: b4d3ab5
