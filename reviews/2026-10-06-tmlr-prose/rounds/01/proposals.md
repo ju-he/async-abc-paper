@@ -349,7 +349,7 @@ Drops the adverb that no result supports and keeps the one that C1 does.
 - severity: L
 - source: claude
 - status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- reason: batch triage 2026-10-06 (all items; user choice) | After amended to the codex verifier's wording after a split changed-message verdict (user decision)
 
 **Before**
 ```text
@@ -358,7 +358,7 @@ The proposal path's total variation is therefore $O(\log n)$, and the snapshot c
 
 **After**
 ```text
-The proposal path's total variation is therefore $O(\log n)$, and the snapshot clause is met. The \emph{distance to the limit} is the harder condition.
+The proposal path's total variation is therefore $O(\log n)$, and the snapshot clause is met. The \emph{distance to the limit} is the binding condition.
 ```
 
 **Rationale**
@@ -411,8 +411,8 @@ Cleft removed; content and cross-reference unchanged.
 - category: vocabulary
 - severity: L
 - source: claude
-- status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- status: reverted
+- reason: batch triage 2026-10-06 (all items; user choice) | codex verifier: changed-message (disappears is stronger than lifts); user chose revert
 
 **Before**
 ```text
@@ -776,7 +776,7 @@ The replacement names the measured relation immediately. It preserves every meth
 - source: codex
 - duplicate-of: P-008
 - status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- reason: batch triage 2026-10-06 (all items; user choice) | After amended to the codex verifier's wording after a split changed-message verdict (user decision)
 
 **Before**
 ```text
@@ -785,7 +785,7 @@ What differs is the bandwidth the estimate is reported at: after the run's $62$ 
 
 **After**
 ```text
-The runs differ in the bandwidth used for reporting. After the run's $62$ calls per worker, the schedule had not moved from $\epsilon_0$, which ended $321\times$ above the tolerance the draws supported, against $2\times$ at $\epsilon_0=0.1$. The transient is negligible on a simulator that affords millions of evaluations, which is why the cheap runs never showed it. It remains consequential in the regime the method is designed for.
+The runs differ in the bandwidth used for reporting. After the run's $62$ calls per worker, the schedule had not moved from $\epsilon_0$, which ended $321\times$ above the tolerance the draws supported, against $2\times$ at $\epsilon_0=0.1$. The transient is negligible on a simulator that affords millions of evaluations, which is why the cheap runs never showed it. It remains a binding limitation in the regime the method is designed for.
 ```
 
 **Rationale**
@@ -967,8 +967,8 @@ The replacement states the mathematical construction directly. It removes both t
 - category: heading
 - severity: M
 - source: codex
-- status: applied
-- reason: batch triage 2026-10-06 (all items; user choice)
+- status: reverted
+- reason: batch triage 2026-10-06 (all items; user choice) | Claude verifier: regressed (heading narrower than the paragraph, body lost its antecedent)
 
 **Before**
 ```text
