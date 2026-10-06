@@ -9,9 +9,9 @@ algorithm holds at this call:
   2 bandwidth        the k best in blue; inset: the smooth kernel K_eps(rho) over rho
                      with the archive's rho_j as ticks (no acceptance boundary)
   3 weights          archive members sized by W_j ~ w_j K_eps(rho_j); Sigma_n dotted
-  4 proposal         q_n as contours
+  4 proposal         q_n as contours; the stored earlier proposals faintly behind it
   5 one draw         a parent J ~ W, perturbed by L_n z, to the candidate theta*
-  6 weight           theta* against q_n and the stored snapshots (gray)
+  6 weight           theta* against q_n and the stored proposals (gray)
 
 Outputs: ../out/a8_panel_1..6.pdf (2.4 cm, for the ring) and
 ../out/a8s_panel_1..6.pdf (1.6 cm, for the strip).
@@ -62,10 +62,15 @@ def make(size, prefix):
     p.tag(r"$\Sigma_n$", BLUE)
     p.save(f"{prefix}_panel_3")
 
-    # 4 proposal mixture
+    # 4 proposal mixture; the stored (earlier) proposals faintly behind it
+    shown = snaps[::3] + ([snaps[-1]] if (len(snaps) - 1) % 3 else [])
     p = T.Panel(size)
     p.ax.contourf(gx, gy, dens, levels=[*levels, dens.max() * 1.01],
                   colors=[T.tint(BLUE, f) for f in (0.25, 0.45, 0.7, 0.95)])
+    for sn in shown:
+        d = sn.pdf(G).reshape(gx.shape)
+        lv = np.quantile(d[d > d.max() * 0.02], [0.6])
+        p.ax.contour(gx, gy, d, levels=lv, colors=["0.8"], linewidths=0.4)
     p.ax.contour(gx, gy, dens, levels=levels, colors=[BLUE], linewidths=0.4)
     p.ax.scatter(theta[arch, 0], theta[arch, 1], s=5 * p.s, color="white", edgecolors=BLUE, linewidths=0.4)
     p.tag(r"$q_n$", BLUE)
@@ -86,7 +91,6 @@ def make(size, prefix):
 
     # 6 weight: theta* against q_n and the stored snapshots (no prior term online)
     p = T.Panel(size)
-    shown = snaps[::3] + ([snaps[-1]] if (len(snaps) - 1) % 3 else [])
     for sn in shown:
         d = sn.pdf(G).reshape(gx.shape)
         lv = np.quantile(d[d > d.max() * 0.02], [0.6])

@@ -54,6 +54,8 @@ from async_abc.plotting import paper_style as ps  # noqa: E402
 # writes next to the default one so the TikZ wrappers can pick either set.
 OUT = HERE.parent / ("out" if ps.SCHEME == "okabe" else f"out_{ps.SCHEME}")
 STAR = "#111111"
+FRAME_LW = 0.6  # pt; the prior-box outline shared by all panels
+FRAME_COLOR = "0.62"
 REF_SIZE = 1.25  # inches; marker areas below are given for this panel size
 TAG_FS = 7
 
@@ -233,14 +235,19 @@ class Panel:
         self.size = size
         self.s = (size / REF_SIZE) ** 2
         self.fig = plt.figure(figsize=(size, size))
-        self.ax = self.fig.add_axes([0, 0, 1, 1])
+        # The axes are the unit prior box in every panel (limits 0..1, never
+        # changed). Its frame is drawn as a thin light-gray outline, inset by
+        # half the line width so the whole line survives the zero-padding save
+        # and every panel shows the identical box.
+        m = 0.5 * FRAME_LW / 72 / size
+        self.ax = self.fig.add_axes([m, m, 1 - 2 * m, 1 - 2 * m])
         self.ax.set_xlim(0, 1)
         self.ax.set_ylim(0, 1)
         self.ax.set_xticks([])
         self.ax.set_yticks([])
         for sp in self.ax.spines.values():
-            sp.set_linewidth(0.6)
-            sp.set_color("0.45")
+            sp.set_linewidth(FRAME_LW)
+            sp.set_color(FRAME_COLOR)
 
     def tag(self, text, color):
         self.ax.text(0.97, 0.05, text, color=color, ha="right", va="bottom", fontsize=TAG_FS,

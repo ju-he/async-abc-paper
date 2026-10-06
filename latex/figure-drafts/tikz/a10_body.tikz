@@ -18,7 +18,7 @@
   num/.style={circle,fill=black!55,text=white,font=\scriptsize\bfseries,inner sep=1.5pt,minimum size=11pt}]
 \def\pw{1.6cm}
 %% ------------------------------------------------------------ texts
-\def\namesList{1/{state},2/{tolerance $\epsilon$},3/{weights, $\Sigma$},4/{proposal},5/{draw},6/{weight}}
+\def\namesList{1/{history},2/{bandwidth},3/{archive weights},4/{proposal},5/{one draw},6/{weight}}
 \ifnum\variantB=1
   \def\labelsA{%
     1/{the current population only; earlier generations are discarded},
@@ -33,7 +33,7 @@
     3/{archive weights: stored weight times kernel weight; covariance from them},
     4/{one mixture proposal over the archive, rebuilt at every call},
     5/{one candidate: a parent drawn by weight, then perturbed},
-    6/{weighted against the mixture of all proposals used so far, before it is simulated}}
+    6/{weighted against the current proposal and the $S$ stored proposals, before it is simulated}}
 \else
   \def\labelsA{%
     1/{$P_t$: $(\theta_i,\rho_i,\omega^{(t)}_i)$\\ gen.\ $<t$ discarded},
@@ -43,7 +43,7 @@
     5/{$\theta^\star\sim q_t$, simulate,\\ keep if $\rho^\star<\epsilon_{t+1}$;\\ one at a time, until $N$ kept},
     6/{$\omega^{(t+1)}\propto\pi/q_t$\\ after acceptance}}
   \def\labelsB{%
-    1/{$\mathcal H_n$: all $n$ so far\\ $(\theta_i,\rho_i,\epsilon_i,\tau_i,w_i)$},
+    1/{$\mathcal H_n$: all $n$ so far\\ $(\theta_i,\rho_i,\epsilon_i,w_i)$},
     2/{$A_n=\mathrm{Top}_k(\rho)$\\ $\epsilon_n$ non-increasing, smooth $K_{\epsilon_n}$},
     3/{$\tilde W_j\propto w_j\,K_{\epsilon_n}(\rho_j)$\\ $\Sigma_n=s\,\widehat{\mathrm{Cov}}_{\tilde W}(A_n)$},
     4/{$q_n=\sum_{j\in A_n}\tilde W_j\,K_{\Sigma_n}(\,\cdot-\theta_j)$},
@@ -51,10 +51,19 @@
     6/{$w^\star=\pi/\bar q^{\mathrm{on}}_n$ at $\theta^\star$}}
 \fi
 \def\returnA{$P_{t+1}$: the $N$ kept, weighted; the rejected are discarded}
+\def\titleA{(a) textbook ABC-PMC, schematic: one update per generation}
+\def\stageA{shown: generation $t\to t+1$, after \pmcCalls{} simulations}
+\def\titleB{(b) generation-free (ours): one update per arrival}
+\def\stageB{shown: the update after \asyncCalls{} evaluations}
+% simulation counts of the toy runs in py/_toy2d.py: the PMC population t exists after
+% 48 pilot + 25 prior-rejection + 16 + 46 = 135 simulations (the drawn generation adds 48);
+% ours is drawn at the call after 84 evaluations (n_calls in run_async).
+\def\pmcCalls{135}\def\asyncCalls{84}
 \def\barrierA{barrier: $q_{t+1}$ needs the complete $P_{t+1}$}
-\def\returnB{$\theta^\star$ to a free worker; $\rho^\star$ arrives later, among other workers' results: append $(\theta^\star,\rho^\star,\epsilon_{\tau^\star},\tau^\star,w^\star)$, $\tau^\star=n$}
-\def\bootB{$|\mathcal H_n|<k$: prior draw, $w^\star\!=\!1$, no $\epsilon$ stamp}
-\def\returnBV{$\theta^\star$ to a free worker; $\rho^\star$ arrives later: append $(\theta^\star,\rho^\star,\epsilon_{\tau^\star},\tau^\star,w^\star)$, $\tau^\star=n$}
+\def\returnB{$\theta^\star$ to a free worker; $\rho^\star$ arrives later, among other workers' results: append $(\theta^\star,\rho^\star,\epsilon_n,w^\star)$}
+\def\bootB{fewer than $k$ particles: prior draw, $w^\star\!=\!1$, no bandwidth stored}
+\def\frameNote{every panel: the same unit prior box}
+\def\returnBV{$\theta^\star$ to a free worker; $\rho^\star$ arrives later: append $(\theta^\star,\rho^\star,\epsilon_n,w^\star)$}
 
 \ifdefined\variantM\else\def\variantM{0}\fi
 \ifdefined\panelsdir\else\def\panelsdir{../out}\fi
@@ -67,11 +76,11 @@
 \ifnum\variantB=1 \def\raildepth{1.75} \else \def\raildepth{2.45} \fi
 \pgfmathsetmacro{\ya}{0}
 \pgfmathsetmacro{\raila}{\ya+0.8+\raildepth+0.45}
-\pgfmathsetmacro{\ys}{\ya-1.25}
-\pgfmathsetmacro{\yb}{\ys-1.75}
+\pgfmathsetmacro{\ys}{\ya-1.38}
+\pgfmathsetmacro{\yb}{\ys-2.0}
 \pgfmathsetmacro{\railb}{\yb-0.8-\raildepth-0.35}
 %% row (a): title, rail, labels above the panels
-\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,\raila+0.32) {(a) textbook hard-threshold ABC-PMC: one update per generation};
+\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,\raila+0.32) {\titleA{} \mdseries\stageA};
 \foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{\panelsdir/a9s_panel_\c.pdf}}; }
 \draw[->,sync,line width=0.9pt] (a6.east) -- ++(0.7,0) |- (-1.3,\raila) |- (a1.west);
 \draw[sync,line width=2.8pt] (5.0,\raila-0.22) -- (5.0,\raila+0.22);
@@ -86,14 +95,13 @@
   \fi
 }
 \foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,sync,line width=0.9pt] (a\c) -- (a\d); }
-%% spine between the rows
+%% spine between the rows: the circled step number, the step name below it
 \foreach \c/\t in \namesList {
-  \node[num] at ({\dx*(\c-1)-0.75},\ys) {\c};
-  \node[hd,anchor=west] at ({\dx*(\c-1)-0.5},\ys) {\t};
+  \node[num] at ({\dx*(\c-1)},\ys+0.24) {\c};
+  \node[hd,anchor=north] at ({\dx*(\c-1)},\ys-0.02) {\t};
 }
 %% row (b): title, panels, labels below, rail below
-\node[ttl,text=async!85!black,anchor=north west] at (-0.8,\ys-0.4) {(b) generation-free (ours): one update per arrival};
-\node[note=right,anchor=north east] at (11.5,\ys-0.4) {\bootB};
+\node[ttl,text=async!85!black,anchor=north west] at (-0.8,\ys-0.52) {\titleB{} \mdseries\stageB};
 \foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{\panelsdir/a8s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsB {
   \ifnum\variantB=1
@@ -119,6 +127,8 @@
 \foreach \c/\d in {1/2,2/3,3/4,4/5,5/6} { \draw[->,async,line width=0.9pt] (b\c) -- (b\d); }
 \draw[->,async,line width=0.9pt] (b6.east) -- ++(0.7,0) |- (-1.3,\railb) |- (b1.west);
 \node[note=left,anchor=north west] at (-0.8,\railb-0.1) {\returnB};
+\node[note=left,anchor=north west] at (-0.8,\railb-0.5) {bootstrap, \bootB};
+\node[note=right,anchor=north east] at (11.5,\railb-0.5) {\frameNote};
 \else
 %% ================================================================ horizontal
 \def\dx{2.0}
@@ -132,7 +142,7 @@
 \fi
 \foreach \c/\t in \namesList { \node[hd] at ({\dx*(\c-1)},0.3) {\c\ \ \t}; }
 %% row (a)
-\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,-0.45) {(a) textbook hard-threshold ABC-PMC: one update per generation};
+\node[ttl,text=sync!85!black,anchor=south west] at (-0.8,-0.45) {\titleA{} \mdseries\stageA};
 \foreach \c in {1,...,6} { \node[inner sep=0pt] (a\c) at ({\dx*(\c-1)},\ya) {\includegraphics[width=\pw]{\panelsdir/a9s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsA {
   \ifnum\variantB=1
@@ -148,7 +158,7 @@
 \node[note=left,anchor=north west] at (-0.8,\raila-0.1) {\returnA};
 \node[note=left,anchor=north west] at (5.2,\raila-0.1) {\barrierA};
 %% row (b)
-\node[ttl,text=async!85!black,anchor=south west] at (-0.8,\yb+1.05) {(b) generation-free (ours): one update per arrival};
+\node[ttl,text=async!85!black,anchor=south west] at (-0.8,\yb+1.05) {\titleB{} \mdseries\stageB};
 \node[note=right,anchor=south east] at (11.5,\yb+1.05) {\bootB};
 \foreach \c in {1,...,6} { \node[inner sep=0pt] (b\c) at ({\dx*(\c-1)},\yb) {\includegraphics[width=\pw]{\panelsdir/a8s_panel_\c.pdf}}; }
 \foreach \c/\t in \labelsB {
@@ -189,8 +199,8 @@
   \draw[->,async,line width=0.9pt] (b\c) -- (b\d);
 }
 %% titles
-\node[ttl,text=sync!85!black,anchor=south,text width=4.2cm] at (-4.15,\ytop+1.0) {(a) textbook hard-threshold ABC-PMC: one update per generation};
-\node[ttl,text=async!85!black,anchor=south,text width=4.2cm] at ( 4.15,\ytop+1.0) {(b) generation-free (ours): one update per arrival};
+\node[ttl,text=sync!85!black,anchor=south,text width=4.2cm] at (-4.15,\ytop+1.0) {\titleA\\ \mdseries\stageA};
+\node[ttl,text=async!85!black,anchor=south,text width=4.2cm] at ( 4.15,\ytop+1.0) {\titleB\\ \mdseries\stageB};
 %% return rails: out of panel 6 at the bottom, up the outside, back into panel 1 from the top
 \draw[->,sync,line width=0.9pt] (a6.south) |- (-6.3,\ybot) |- (-2.0,\ytop) -- (a1.north);
 \draw[sync,line width=2.8pt] (-4.3,\ybot-0.22) -- (-4.3,\ybot+0.22);

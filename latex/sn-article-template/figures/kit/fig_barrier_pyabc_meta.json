@@ -1,0 +1,12 @@
+{
+  "git_hash": "94f8a29",
+  "timestamp": "2026-10-06T17:39:13.615915",
+  "pdf": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_barrier_pyabc.pdf",
+  "png": "/home/juhe/bwSyncShare/Code/async-abc-paper/latex/sn-article-template/figures/kit/fig_barrier_pyabc.png",
+  "figure": "fig_barrier_pyabc",
+  "vendored_data_dir": null,
+  "sources": [
+    "fig_straggler_throughput",
+    "fig_hetero_idle"
+  ]
+}
