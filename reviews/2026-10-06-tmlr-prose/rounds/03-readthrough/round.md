@@ -8,4 +8,4 @@
 - left as split: the per-step drift / archive-turnover pair and the two exponent-fit sentences
   (both reviewers proposed those splits independently and they read as separate measurements)
 - build clean (0 LaTeX errors, 0 undefined), 41 pages
-- commit: 1e52526
+- commit: 7d0621d
