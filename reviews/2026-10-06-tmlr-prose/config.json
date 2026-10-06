@@ -1,0 +1,10 @@
+{
+ "files": [
+  "latex/tmlr/tmlr-article.tex"
+ ],
+ "thesishelper": false,
+ "build": "cd latex/tmlr && latexmk -pdf -interaction=nonstopmode tmlr-article.tex",
+ "accept_threshold": 5,
+ "created": "2026-10-06",
+ "notes": "headings/structure in scope unless thesishelper is true"
+}
