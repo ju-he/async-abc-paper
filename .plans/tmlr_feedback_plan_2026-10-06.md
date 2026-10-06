@@ -265,3 +265,41 @@ recommendation.
   repeating a table cell.
 - Figures regenerated under `ABC_FIG_SCHEME=okabe` and `kit`; the KIT PDFs feed the thesis.
 - One commit per step; Overleaf push after step 11 and after 12.
+
+## 8. Execution record (2026-10-06, same day)
+
+Steps 1-11 executed on branch `campaign-tooling`, one commit per step group
+(baseline 94f8a29; Section 3/4 fac09f8; Background/Section 5 363085f; figures 78384b6;
+Results 5058b02; abstract/intro/Discussion/Conclusion/captions/terminology: last commit).
+Step 12, the prose pass, has not been run.
+
+Outcome against the budget:
+
+| | baseline | now |
+|---|---:|---:|
+| main-body pages (before References) | 17 | 16 |
+| main-body words outside floats | 5,356 | 5,766 |
+| floats in the main body | 12 | 11 |
+
+The page count fell by one, so the "no inflation" constraint holds, but the word budget
+(-1,200) was missed: Background (+280), Section 3 (+330) and Section 5 (+380, the
+Cellular Potts motivation and the metric definitions) grew more than planned, and the
+Results cut (-390) and Discussion/Conclusion cut (-120) were smaller than planned. The
+remaining fat is in 6.4 (calibration paragraph) and the four Discussion rules; the prose
+pass can take it.
+
+Deviations from the plan worth knowing:
+- The parent weight also feeds the scheduler's ESS search, so it is "used only inside the
+  running sampler", not "only to choose parents".
+- Lotka-Volterra and the four-dimensional calibration runs use the geometric-decay schedule
+  family; the hyperparameter table in Appendix B says so, 3.3 describes the kernel-aware
+  rule they all share.
+- Fig. 1 row (a) stage is "generation t -> t+1 after 135 simulations" (48 of them a toy
+  pilot for epsilon_0); row (b) "after 84 evaluations". The counts were annotated, not
+  matched, because the only PMC stage near 84 is a near-prior population.
+- Fig. 2's legend sits below the panel (the longest label is wider than the empty corner).
+- Three references were added from memory and must be checked against the originals:
+  Kursawe, Baker & Fletcher 2018 (J. Theor. Biol. 443:66-81); Lambert et al. 2018
+  (J. Math. Biol. 76:1673-1697); Hirashima, Rens & Merks 2017 (Dev. Growth Differ.
+  59(5):329-339).
+- Overleaf not pushed (needs the user's token interactively).
