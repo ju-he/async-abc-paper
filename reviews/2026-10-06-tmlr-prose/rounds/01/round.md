@@ -15,7 +15,7 @@
 - apply: 37 applied, 0 failed; build clean (0 LaTeX errors, 0 undefined), 41 pages
 - diagnostics (not targets): "is what" 12 -> 1 after stage 1; "carries" 12 -> 7; counted
   signposts ("Three things/findings/comparators/weightings") 4 -> 0
-- commit: f0adb4e
+- commit: 8ace65e (round applied at f0adb4e; verification fixes in this commit)
 
 ## Verification
 
