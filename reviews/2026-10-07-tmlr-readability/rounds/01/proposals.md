@@ -657,7 +657,7 @@ The validation now follows the definition as a separate result. The edit retains
 - severity: H
 - source: codex
 - status: applied
-- reason: The abstract joins a theorem, its exact-fidelity condition, and an empirical calibration comparison in a single sentence.
+- reason: applied, then amended after verification: both verifiers rated the applied wording regressed (tautological 'In calibration experiments, the estimator is calibrated') and both proposed 'Empirically, it is calibrated where ...'; that wording is now in the file | The abstract joins a theorem, its exact-fidelity condition, and an empirical calibration comparison in a single sentence.
 
 **Before**
 ```text
@@ -700,7 +700,7 @@ The revision separates the theorem, supporting analysis, and empirical scope wit
 - severity: H
 - source: codex
 - status: applied
-- reason: Assumption B3 and its consequence introduce the scheduling variables, independence condition, filtration, and two conditional laws without a pause.
+- reason: applied, then amended after verification: Claude verifier regressed (the applied text dropped 'by then'); restored | Assumption B3 and its consequence introduce the scheduling variables, independence condition, filtration, and two conditional laws without a pause.
 
 **Before**
 ```text
@@ -806,8 +806,8 @@ The split preserves the logical connective while giving the variance comparison 
 - category: readability
 - severity: M
 - source: codex
-- status: applied
-- reason: The explanation of the tilt identity states both the operative quantity and scale invariance after a colon, which makes the second fact easy to miss.
+- status: reverted
+- reason: reverted after verification: codex verifier regressed (paraphrases the equation and inverts the explanatory order); Claude verifier neutral | The explanation of the tilt identity states both the operative quantity and scale invariance after a colon, which makes the second fact easy to miss. | reverted after verification
 
 **Before**
 ```text

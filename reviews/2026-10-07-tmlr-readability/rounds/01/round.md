@@ -20,3 +20,18 @@
   in Appendix A(a); the floored prior weight is lambda_n in the snapshot-denominator display and
   w_n occurs nowhere else) and P-015 ("nine of ten" -> "nine of the ten marginals").
 - apply: 39 applied, 0 failed; build clean (0 LaTeX errors, 0 undefined), 43 pages (43 before)
+- commit: 793b61b (round applied at 1afd508; verification fixes in this commit)
+
+## Verification
+
+- Claude (verify_claude.md): 35 improved, 2 neutral (P-038, P-041), 2 regressed (P-031: the
+  abstract split echoes "calibration ... calibrated"; P-033: the (B3) rewrite dropped "by then"),
+  0 changed-message; no protected token added or removed in any item.
+- codex (verify_codex.md): 36 improved, 1 neutral (P-037), 2 regressed (P-031, same reason;
+  P-038: paraphrases the equation and inverts the explanatory order), 0 changed-message; token
+  audit clean.
+- Actions: P-038 reverted (pipeline revert). P-031 amended to the wording both verifiers
+  proposed ("Empirically, it is calibrated where ..."). P-033 amended by restoring "by then".
+  Rebuilt: clean, 43 pages. Round outcome: 38 applied (two amended), 1 reverted, 10 rejected.
+- Both verifiers would not run another broad round; both suggest a short targeted read of the
+  transitions at the new sentence boundaries in Section 3 and Appendices A-B.
