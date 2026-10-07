@@ -19,6 +19,7 @@
   rather than clearly inside it"; "the scale below which ... not a threshold above which");
   all hedges and limitations; all headings; the proof prose of Appendix B
 - build: latexmk clean, 0 LaTeX errors, 0 undefined, 43 pages
+- commit: d1ebcc0
 - A/B: blinded copies in ab/claude (version_1 = edited, version_2 = baseline) and ab/codex
   (version_1 = baseline, version_2 = edited); orders set by hand, keys kept outside the repo
 
