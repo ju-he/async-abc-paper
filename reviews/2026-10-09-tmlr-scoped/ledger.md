@@ -6,25 +6,25 @@ Status counts: applied 6, rejected 16
 
 | id | round | source | file | category | sev | status | reason | commit |
 |---|---|---|---|---|---|---|---|---|
-| P-001 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | H | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-002 | 01 | claude | latex/tmlr/tmlr-article.tex | structure | H | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-003 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | M | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-004 | 01 | claude | latex/tmlr/tmlr-article.tex | duplication | M | rejected | single reviewer, severity below H (batch rule); author may promote | cff4fe5 |
-| P-005 | 01 | claude | latex/tmlr/tmlr-article.tex | duplication | L | rejected | single reviewer, severity below H (batch rule); author may promote | cff4fe5 |
-| P-006 | 01 | claude | latex/tmlr/tmlr-article.tex | meta | M | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-007 | 01 | claude | latex/tmlr/tmlr-article.tex | punchline | M | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-008 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | cff4fe5 |
-| P-009 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | cff4fe5 |
-| P-010 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | applied | both reviewers proposed it; Claude's wording (batch rule) | cff4fe5 |
-| P-011 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | cff4fe5 |
-| P-012 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | caption prose only; the figure environment is untouched (author to confirm captions are in scope) | cff4fe5 |
-| P-013 | 01 | codex | latex/tmlr/tmlr-article.tex | meta | H | rejected | The five-sentence proof roadmap narrates an itemized sequence that the proof immediately executes, producing the strongest mirrored-template effect in the scoped additions. | cff4fe5 |
-| P-014 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | H | rejected | “The bandwidths the sampler proposes with” is malformed, and the sentence obscures the important distinction between reporting and proposal bandwidths. | cff4fe5 |
-| P-015 | 01 | codex | latex/tmlr/tmlr-article.tex | duplication | H | rejected | The limitations section re-derives the floor condition from the theory section while combining two distinct limitations in one semicolon-heavy sentence. | cff4fe5 |
-| P-016 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | The sentence chains floor status, scheduler behavior, kernel support, and the effective-sample-size consequence with three equally weighted clauses. | cff4fe5 |
-| P-017 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | The sentence joins an asymptotic result, its temporal interpretation, and the finite-budget evidence in one long closing chain. | cff4fe5 |
-| P-018 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | H | rejected | The scheduler sentence combines cadence, cache invalidation, execution mode, and the observed twin difference in a single deeply nested construction. | cff4fe5 |
-| P-019 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | Four distinct quantitative comparisons are packed into one sentence, making it difficult to distinguish throughput, barrier attribution, per-simulation efficiency, and equal-wall-clock efficiency. | cff4fe5 |
-| P-020 | 01 | codex | latex/tmlr/tmlr-article.tex | punchline | M | rejected | The sentence restates both the appendix introduction and the next subsection’s purpose without adding a condition, result, or evidence pointer. | cff4fe5 |
-| P-021 | 01 | codex | latex/tmlr/tmlr-article.tex | meta | M | rejected | The sentence announces that an example will show a difficulty instead of beginning the example. | cff4fe5 |
-| P-022 | 01 | codex | latex/tmlr/tmlr-article.tex | vocabulary | M | rejected | “The implementation also offers” sounds product-like, and the sentence expresses the same no-effect conclusion twice through “every choice reduces” and “the option has no effect.” | cff4fe5 |
+| P-001 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | H | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-002 | 01 | claude | latex/tmlr/tmlr-article.tex | structure | H | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-003 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | M | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-004 | 01 | claude | latex/tmlr/tmlr-article.tex | duplication | M | rejected | single reviewer, severity below H (batch rule); author may promote | 3d2aa85 |
+| P-005 | 01 | claude | latex/tmlr/tmlr-article.tex | duplication | L | rejected | single reviewer, severity below H (batch rule); author may promote | 3d2aa85 |
+| P-006 | 01 | claude | latex/tmlr/tmlr-article.tex | meta | M | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-007 | 01 | claude | latex/tmlr/tmlr-article.tex | punchline | M | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-008 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | 3d2aa85 |
+| P-009 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | 3d2aa85 |
+| P-010 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | applied | both reviewers proposed it; Claude's wording (batch rule) | 3d2aa85 |
+| P-011 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | single reviewer, severity below H (batch rule); author may promote | 3d2aa85 |
+| P-012 | 01 | claude | latex/tmlr/tmlr-article.tex | readability | L | rejected | caption prose only; the figure environment is untouched (author to confirm captions are in scope) | 3d2aa85 |
+| P-013 | 01 | codex | latex/tmlr/tmlr-article.tex | meta | H | rejected | The five-sentence proof roadmap narrates an itemized sequence that the proof immediately executes, producing the strongest mirrored-template effect in the scoped additions. | 3d2aa85 |
+| P-014 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | H | rejected | “The bandwidths the sampler proposes with” is malformed, and the sentence obscures the important distinction between reporting and proposal bandwidths. | 3d2aa85 |
+| P-015 | 01 | codex | latex/tmlr/tmlr-article.tex | duplication | H | rejected | The limitations section re-derives the floor condition from the theory section while combining two distinct limitations in one semicolon-heavy sentence. | 3d2aa85 |
+| P-016 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | The sentence chains floor status, scheduler behavior, kernel support, and the effective-sample-size consequence with three equally weighted clauses. | 3d2aa85 |
+| P-017 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | The sentence joins an asymptotic result, its temporal interpretation, and the finite-budget evidence in one long closing chain. | 3d2aa85 |
+| P-018 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | H | rejected | The scheduler sentence combines cadence, cache invalidation, execution mode, and the observed twin difference in a single deeply nested construction. | 3d2aa85 |
+| P-019 | 01 | codex | latex/tmlr/tmlr-article.tex | readability | M | rejected | Four distinct quantitative comparisons are packed into one sentence, making it difficult to distinguish throughput, barrier attribution, per-simulation efficiency, and equal-wall-clock efficiency. | 3d2aa85 |
+| P-020 | 01 | codex | latex/tmlr/tmlr-article.tex | punchline | M | rejected | The sentence restates both the appendix introduction and the next subsection’s purpose without adding a condition, result, or evidence pointer. | 3d2aa85 |
+| P-021 | 01 | codex | latex/tmlr/tmlr-article.tex | meta | M | rejected | The sentence announces that an example will show a difficulty instead of beginning the example. | 3d2aa85 |
+| P-022 | 01 | codex | latex/tmlr/tmlr-article.tex | vocabulary | M | rejected | “The implementation also offers” sounds product-like, and the sentence expresses the same no-effect conclusion twice through “every choice reduces” and “the option has no effect.” | 3d2aa85 |

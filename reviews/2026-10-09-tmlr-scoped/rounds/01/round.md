@@ -16,4 +16,25 @@
   - "Does the proposal path settle?": O(log n) total variation follows from the membership-change
     count, not from the tau^-0.7 drift; wording unchanged from v1, left for the author.
 - stop: both reviewers would not run another round.
-- commit: cff4fe5
+- commit: 3d2aa85
+
+## Verification
+
+| id | Claude | codex |
+|---|---|---|
+| P-001 | improved | improved |
+| P-002 | improved | improved |
+| P-003 | improved | improved |
+| P-006 | neutral | changed-message (removes the word "four" in "The argument has four steps.") |
+| P-007 | improved | improved |
+| P-010 | improved | improved |
+
+- P-006: reviewers disagree on a changed-message verdict; per the skill this goes to the author,
+  pending.
+- Claude's optional suggestions (not applied): say explicitly in Limitations that the two
+  near-instantaneous benchmarks are not covered as executed (P-003); "It" -> "The asynchronous
+  sampler" (P-010). Claude would revisit rejected P-004, P-008, P-009 in a short targeted pass.
+- follow-up commit (not a prose item): TODO removed after the SBC replay confirmed the
+  calibration-trial claim (30 of 1,000 g-and-k trials, 0 binding, min final eps/eps0 1.1e-2,
+  median 0.17, max 0.55, 6 workers vs 48); replay numbers added to Table C.1; Section 4's
+  "collects the remaining conditions" corrected after Assumption 5 was reduced to fidelity.
